@@ -83,8 +83,9 @@ export const statsKeys = {
   boxScore: (gameId: string) => [...statsKeys.boxScores(), gameId] as const,
   playerGame: (gameId: string, playerId: string) =>
     [...statsKeys.all, 'playerGame', gameId, playerId] as const,
-  playerOverall: (playerId: string) =>
-    [...statsKeys.all, 'playerOverall', playerId] as const,
+  /** Every player's career view; a season rollover (#461) adds a row to each carried player's. */
+  playerOveralls: () => [...statsKeys.all, 'playerOverall'] as const,
+  playerOverall: (playerId: string) => [...statsKeys.playerOveralls(), playerId] as const,
   playerSeason: (playerId: string, teamId: string) =>
     [...statsKeys.all, 'playerSeason', playerId, teamId] as const,
   teamSeason: (teamId: string) => [...statsKeys.all, 'teamSeason', teamId] as const,

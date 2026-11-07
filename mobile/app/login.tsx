@@ -14,6 +14,16 @@ import { typography } from '../theme/typography';
 import { postLoginRoute } from '../utils/role-onboarding';
 import { beginPkceLogin } from '../utils/pkce';
 import { APP_URL_SCHEME } from '../config/env';
+import { useTranslation } from '../i18n';
+import { trackEvent, AnalyticsEvents } from '../services/analytics';
+import { failureStatus, reportSignInFailure } from '../utils/sign-in-failure';
+
+/**
+ * A completed sign-in also brings the app back to the foreground, with the
+ * callback deep link close behind. Wait this long for that link before
+ * counting the return as a dismissed browser (#967).
+ */
+export const BROWSER_DISMISS_GRACE_MS = 5000;
 
 interface DevUser {
   id: string;
@@ -27,6 +37,7 @@ interface DevUser {
  */
 export default function Login() {
   const router = useRouter();
+  const { t } = useTranslation();
   const { setAuthToken, setUser } = useAuthStore();
   const [isLoading, setIsLoading] = useState(false);
   const [showDevLogin, setShowDevLogin] = useState(false);
@@ -37,15 +48,34 @@ export default function Login() {
   // foreground (audit #33). A successful sign-in lands on /auth/callback and
   // unmounts this screen, so resetting here is harmless in that case.
   const awaitingBrowserRef = useRef(false);
+  // Set when the `/auth/callback` deep link arrives, so a return from the
+  // browser that completed sign-in is not counted as a dismissal (#967).
+  const callbackArrivedRef = useRef(false);
+  // The redirect URI this sign-in sent; the callback link starts with it.
+  const redirectUriRef = useRef<string | null>(null);
 
   useEffect(() => {
+    let dismissTimer: ReturnType<typeof setTimeout> | null = null;
     const subscription = AppState.addEventListener('change', (nextState) => {
       if (nextState === 'active' && awaitingBrowserRef.current) {
         awaitingBrowserRef.current = false;
         setIsLoading(false);
+        if (dismissTimer) clearTimeout(dismissTimer);
+        dismissTimer = setTimeout(() => {
+          dismissTimer = null;
+          if (!callbackArrivedRef.current) reportSignInFailure({ stage: 'browser_dismissed' });
+        }, BROWSER_DISMISS_GRACE_MS);
       }
     });
-    return () => subscription.remove();
+    const urlSubscription = Linking.addEventListener('url', ({ url }) => {
+      const redirectUri = redirectUriRef.current;
+      if (redirectUri && url.startsWith(redirectUri)) callbackArrivedRef.current = true;
+    });
+    return () => {
+      subscription.remove();
+      urlSubscription.remove();
+      if (dismissTimer) clearTimeout(dismissTimer);
+    };
   }, []);
 
   // The OAuth redirect (hooplings://auth/callback?code=…) is handled by the
@@ -55,11 +85,15 @@ export default function Login() {
   const handleLogin = async () => {
     try {
       setIsLoading(true);
+      // Every attempt counts as started, so a failure below always has a start (#967).
+      callbackArrivedRef.current = false;
+      trackEvent(AnalyticsEvents.SIGN_IN_STARTED);
       // Get authorization URL from backend (request JSON format for mobile)
       // Use mobile redirect URI that deep links back to app. The scheme is
       // passed explicitly (#504): without it expo-linking picks the first
       // manifest scheme, and the manifest is the OTA payload, not the binary.
       const mobileRedirectUri = Linking.createURL('auth/callback', { scheme: APP_URL_SCHEME });
+      redirectUriRef.current = mobileRedirectUri;
       // PKCE + state (audit #5): the verifier/state pair is persisted on the
       // device and checked by app/auth/callback.tsx before the code exchange.
       const { state, codeChallenge } = await beginPkceLogin();
@@ -79,14 +113,16 @@ export default function Login() {
         awaitingBrowserRef.current = true;
         await Linking.openURL(url);
       } else {
-        Alert.alert('Error', 'Cannot open browser. Please check your device settings.');
+        reportSignInFailure({ stage: 'initiate' });
+        Alert.alert(t('common.error'), t('login.cannotOpenBrowser'));
         setIsLoading(false);
       }
     } catch (error) {
       awaitingBrowserRef.current = false;
       captureException(error, { flow: 'login-initiate' });
       log.error('Login error', { error });
-      Alert.alert('Error', 'Failed to initiate login. Please try again.');
+      reportSignInFailure({ stage: 'initiate', status: failureStatus(error) });
+      Alert.alert(t('common.error'), t('login.initiateFailed'));
       setIsLoading(false);
     }
   };
@@ -100,7 +136,7 @@ export default function Login() {
       setShowDevLogin(true);
     } catch (error) {
       log.error('Error fetching dev users', { error });
-      Alert.alert('Error', 'Failed to load test users. Is the backend running?');
+      Alert.alert(t('common.error'), t('login.devUsersFailed'));
     } finally {
       setIsLoading(false);
     }
@@ -121,7 +157,7 @@ export default function Login() {
       router.replace(await postLoginRoute(user));
     } catch (error) {
       log.error('Dev login error', { error });
-      Alert.alert('Error', 'Dev login failed. Please try again.');
+      Alert.alert(t('common.error'), t('login.devLoginFailed'));
     } finally {
       setIsLoading(false);
     }
@@ -147,7 +183,7 @@ export default function Login() {
       style={styles.container}
     >
       <Text style={styles.title} accessibilityRole="header">Hooplings</Text>
-      <Text style={styles.subtitle}>Sign in to continue</Text>
+      <Text style={styles.subtitle}>{t('login.subtitle')}</Text>
 
       {isLoading ? (
         <ActivityIndicator color="#FFFFFF" size="large" style={styles.loader} />
@@ -158,7 +194,7 @@ export default function Login() {
             disabled={isLoading}
             activeOpacity={0.8}
             accessibilityRole="button"
-            accessibilityLabel="Sign in"
+            accessibilityLabel={t('login.signInA11y')}
             accessibilityState={{ disabled: isLoading }}
             style={styles.signInTouchable}
           >
@@ -168,7 +204,7 @@ export default function Login() {
               end={{ x: 1, y: 1 }}
               style={styles.signInButton}
             >
-              <Text style={styles.signInButtonText}>Sign In</Text>
+              <Text style={styles.signInButtonText}>{t('login.signIn')}</Text>
             </LinearGradient>
           </TouchableOpacity>
 
@@ -180,9 +216,9 @@ export default function Login() {
               disabled={isLoading}
               activeOpacity={0.7}
               accessibilityRole="button"
-              accessibilityLabel="Developer login with test users"
+              accessibilityLabel={t('login.devLoginA11y')}
             >
-              <Text style={styles.devButtonText}>Dev Login (Test Users)</Text>
+              <Text style={styles.devButtonText}>{t('login.devLogin')}</Text>
             </TouchableOpacity>
           )}
         </>
@@ -197,13 +233,13 @@ export default function Login() {
       >
         <View style={[styles.modalContainer, { backgroundColor: colors.background }]}>
           <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
-            <Text style={[styles.modalTitle, { color: colors.text }]} accessibilityRole="header">Select Test User</Text>
+            <Text style={[styles.modalTitle, { color: colors.text }]} accessibilityRole="header">{t('login.selectTestUser')}</Text>
             <TouchableOpacity
               onPress={() => setShowDevLogin(false)}
               accessibilityRole="button"
-              accessibilityLabel="Cancel"
+              accessibilityLabel={t('common.cancel')}
             >
-              <Text style={[styles.modalClose, { color: colors.primary }]}>Cancel</Text>
+              <Text style={[styles.modalClose, { color: colors.primary }]}>{t('common.cancel')}</Text>
             </TouchableOpacity>
           </View>
           <FlatList

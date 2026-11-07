@@ -216,3 +216,24 @@ describe('DeleteAccountScreen (guardian, ?childId=)', () => {
     }
   });
 });
+
+describe('DeleteAccountScreen in Spanish', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockParams = {};
+    signIn();
+  });
+
+  it('asks for the same word the screen checks, DELETE, in every language', async () => {
+    await i18n.changeLanguage('es');
+    try {
+      const { getByText, getByTestId } = render(<DeleteAccountScreen />);
+      expect(getByText('Escribe DELETE para confirmar')).toBeTruthy();
+      const button = getByTestId('delete-account-submit');
+      fireEvent.changeText(getByTestId('delete-confirmation-input'), 'DELETE');
+      expect(button.props.accessibilityState?.disabled).toBe(false);
+    } finally {
+      await i18n.changeLanguage('en');
+    }
+  });
+});

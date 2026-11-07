@@ -35,6 +35,27 @@ describe('useSeasons runtime', () => {
     expect(mockedGet).toHaveBeenCalledWith('/seasons?');
   });
 
+  it('sends nothing while disabled (the rollover form before its league is known, #461)', async () => {
+    const { wrapper } = createQueryWrapper();
+    const { result } = renderHook(() => useSeasons({ leagueId: undefined }, { enabled: false }), { wrapper });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(mockedGet).not.toHaveBeenCalled();
+    expect(result.current.isLoading).toBe(false);
+  });
+
+  it('passes canCreate through on a league-filtered list', async () => {
+    mockedGet.mockResolvedValueOnce({
+      data: { success: true, seasons: [], total: 0, limit: 100, offset: 0, canCreate: true },
+    });
+    const { wrapper } = createQueryWrapper();
+    const { result } = renderHook(() => useSeasons({ leagueId: 'l1', limit: 100 }, { enabled: true }), { wrapper });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(mockedGet).toHaveBeenCalledWith('/seasons?leagueId=l1&limit=100');
+    expect(result.current.data?.canCreate).toBe(true);
+  });
+
   it('serializes all filter params', async () => {
     mockedGet.mockResolvedValueOnce({
       data: { success: true, seasons: [], total: 0, limit: 0, offset: 0 },

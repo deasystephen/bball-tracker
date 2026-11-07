@@ -1,6 +1,7 @@
 import { File } from 'expo-file-system';
 import { apiClient } from './api-client';
 import { captureException } from './sentry';
+import { AvatarUploadError } from '../utils/upload-error';
 
 interface AvatarUploadResponse {
   uploadUrl: string;
@@ -28,10 +29,10 @@ export async function uploadAvatar(localUri: string): Promise<string> {
 
   const file = new File(localUri);
   if (!file.exists || file.size < 1) {
-    throw new Error('The selected image could not be read');
+    throw new AvatarUploadError('The selected image could not be read', 'avatar.unreadable');
   }
   if (file.size > MAX_AVATAR_BYTES) {
-    throw new Error('Avatar image must be 5 MB or smaller');
+    throw new AvatarUploadError('Avatar image must be 5 MB or smaller', 'avatar.tooLarge');
   }
 
   // Get presigned POST from backend
@@ -59,8 +60,9 @@ export async function uploadAvatar(localUri: string): Promise<string> {
     const body = typeof res.text === 'function' ? await res.text().catch(() => '') : '';
     const code = /<Code>([^<]+)<\/Code>/.exec(body)?.[1];
     const detail = /<Message>([^<]+)<\/Message>/.exec(body)?.[1];
-    const error = new Error(
-      `Avatar upload failed (${res.status}${code ? ` ${code}` : ''}${detail ? `: ${detail}` : ''})`
+    const error = new AvatarUploadError(
+      `Avatar upload failed (${res.status}${code ? ` ${code}` : ''}${detail ? `: ${detail}` : ''})`,
+      'avatar.uploadFailed'
     );
     captureException(error, {
       flow: 'avatar-upload',

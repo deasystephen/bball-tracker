@@ -14,6 +14,7 @@ import { setupWebSocketHandlers } from './websocket';
 import apiRouter from './api';
 import { requestContext } from './api/middleware/request-context';
 import { requestLogger, loggablePath } from './api/middleware/request-logger';
+import { CLIENT_HEADER, REQUEST_ID_HEADER } from './api/middleware/request-headers';
 import { logger } from './utils/logger';
 import { warnMissingUrlConfig } from './utils/urls';
 import { enforceReplicaGuard } from './utils/replica-guard';
@@ -21,6 +22,7 @@ import { assertWorkOSConfig, WorkOSConfigError } from './utils/workos-client';
 import { createSesEventConsumer } from './services/mailer/ses-event-consumer';
 import { createShutdown } from './utils/shutdown';
 import { closeRedis } from './utils/redis';
+import { attachRedisAdapter } from './websocket/redis-adapter';
 
 const app = express();
 const httpServer = createServer(app);
@@ -39,13 +41,14 @@ httpServer.headersTimeout = 66_000;
 // are configured (#447). Native mobile sends no Origin header and is unaffected.
 const corsOrigins = (process.env.CORS_ORIGIN || 'http://localhost:19006').split(',').map(o => o.trim());
 
-// Socket.io currently uses the in-memory adapter. Rooms are local to a single
-// process, so broadcasts do NOT fan out across replicas. The GA target is a
-// single ECS task; horizontal scale requires `@socket.io/redis-adapter` and a
-// shared rate-limit store (tracked in issue #452). `enforceReplicaGuard()`
-// (utils/replica-guard.ts) refuses to start the server in production when the
-// configured replica ceiling (MAX_REPLICAS) is above 1 — see the call next to
-// `httpServer.listen` at the bottom of this file (#446).
+// Socket.io uses the in-memory adapter unless REDIS_SOCKET_ADAPTER_URL is set,
+// in which case `attachRedisAdapter` (websocket/redis-adapter.ts, #452) fans
+// broadcasts out across tasks through Redis; the rate limiters already share
+// Redis counters. The API still runs as a single task: `enforceReplicaGuard()`
+// (utils/replica-guard.ts) refuses to start in production when the configured
+// replica ceiling (MAX_REPLICAS) is above 1 — see the call next to
+// `httpServer.listen` at the bottom of this file (#446) — until a load test
+// flips MULTI_REPLICA_SUPPORTED there.
 const io = new SocketServer(httpServer, {
   cors: {
     origin: corsOrigins,
@@ -60,16 +63,26 @@ app.set('trust proxy', 1);
 
 // Middleware
 app.use(helmet());
+
+// Request context and logging, ahead of CORS and the body parsers (#963): a
+// preflight, a malformed JSON body (400) or an oversized one (413) is answered
+// before any router, and it still gets an X-Request-Id, a log context and an
+// `HTTP request` line.
+app.use(requestContext);
+app.use(requestLogger);
+
+// The browser (the web invite page's accept, #964) may send only these
+// request headers; X-Request-Id and X-Hooplings-Client are the correlation
+// headers of #963 (api/middleware/request-headers.ts). X-Request-Id is exposed
+// so a browser script can read the id the API logged the request under.
 app.use(cors({
   origin: corsOrigins,
   credentials: true,
+  allowedHeaders: ['Content-Type', 'Authorization', REQUEST_ID_HEADER, CLIENT_HEADER],
+  exposedHeaders: [REQUEST_ID_HEADER],
 }));
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
-
-// Request context and logging
-app.use(requestContext);
-app.use(requestLogger);
 
 // Health check endpoint.
 // This backs the ECS container health check, so it pings the database: a
@@ -197,6 +210,8 @@ if (require.main === module) {
     process.exit(1);
   }
   warnMissingUrlConfig();
+  // Before listening, so no socket connects on the in-memory adapter.
+  const socketAdapter = attachRedisAdapter(io);
   httpServer.listen(PORT, () => {
     logger.info(`Server running on port ${PORT}`, { env: process.env.NODE_ENV || 'development' });
   });
@@ -211,7 +226,9 @@ if (require.main === module) {
     io,
     consumer,
     disconnectPrisma: () => prisma.$disconnect(),
-    closeRedis,
+    closeRedis: async () => {
+      await Promise.all([closeRedis(), socketAdapter?.close()]);
+    },
     exit: (code) => process.exit(code),
   });
   // `on`, not `once`: a second signal must hit the routine's own guard and be

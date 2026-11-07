@@ -11,6 +11,7 @@ import { spacing } from '../../theme';
 import { Ionicons } from '@expo/vector-icons';
 import type { PlayerGameStats, AggregatedPlayerStats } from '../../types/stats';
 import { playerDisplayName } from '../../utils/display-name';
+import { useTranslation } from '../../i18n';
 
 interface PlayerStatsCardProps {
   stats: PlayerGameStats | AggregatedPlayerStats;
@@ -26,6 +27,7 @@ export const PlayerStatsCard: React.FC<PlayerStatsCardProps> = ({
   compact = false,
 }) => {
   const { colors } = useTheme();
+  const { t } = useTranslation();
   const isAggregated = 'gamesPlayed' in stats;
 
   const formatPercentage = (value: number) => `${value.toFixed(1)}%`;
@@ -63,19 +65,19 @@ export const PlayerStatsCard: React.FC<PlayerStatsCardProps> = ({
         <View style={styles.statItem}>
           <ThemedText variant="h2">{stats.points}</ThemedText>
           <ThemedText variant="caption" color="textSecondary">
-            {showAverages && isAggregated ? 'Total PTS' : 'PTS'}
+            {showAverages && isAggregated ? t('stats.abbr.totalPts') : t('stats.abbr.pts')}
           </ThemedText>
         </View>
         <View style={styles.statItem}>
           <ThemedText variant="h2">{stats.rebounds}</ThemedText>
           <ThemedText variant="caption" color="textSecondary">
-            {showAverages && isAggregated ? 'Total REB' : 'REB'}
+            {showAverages && isAggregated ? t('stats.abbr.totalReb') : t('stats.abbr.reb')}
           </ThemedText>
         </View>
         <View style={styles.statItem}>
           <ThemedText variant="h2">{stats.assists}</ThemedText>
           <ThemedText variant="caption" color="textSecondary">
-            {showAverages && isAggregated ? 'Total AST' : 'AST'}
+            {showAverages && isAggregated ? t('stats.abbr.totalAst') : t('stats.abbr.ast')}
           </ThemedText>
         </View>
       </View>
@@ -85,15 +87,15 @@ export const PlayerStatsCard: React.FC<PlayerStatsCardProps> = ({
         <View style={[styles.mainStats, styles.averagesRow]}>
           <View style={styles.statItem}>
             <ThemedText variant="bodyBold">{stats.pointsPerGame.toFixed(1)}</ThemedText>
-            <ThemedText variant="caption" color="textSecondary">PPG</ThemedText>
+            <ThemedText variant="caption" color="textSecondary">{t('stats.abbr.ppg')}</ThemedText>
           </View>
           <View style={styles.statItem}>
             <ThemedText variant="bodyBold">{stats.reboundsPerGame.toFixed(1)}</ThemedText>
-            <ThemedText variant="caption" color="textSecondary">RPG</ThemedText>
+            <ThemedText variant="caption" color="textSecondary">{t('stats.abbr.rpg')}</ThemedText>
           </View>
           <View style={styles.statItem}>
             <ThemedText variant="bodyBold">{stats.assistsPerGame.toFixed(1)}</ThemedText>
-            <ThemedText variant="caption" color="textSecondary">APG</ThemedText>
+            <ThemedText variant="caption" color="textSecondary">{t('stats.abbr.apg')}</ThemedText>
           </View>
         </View>
       )}
@@ -107,19 +109,19 @@ export const PlayerStatsCard: React.FC<PlayerStatsCardProps> = ({
           <View style={styles.detailRow}>
             <View style={styles.detailItem}>
               <ThemedText variant="body">{stats.steals}</ThemedText>
-              <ThemedText variant="caption" color="textSecondary">STL</ThemedText>
+              <ThemedText variant="caption" color="textSecondary">{t('stats.abbr.stl')}</ThemedText>
             </View>
             <View style={styles.detailItem}>
               <ThemedText variant="body">{stats.blocks}</ThemedText>
-              <ThemedText variant="caption" color="textSecondary">BLK</ThemedText>
+              <ThemedText variant="caption" color="textSecondary">{t('stats.abbr.blk')}</ThemedText>
             </View>
             <View style={styles.detailItem}>
               <ThemedText variant="body">{stats.turnovers}</ThemedText>
-              <ThemedText variant="caption" color="textSecondary">TO</ThemedText>
+              <ThemedText variant="caption" color="textSecondary">{t('stats.abbr.to')}</ThemedText>
             </View>
             <View style={styles.detailItem}>
               <ThemedText variant="body">{stats.fouls}</ThemedText>
-              <ThemedText variant="caption" color="textSecondary">PF</ThemedText>
+              <ThemedText variant="caption" color="textSecondary">{t('stats.abbr.pf')}</ThemedText>
             </View>
           </View>
 
@@ -130,7 +132,7 @@ export const PlayerStatsCard: React.FC<PlayerStatsCardProps> = ({
                 {formatShooting(stats.fieldGoalsMade, stats.fieldGoalsAttempted)}
               </ThemedText>
               <ThemedText variant="caption" color="textSecondary">
-                FG ({formatPercentage(stats.fieldGoalPercentage)})
+                {t('stats.shootingWithPct', { label: t('stats.abbr.fg'), pct: formatPercentage(stats.fieldGoalPercentage) })}
               </ThemedText>
             </View>
             <View style={styles.detailItem}>
@@ -138,7 +140,7 @@ export const PlayerStatsCard: React.FC<PlayerStatsCardProps> = ({
                 {formatShooting(stats.threePointersMade, stats.threePointersAttempted)}
               </ThemedText>
               <ThemedText variant="caption" color="textSecondary">
-                3P ({formatPercentage(stats.threePointPercentage)})
+                {t('stats.shootingWithPct', { label: t('stats.abbr.threes'), pct: formatPercentage(stats.threePointPercentage) })}
               </ThemedText>
             </View>
             <View style={styles.detailItem}>
@@ -146,7 +148,7 @@ export const PlayerStatsCard: React.FC<PlayerStatsCardProps> = ({
                 {formatShooting(stats.freeThrowsMade, stats.freeThrowsAttempted)}
               </ThemedText>
               <ThemedText variant="caption" color="textSecondary">
-                FT ({formatPercentage(stats.freeThrowPercentage)})
+                {t('stats.shootingWithPct', { label: t('stats.abbr.ft'), pct: formatPercentage(stats.freeThrowPercentage) })}
               </ThemedText>
             </View>
           </View>
@@ -155,7 +157,7 @@ export const PlayerStatsCard: React.FC<PlayerStatsCardProps> = ({
           {isAggregated && (
             <View style={styles.efficiencyRow}>
               <ThemedText variant="caption" color="textSecondary">
-                Efficiency: {stats.efficiency.toFixed(1)} | Games: {stats.gamesPlayed}
+                {t('stats.efficiencyAndGames', { efficiency: stats.efficiency.toFixed(1), games: stats.gamesPlayed })}
               </ThemedText>
             </View>
           )}

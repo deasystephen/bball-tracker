@@ -31,11 +31,13 @@ import { canManageLeague } from '../../../utils/team-permissions';
 import { spacing } from '../../../theme';
 import { getHorizontalPadding } from '../../../utils/responsive';
 import { BackButton } from '../../../components/BackButton';
+import { useTranslation } from '../../../i18n';
 
 export default function CreateSeasonScreen() {
   const router = useRouter();
   const { leagueId } = useLocalSearchParams<{ leagueId: string }>();
   const { colors } = useTheme();
+  const { t } = useTranslation();
   const padding = getHorizontalPadding();
   const insets = useSafeAreaInsets();
 
@@ -54,7 +56,7 @@ export default function CreateSeasonScreen() {
   const allowed = useAccessGuard(
     !!user,
     canManageLeague(user, leagueId),
-    'Only admins of this league can create seasons',
+    t('seasons.createNotAllowed'),
     { fallback: '/admin' }
   );
 
@@ -62,11 +64,11 @@ export default function CreateSeasonScreen() {
     const newErrors: { name?: string; leagueId?: string } = {};
 
     if (!name.trim()) {
-      newErrors.name = 'Season name is required';
+      newErrors.name = t('seasons.nameRequired');
     }
 
     if (!leagueId) {
-      newErrors.leagueId = 'League is required';
+      newErrors.leagueId = t('seasons.leagueRequired');
     }
 
     setErrors(newErrors);
@@ -84,18 +86,18 @@ export default function CreateSeasonScreen() {
         endDate: endDate?.toISOString(),
       });
 
-      toast.showToast('Season created successfully', 'success');
+      toast.showToast(t('seasons.createSuccess'), 'success');
       router.back();
     } catch (error) {
       Alert.alert(
-        'Error',
-        error instanceof Error ? error.message : 'Failed to create season'
+        t('common.error'),
+        error instanceof Error ? error.message : t('seasons.createFailed')
       );
     }
   };
 
   if (leagueLoading || !allowed) {
-    return <LoadingSpinner message="Loading..." fullScreen />;
+    return <LoadingSpinner message={t('common.loading')} fullScreen />;
   }
 
   if (!leagueId || !league) {
@@ -103,14 +105,14 @@ export default function CreateSeasonScreen() {
       <ThemedView variant="background" style={styles.container}>
         <View style={[styles.header, { paddingTop: insets.top + spacing.md, paddingHorizontal: padding }]}>
           <BackButton onPress={() => router.back()} style={styles.backButton} />
-          <ThemedText variant="h2" heading>Create Season</ThemedText>
+          <ThemedText variant="h2" heading>{t('seasons.createTitle')}</ThemedText>
         </View>
         <View style={styles.errorContainer}>
           <ThemedText variant="body" color="error">
-            No league selected. Please select a league first.
+            {t('seasons.noLeagueSelected')}
           </ThemedText>
           <Button
-            title="Go Back"
+            title={t('seasons.noLeagueBack')}
             variant="outline"
             onPress={() => router.back()}
             style={{ marginTop: spacing.lg }}
@@ -136,9 +138,9 @@ export default function CreateSeasonScreen() {
       >
         <BackButton onPress={() => router.back()} style={styles.backButton} />
         <View style={styles.headerContent}>
-          <ThemedText variant="h2" heading>Create Season</ThemedText>
+          <ThemedText variant="h2" heading>{t('seasons.createTitle')}</ThemedText>
           <ThemedText variant="caption" color="textSecondary">
-            for {league.name}
+            {t('seasons.forLeague', { league: league.name })}
           </ThemedText>
         </View>
       </View>
@@ -155,8 +157,8 @@ export default function CreateSeasonScreen() {
           keyboardShouldPersistTaps="handled"
         >
           <Input
-            label="Season Name"
-            placeholder="e.g., Spring 2024, Fall 2024"
+            label={t('seasons.name')}
+            placeholder={t('seasons.namePlaceholder')}
             value={name}
             onChangeText={setName}
             error={errors.name}
@@ -173,7 +175,7 @@ export default function CreateSeasonScreen() {
 
           <View style={styles.buttonContainer}>
             <Button
-              title="Create Season"
+              title={t('seasons.createTitle')}
               onPress={handleSubmit}
               loading={createSeason.isPending}
               disabled={!name.trim()}
@@ -181,7 +183,7 @@ export default function CreateSeasonScreen() {
               testID="season-create-submit"
             />
             <Button
-              title="Cancel"
+              title={t('common.cancel')}
               variant="outline"
               onPress={() => router.back()}
               style={styles.cancelButton}

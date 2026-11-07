@@ -134,11 +134,14 @@ The service's `desired_count` is 1 on purpose: the API is single-replica (see [S
 ### Deploy window: avoid scheduled game times
 
 Production deploys are rolling, with `deployment_maximum_percent = 200` (`infra/ecs.tf`), so **every
-deploy briefly runs two tasks** — the old one draining and the new one taking connections. Socket.io
-rooms live in process memory, so for that window a live game is split: a coach tracking on one task
-and the spectators on the other stop seeing each other's events, and nobody gets an error. Clients
-converge again once the old task stops and they reconnect (every broadcast and the join snapshot
-carry the current score), but the gap is visible to anyone watching a game.
+deploy runs two tasks for under a minute** — the old one draining and the new one taking connections.
+Socket.io rooms live in process memory, so for that window a live game is split: a coach tracking on
+one task and the spectators on the other stop seeing each other's events, and nobody gets an error.
+The window is the target group's `deregistration_delay` (30 s, #748; the AWS default of 300 s made it
+about five minutes) plus the few seconds the clients take to reconnect. Clients converge again once
+the old task stops and they reconnect (every broadcast and the join snapshot carry the current
+score), but the gap is visible to anyone watching a game. Detail:
+`docs/deployment/ecs-deploys.md` ("ECS deploy safety").
 
 - **Do not deploy during scheduled game windows** (weekday evenings and weekends, in practice).
   Check for `IN_PROGRESS` games before merging anything that deploys.
@@ -206,6 +209,7 @@ was last checked against it on 2026-10-03):
   Both are read only through `backend/src/utils/urls.ts`; unset they fall back to `http://localhost:3000` (fail-loud) and the server logs a warning at boot in production.
 - `DEFAULT_TIMEZONE` (`America/Los_Angeles`): time zone for dates in outbound email
 - `AWS_REGION`, `S3_AVATARS_BUCKET`: avatar uploads via presigned S3 POST (bucket from `infra/s3.tf`)
+- `AVATAR_PENDING_TAG_ENABLED` (`true` to enable; unset by default): new avatar uploads are born `pending=true`, so the `expire-pending-avatars` lifecycle rule deletes the ones never saved after 3 days (#1005). Set it only after the IAM and lifecycle `terraform apply` and the deploy of the untag-on-save code (`docs/architecture/backend-services.md`, "Unsaved uploads expire"). Turning it off again has a runbook step (`docs/runbooks/data-subject-requests.md`, "Turning pending-upload expiry off").
 - `AWS_SES_REGION`, `SES_FROM_ADDRESS` (`noreply@mail.hooplings.com`): SES mailer
 - `SES_CONFIGURATION_SET` (`bball-tracker-production-transactional`), `SES_EVENTS_QUEUE_URL` (the
   SQS queue from `terraform output ses_events_queue_url`): SES event publishing and the in-process

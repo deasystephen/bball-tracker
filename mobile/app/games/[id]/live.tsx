@@ -33,12 +33,14 @@ import type { GameStatus } from '../../../types/game';
 import { useGoBack } from '../../../hooks/useGoBack';
 import { scoreAccessibilityLabel, useScoreAnnouncement } from '../../../hooks/useScoreAnnouncement';
 import { BackButton } from '../../../components/BackButton';
+import { useTranslation } from '../../../i18n';
 
 export default function GameLiveScreen() {
   const router = useRouter();
   const goBack = useGoBack('/(tabs)/games');
   const { id } = useLocalSearchParams<{ id: string }>();
   const { colors, colorScheme } = useTheme();
+  const { t } = useTranslation();
   const padding = getHorizontalPadding();
   const insets = useSafeAreaInsets();
 
@@ -51,7 +53,7 @@ export default function GameLiveScreen() {
     live.status !== null ? live.score.homeScore : game?.homeScore;
   const awayScore =
     live.status !== null ? live.score.awayScore : game?.awayScore;
-  const homeTeamName = game?.team?.name || 'Your Team';
+  const homeTeamName = game?.team?.name || t('games.yourTeam');
   const awayTeamName = game?.opponent ?? '';
   // VoiceOver hears score updates through this; TalkBack through the live
   // region on the score container (#774).
@@ -63,13 +65,13 @@ export default function GameLiveScreen() {
       : (['#1A3A5C', '#0F2540'] as const);
 
   if (isLoading) {
-    return <LoadingSpinner message="Loading game..." fullScreen />;
+    return <LoadingSpinner message={t('games.loadingGame')} fullScreen />;
   }
 
   if (error || !game) {
     return (
       <ErrorState
-        message={error instanceof Error ? error.message : 'Game not found'}
+        message={error instanceof Error ? error.message : t('games.notFound')}
         onRetry={refetch}
         onBack={goBack}
       />
@@ -87,10 +89,10 @@ export default function GameLiveScreen() {
     live.connectionState === 'error';
   const bannerText =
     live.connectionState === 'error'
-      ? live.error ?? 'Connection error'
+      ? live.error ?? t('games.live.connectionError')
       : live.connectionState === 'reconnecting'
-        ? 'Reconnecting…'
-        : 'Connecting…';
+        ? t('games.live.reconnecting')
+        : t('games.live.connecting');
 
   return (
     <ThemedView variant="background" style={styles.container}>
@@ -115,7 +117,9 @@ export default function GameLiveScreen() {
                   (isFinished ? colors.textTertiary : colors.error) + '30',
               },
             ]}
-            accessibilityLabel={isFinished ? 'Final' : isLive ? 'Live' : 'Status'}
+            accessibilityLabel={
+              isFinished ? t('games.statusFinal') : isLive ? t('games.statusLive') : t('games.status')
+            }
           >
             {isLive && (
               <View style={[styles.liveDot, { backgroundColor: colors.error }]} />
@@ -126,7 +130,7 @@ export default function GameLiveScreen() {
                 color: isFinished ? colors.textTertiary : colors.error,
               }}
             >
-              {isFinished ? 'FINAL' : isLive ? 'LIVE' : 'Not Started'}
+              {isFinished ? t('games.finalBadge') : isLive ? t('games.liveBadge') : t('games.live.notStarted')}
             </ThemedText>
           </View>
         </View>
@@ -167,7 +171,7 @@ export default function GameLiveScreen() {
       {showBanner && (
         <View
           style={[styles.banner, { backgroundColor: colors.backgroundSecondary }]}
-          accessibilityLabel="Connection status"
+          accessibilityLabel={t('games.live.connectionStatus')}
         >
           <Ionicons
             name="sync"
@@ -195,7 +199,7 @@ export default function GameLiveScreen() {
               color={colors.textTertiary}
             />
             <ThemedText variant="body" color="textSecondary" style={styles.emptyText}>
-              Game hasn&apos;t started yet
+              {t('games.live.notStartedYet')}
             </ThemedText>
           </Card>
         ) : (

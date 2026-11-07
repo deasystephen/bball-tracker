@@ -14,6 +14,7 @@
  */
 
 import { uploadAvatar, MAX_AVATAR_BYTES } from '../../services/upload-service';
+import { uploadErrorMessageKey } from '../../utils/upload-error';
 import { apiClient } from '../../services/api-client';
 
 type MockedApi = { post: jest.Mock };
@@ -175,6 +176,10 @@ describe('upload-service', () => {
     const fetchMock = stubUpload({ ok: true, status: 204 });
 
     await expect(uploadAvatar('file:///tmp/huge.jpg')).rejects.toThrow('5 MB or smaller');
+    // The English message goes to Sentry; the screen shows the localized key (#671).
+    const error = await uploadAvatar('file:///tmp/huge.jpg').catch((e: unknown) => e);
+    expect(uploadErrorMessageKey(error)).toBe('avatar.tooLarge');
+    expect(uploadErrorMessageKey(new Error('api down'))).toBeUndefined();
     expect(mockedApi.post).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
   });

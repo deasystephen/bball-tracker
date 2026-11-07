@@ -43,9 +43,16 @@ resource "aws_s3_bucket_cors_configuration" "avatars" {
   }
 }
 
-# Avatars are uploaded with presigned POST policies (size-capped). Incomplete
-# multipart uploads are the one class of orphan S3 can expire on its own; the
-# previous avatar object is deleted by the API when a user replaces it.
+# Avatars are uploaded with presigned POST policies (size-capped). The API
+# deletes the previous avatar object when a user replaces it. Two orphan
+# classes S3 expires on its own:
+#   - incomplete multipart uploads (1 day);
+#   - uploads never saved to a profile (#1005): the POST policy tags every
+#     upload pending=true (backend/src/services/upload-service.ts,
+#     PENDING_TAGGING_XML) and the profile write removes the tag, so whatever
+#     is still tagged 3 days after upload is expired here. The tag key/value
+#     must match PENDING_TAG_KEY / PENDING_TAG_VALUE in that file
+#     (backend/tests/infra/avatar-lifecycle.test.ts pins both).
 resource "aws_s3_bucket_lifecycle_configuration" "avatars" {
   bucket = aws_s3_bucket.avatars.id
 
@@ -59,6 +66,25 @@ resource "aws_s3_bucket_lifecycle_configuration" "avatars" {
 
     abort_incomplete_multipart_upload {
       days_after_initiation = 1
+    }
+  }
+
+  rule {
+    id     = "expire-pending-avatars"
+    status = "Enabled"
+
+    filter {
+      and {
+        prefix = "avatars/"
+        tags = {
+          pending = "true"
+        }
+      }
+    }
+
+    # S3 counts from creation and rounds up to the next midnight UTC.
+    expiration {
+      days = 3
     }
   }
 }

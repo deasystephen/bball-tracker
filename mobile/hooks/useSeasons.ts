@@ -57,6 +57,13 @@ export interface SeasonsResponse {
   total: number;
   limit: number;
   offset: number;
+  /**
+   * Only on a `leagueId`-filtered list: whether the caller may create a season
+   * in that league (league admin; a personal-league owner is one). A hint for
+   * the rollover form (#461); the API stays the authority. Absent from a
+   * backend that predates it.
+   */
+  canCreate?: boolean;
 }
 
 // Query keys
@@ -69,9 +76,15 @@ export const seasonKeys = {
 };
 
 // Hooks
-export function useSeasons(filters?: SeasonFilters) {
+/**
+ * `options.enabled: false` holds the request until the caller has what it
+ * needs (the rollover form waits for the team's league, #461), so a filter
+ * that is not ready yet never fires an unscoped `GET /seasons`.
+ */
+export function useSeasons(filters?: SeasonFilters, options: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: seasonKeys.list(filters),
+    enabled: options.enabled ?? true,
     queryFn: async () => {
       const params = new URLSearchParams();
       if (filters?.leagueId) params.append('leagueId', filters.leagueId);

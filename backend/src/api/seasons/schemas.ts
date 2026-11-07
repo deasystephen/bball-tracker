@@ -9,7 +9,9 @@ import { z } from 'zod';
  */
 export const createSeasonSchema = z.object({
   leagueId: z.string().min(1, 'League ID is required'),
-  name: z.string().min(1, 'Season name is required').max(100, 'Season name too long'),
+  // Stored trimmed (#461): the name rule (`season-service#findSeasonByName`)
+  // ignores case and surrounding whitespace, so the stored form drops it.
+  name: z.string().trim().min(1, 'Season name is required').max(100, 'Season name too long'),
   // `.nullable()` must wrap the coercion: a bare `z.coerce.date()` turns
   // `null` into `new Date(null)` (1970-01-01) instead of rejecting/keeping it.
   startDate: z.coerce.date().nullable().optional(),

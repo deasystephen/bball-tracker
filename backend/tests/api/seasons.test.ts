@@ -64,6 +64,19 @@ describe('Seasons API', () => {
   });
 
   describe('POST /api/v1/seasons', () => {
+    it('answers the duplicate-name 400 when the service finds the name taken (case or space variant, #461)', async () => {
+      mockSeasonService.createSeason.mockRejectedValue(
+        new BadRequestError('A season with this name already exists in this league')
+      );
+
+      const response = await request(app)
+        .post('/api/v1/seasons')
+        .send({ leagueId: TEST_LEAGUE_ID_UUID, name: ' spring 2024 ' });
+
+      expect(response.status).toBe(400);
+      expect(response.body.error).toBe('A season with this name already exists in this league');
+    });
+
     it('should create a season with UUID league ID', async () => {
       mockSeasonService.createSeason.mockResolvedValue(mockSeason as unknown as Awaited<ReturnType<typeof mockSeasonService.createSeason>>);
 
@@ -244,6 +257,16 @@ describe('Seasons API', () => {
       expect(response.body.success).toBe(true);
       expect(response.body.seasons).toHaveLength(1);
       expect(response.body).toMatchObject({ success: true, total: 1, limit: 20, offset: 0 });
+    });
+
+    it('passes canCreate through when the service answers it for a leagueId filter (#461)', async () => {
+      const page: SeasonList = { seasons: [seasonListItem], total: 1, limit: 20, offset: 0, canCreate: false };
+      mockSeasonService.listSeasons.mockResolvedValue(page);
+
+      const response = await request(app).get('/api/v1/seasons').query({ leagueId: TEST_LEAGUE_ID_UUID });
+
+      expect(response.status).toBe(200);
+      expect(response.body).toMatchObject({ success: true, total: 1, canCreate: false });
     });
 
     it('should filter by UUID league ID', async () => {

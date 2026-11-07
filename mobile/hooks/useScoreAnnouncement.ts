@@ -13,6 +13,7 @@
 import { useEffect, useRef } from 'react';
 import { Platform } from 'react-native';
 import { announce } from '../utils/announce';
+import { i18n } from '../i18n';
 
 export function scoreAccessibilityLabel(
   homeTeamName: string,
@@ -20,7 +21,7 @@ export function scoreAccessibilityLabel(
   awayTeamName: string,
   awayScore: number
 ): string {
-  return `Score: ${homeTeamName} ${homeScore}, ${awayTeamName} ${awayScore}`;
+  return i18n.t('games.scoreA11y', { home: homeTeamName, homeScore, away: awayTeamName, awayScore });
 }
 
 export function useScoreAnnouncement(

@@ -36,6 +36,14 @@ const SERVICES = path.join(BACKEND, 'src/services');
  */
 const ALLOWED: Record<string, string> = {
   // In-transaction helpers: the public method that calls them logs the event.
+  'account-service.ts#unclaimManagedRow':
+    'un-claim write inside convertToManaged (and the #981 age screen), whose caller logs `Account converted to managed`',
+  'account-service.ts#deletePersonalLeagueIfEmpty':
+    'D16 inside deleteAccount and convertToManaged, which log `Account deleted` / `Account converted to managed`',
+  'account-service.ts#purgeLoginBindings':
+    'token and invitation purge inside deleteAccount and unclaimManagedRow; their callers log `Account deleted` / `Account converted to managed`',
+  'account-service.ts#scrubInvitedEmail':
+    'D17 guardian-invitation scrub inside deleteAccount and unclaimManagedRow; their callers log the domain event',
   'game-event-service.ts#recomputeHomeScore':
     'derives Game.homeScore inside createEvent/deleteEvent, which log `Game event created` / `deleted`',
   'guardian-service.ts#promoteNextPrimary':
@@ -52,6 +60,11 @@ const ALLOWED: Record<string, string> = {
     'status-guarded PENDING exit inside accept/reject/cancel, which log `Invitation accepted` / `declined` / `cancelled`',
   'invitation-service.ts#stripUnclaimedEmail':
     'consent guard inside rejectInvitation, which logs `Invitation declined`',
+  // Callers whose write is the shared helper: the helper logs the event.
+  'league-service.ts#createSeason':
+    'POST /leagues/:id/seasons writes through season-service findOrCreateSeason, which logs `Season created` when it inserts',
+  'season-service.ts#createSeason':
+    'POST /seasons writes through findOrCreateSeason, which logs `Season created` when it inserts',
   'invitation-service.ts#expireOldInvitations':
     'bulk expiry kept for a future maintenance job; nothing calls it today',
   // The SES event consumer (#449): background work driven by SES

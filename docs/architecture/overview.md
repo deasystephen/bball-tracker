@@ -128,9 +128,13 @@ What exists today (as built; the runbook is `../runbooks/on-call.md`):
 
 - **Logs**: the API writes one JSON object per line (`backend/src/utils/logger.ts`) to stdout; the
   awslogs driver ships them to CloudWatch (`/ecs/bball-tracker-production`) and `infra/datadog.tf`
-  forwards them to Datadog. Query `service:bball-tracker-api`; every line inside a request carries
-  `requestId` and `userId`, domain events carry entity ids, and `LOG_LEVEL` (default `info`, in
-  `infra/task-definition.json`) is the threshold. Detail: `backend-services.md#logging`.
+  forwards them to Datadog. Query `service:bball-tracker-api`; every line carries `commit` and the
+  `env:production` tag, every line inside a request carries `requestId` (the client's
+  `X-Request-Id` when it is a UUID), `userId` and `client` (`X-Hooplings-Client`), domain events
+  carry entity ids, and `LOG_LEVEL` (default `info`, in `infra/task-definition.json`) is the
+  threshold. Detail: `backend-services.md#logging`. The web site (`web/lib/log.ts`) writes the same
+  shape as `service:bball-tracker-web`, tokens masked; only those lines are forwarded
+  (`../deployment/web-app.md#logs-and-errors`).
 - **Errors**: Sentry. Backend project: the Express error handler, the health check, the socket
   handshake (outages only, not rejected tokens), the auth routes, account deletion and the SES
   event consumer, each explicit capture tagged `flow`. Mobile
@@ -140,8 +144,9 @@ What exists today (as built; the runbook is `../runbooks/on-call.md`):
 - **Alerting**: fifteen CloudWatch alarms (`infra/`), named `bball-tracker-production-*`, emailing
   an SNS subscription: API down and 5xx, latency, task count, CPU and memory, RDS storage,
   connections and CPU, and four SES email alarms (bounce and complaint rates, the events queue,
-  #449). Nothing watches Redis. Sentry has its own alert rules. **Datadog has logs and no monitors**: its default host monitors were deleted
-  because Fargate never emits `system.*` metrics (`../runbooks/on-call.md#datadog-has-logs-and-no-monitors`).
+  #449). Nothing watches Redis. Sentry has its own alert rules. **Datadog has logs and one monitor**, the hand-created web server
+  error monitor (#966): its default host monitors were deleted
+  because Fargate never emits `system.*` metrics (`../runbooks/on-call.md#datadog-has-logs-and-one-monitor`).
 - **Health**: `GET /health` pings the database and reports the running `commit`; ECS recycles a
   task that fails it three times.
 - **Mobile**: `services/log.ts` is the app's logger (console in development, Sentry breadcrumbs

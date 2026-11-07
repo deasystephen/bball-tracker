@@ -14,6 +14,9 @@ jest.mock('@aws-sdk/client-s3', () => ({
     deleteObjectCalls.push(input);
     return { input };
   }),
+  DeleteObjectTaggingCommand: jest.fn().mockImplementation((input: unknown) => ({ kind: 'DeleteObjectTagging', input })),
+  HeadObjectCommand: jest.fn().mockImplementation((input: unknown) => ({ kind: 'HeadObject', input })),
+  HeadBucketCommand: jest.fn().mockImplementation((input: unknown) => ({ kind: 'HeadBucket', input })),
 }));
 
 import request from 'supertest';
@@ -118,6 +121,87 @@ describe('PATCH /api/v1/auth/me', () => {
     expect(deleteObjectCalls).toEqual([
       { Bucket: 'bball-tracker-avatars-dev', Key: `avatars/${TEST_USER_ID}/old.jpg` },
     ]);
+  });
+
+  describe('pending upload save order (#1005)', () => {
+    type Sent = { kind?: string; input: Record<string, unknown> };
+    const s3Kinds = (): (string | undefined)[] => mockS3Send.mock.calls.map(([cmd]) => (cmd as Sent).kind);
+    const NEW_KEY = `avatars/${TEST_USER_ID}/new.jpg`;
+
+    beforeEach(() => {
+      process.env.AVATAR_PENDING_TAG_ENABLED = 'true';
+    });
+
+    afterEach(() => {
+      delete process.env.AVATAR_PENDING_TAG_ENABLED;
+    });
+
+    it('checks the upload before the write and untags it only after the write', async () => {
+      const res = await request(app).patch('/api/v1/auth/me').set(AUTH).send({ profilePictureUrl: OWN_NEW });
+
+      expect(res.status).toBe(200);
+      const calls = mockS3Send.mock.calls.map(([cmd]) => cmd as Sent);
+      expect(calls.filter((c) => c.kind !== undefined).map((c) => [c.kind, c.input.Key])).toEqual([
+        ['HeadObject', NEW_KEY],
+        ['DeleteObjectTagging', NEW_KEY],
+      ]);
+      const writeAt = (mockPrisma.user.updateMany as jest.Mock).mock.invocationCallOrder[0];
+      expect(mockS3Send.mock.invocationCallOrder[0]).toBeLessThan(writeAt);
+      expect(mockS3Send.mock.invocationCallOrder[1]).toBeGreaterThan(writeAt);
+    });
+
+    it('answers 400 upload_expired and writes nothing when the upload is gone (HeadObject 404)', async () => {
+      mockS3Send.mockRejectedValueOnce(
+        Object.assign(new Error('Not Found'), { name: 'NotFound', $metadata: { httpStatusCode: 404 } })
+      );
+
+      const res = await request(app).patch('/api/v1/auth/me').set(AUTH).send({ profilePictureUrl: OWN_NEW });
+
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({
+        error: 'That photo upload expired. Please choose it again.',
+        code: 'upload_expired',
+      });
+      expect(mockPrisma.user.updateMany).not.toHaveBeenCalled();
+      expect(s3Kinds()).toEqual(['HeadObject', 'HeadBucket']);
+    });
+
+    it('a failed write (account deleted underneath, 401) makes no S3 call after the check', async () => {
+      (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+
+      const res = await request(app).patch('/api/v1/auth/me').set(AUTH).send({ profilePictureUrl: OWN_NEW });
+
+      expect(res.status).toBe(401);
+      expect(s3Kinds()).toEqual(['HeadObject']);
+      expect(deleteObjectCalls).toHaveLength(0);
+    });
+
+    it('makes no S3 call for an external URL', async () => {
+      const res = await request(app)
+        .patch('/api/v1/auth/me')
+        .set(AUTH)
+        .send({ profilePictureUrl: 'https://workos.example/photo.jpg' });
+
+      expect(res.status).toBe(200);
+      expect(s3Kinds().filter((k) => k === 'HeadObject' || k === 'DeleteObjectTagging')).toHaveLength(0);
+    });
+
+    it('a re-save of the stored URL skips the check but untags again after the write (repairs a failed untag)', async () => {
+      const res = await request(app).patch('/api/v1/auth/me').set(AUTH).send({ profilePictureUrl: OWN_OLD });
+
+      expect(res.status).toBe(200);
+      expect(s3Kinds().filter((k) => k === 'HeadObject' || k === 'DeleteObjectTagging')).toEqual(['DeleteObjectTagging']);
+      const untagAt = mockS3Send.mock.invocationCallOrder[0];
+      expect(untagAt).toBeGreaterThan((mockPrisma.user.updateMany as jest.Mock).mock.invocationCallOrder[0]);
+    });
+
+    it('with the flag off, a photo save makes no S3 call at all', async () => {
+      delete process.env.AVATAR_PENDING_TAG_ENABLED;
+      const res = await request(app).patch('/api/v1/auth/me').set(AUTH).send({ profilePictureUrl: OWN_NEW });
+
+      expect(res.status).toBe(200);
+      expect(s3Kinds().filter((k) => k === 'HeadObject' || k === 'HeadBucket' || k === 'DeleteObjectTagging')).toHaveLength(0);
+    });
   });
 
   it('does not look up or delete the avatar on a name-only update', async () => {

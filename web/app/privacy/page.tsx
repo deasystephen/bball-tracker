@@ -123,9 +123,18 @@ export default function PrivacyPolicyPage() {
           progress are stored on the device. We do not receive these.
         </p>
 
+        <h3>Your age</h3>
+        <p>
+          When you first sign in we ask for your birth month and year, once, to confirm that you are old enough to hold
+          an account (13, or 16 in the European Union, the European Economic Area, the United Kingdom and Switzerland;
+          see <a href="#children">section 8</a>). We keep neither the month nor the year, and we do not send them to our
+          analytics or error-reporting providers: we record only that you confirmed, and when. The app sends your
+          device’s region setting with the answer so that the right minimum applies; that is not kept either.
+        </p>
+
         <h3>What we do not collect</h3>
         <p>
-          We do not ask for a date of birth or age. The app never reads your device’s location (it asks for no
+          We do not store anyone’s date of birth or age. The app never reads your device’s location (it asks for no
           location permission), your contacts, your microphone or any advertising identifier. There are no purchases
           in the app, so we hold no payment information. The camera and photo library are used only when you choose
           to take or pick a profile photo, and only the photo you choose is uploaded.
@@ -206,10 +215,13 @@ export default function PrivacyPolicyPage() {
             <tr>
               <td>Amazon Web Services (AWS), United States (US East)</td>
               <td>
-                Hosts the API, the database and its backups, a cache, profile photo storage (Amazon S3), email delivery
-                (Amazon SES) and server logs (Amazon CloudWatch)
+                Hosts the API, the hooplings.com web pages, the database and its backups, a cache, profile photo
+                storage (Amazon S3), email delivery (Amazon SES) and server logs (Amazon CloudWatch)
               </td>
-              <td>Everything the service stores; email addresses and message content for the emails we send</td>
+              <td>
+                Everything the service stores; email addresses and message content for the emails we send; standard
+                web request information for the web pages (see <a href="#website">section 11</a>)
+              </td>
             </tr>
             <tr>
               <td>WorkOS</td>
@@ -246,13 +258,6 @@ export default function PrivacyPolicyPage() {
               <td>Google Workspace</td>
               <td>Our support and privacy mailboxes</td>
               <td>Whatever you write to us, and your email address</td>
-            </tr>
-            <tr>
-              <td>
-                <Placeholder>OWNER DECISION: web host for hooplings.com</Placeholder>
-              </td>
-              <td>Serving the hooplings.com web pages</td>
-              <td>Standard web request information, such as IP address and browser type</td>
             </tr>
           </tbody>
         </Table>
@@ -394,51 +399,57 @@ export default function PrivacyPolicyPage() {
 
       <Section id="children" title="8. Children and families">
         <p>
-          Hooplings is used by youth teams, so many players are children. This is what the app does with their
-          information today.
+          Hooplings is for a general audience and is not directed to children under 13. <strong>Account holders must be
+          13 or older</strong> (16 in the European Union, the European Economic Area, the United Kingdom and
+          Switzerland). We do not knowingly collect personal information from children under 13. Younger players take
+          part as <strong>roster records</strong> that a coach or a parent or guardian enters and keeps, with no sign-in
+          of their own. This is how that works.
         </p>
         <ul>
           <li>
-            We do not ask for anyone’s age or date of birth, and sign-up has no age check.
+            <strong>Children’s information is entered by adults.</strong> A coach or other staff member with roster
+            permission adds a player’s name and, optionally, a photo, a jersey number and a position. For a player under
+            13 the app asks the coach to invite a parent or guardian by email instead of entering an email address for
+            the player, so the player never gets a login. A player 13 or older may be invited by email and, after
+            confirming their age, can sign in and take over the record.
           </li>
           <li>
-            Children’s information is entered by adults: a coach or other staff member with roster permission adds a
-            player’s name and, optionally, an email address, photo, jersey number and position. A player added without
-            an email address is a record managed by the team, with no sign-in. If an email address is entered, we send
-            an invitation to it, and the person who uses that address can sign in and take over the record.
+            <strong>Age at sign-in.</strong> Everyone who signs in answers the birth month and year question in{' '}
+            <a href="#information-we-collect">section 2</a> once. An answer under the minimum ends the sign-in: an
+            account created by that sign-in is erased, a roster record the sign-in had taken over goes back to being a
+            record the coach keeps (its sign-in, email address, photo and anything the person wrote are removed), and
+            the sign-in account at our provider is deleted. Nothing about the answer is kept.
           </li>
           <li>
-            A coach can invite a parent or guardian by email. Once the invitation is accepted, the guardian is linked
-            to the child and can see the child’s teams, schedules, live games, box scores and statistics; RSVP for the
-            child; change the child’s name and photo; receive the team’s announcements; and delete the child’s record
-            if the child has never signed in.
+            <strong>Parents and guardians.</strong> A coach can invite a parent or guardian by email. Once the
+            invitation is accepted, the guardian is linked to the child and can see the child’s teams, schedules, live
+            games, box scores and statistics; RSVP for the child; change the child’s name and photo; receive the
+            team’s announcements; and delete the child’s record. Whoever enters a child’s information, invites a
+            guardian or uploads a child’s photo confirms in our Terms that they are the child’s parent or guardian or
+            have that person’s permission.
           </li>
           <li>
             Team members, staff and other families on the team see the child’s name, photo, jersey number, position and
-            statistics, as described in <a href="#who-can-see">section 4</a>. The child’s email address is shown only
-            to staff who can manage the roster.
+            statistics, as described in <a href="#who-can-see">section 4</a>. A child’s email address, where a coach
+            entered one, is shown only to staff who can manage the roster.
           </li>
           <li>
             Analytics and error reports describe what the person using the app does. When a coach adds a player, the
             analytics event records only yes/no flags (for example, whether a photo or jersey number was added), never
             the player’s name, email address, jersey number or photo.
           </li>
-          <li>
-            We do not use children’s information for advertising, and we do not sell it.
-          </li>
+          <li>We do not use children’s information for advertising, and we do not sell it.</li>
         </ul>
         <p>
-          A parent or guardian can ask to see, correct or delete their child’s information by writing to{' '}
-          <Email address={PRIVACY_EMAIL} /> (see <a href="#deleting">section 7</a> for how we verify the request).
+          <strong>If you believe a child under 13 has created their own Hooplings account</strong>, email{' '}
+          <Email address={PRIVACY_EMAIL} /> with the email address on the account. We will turn it into a roster record
+          kept by the team’s coach or a parent, or delete it, within 5 business days, and ask our service providers to
+          delete their copies.
         </p>
         <p>
-          <Placeholder>
-            OWNER DECISION: whether Hooplings is directed to children under 13 under the US Children’s Online Privacy
-            Protection Act (COPPA), whether children under 13 may have their own sign-in, and, if so, how verifiable
-            parental consent is obtained before a coach adds a child. Today the app has no age check and no parental
-            consent step. Replace this paragraph with the decided position; do not publish a compliance claim the app
-            does not implement.
-          </Placeholder>
+          A parent or guardian can review, correct or delete their child’s record in the app (Profile → My kids → ⋯ →
+          Delete [child]’s record, for a record with no sign-in of its own) or by writing to{' '}
+          <Email address={PRIVACY_EMAIL} /> (see <a href="#deleting">section 7</a> for how we verify the request).
         </p>
       </Section>
 

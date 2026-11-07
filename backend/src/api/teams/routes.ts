@@ -9,6 +9,7 @@ import { authenticate } from '../auth/middleware';
 import {
   createTeamSchema,
   updateTeamSchema,
+  rolloverTeamSchema,
   updateTeamMemberSchema,
   teamQuerySchema,
   addRosterPlayerSchema,
@@ -161,6 +162,58 @@ router.delete('/:id', validateUuidParams('id'), async (req, res) => {
     });
   } catch (error) {
     respondWithError(res, error, { log: 'Error deleting team', fallback: 'Failed to delete team' });
+  }
+});
+
+/**
+ * POST /api/v1/teams/:id/rollover
+ * Start the next season of a team (#461): a new team-season row with the same
+ * lineage, carrying roster and staff. 201 with `created: true` when the row
+ * was made; 200 with `created: false` and the existing row when the lineage
+ * already has one in the target season (a repeated tap is idempotent). Both
+ * carry `seasonCreated`.
+ *
+ * Deliberately NOT behind `requireTeamCreateLimit`: the tier team cap counts
+ * lineages (`countDistinctStaffTeams`, a team is its lineage), and a rollover
+ * continues a lineage, so it adds no team to anyone's count. Counting
+ * team-season rows instead would charge a coach for every past season and a
+ * capped coach could never continue their own team. The service invalidates
+ * every carried staff member's usage cache (their season count changes).
+ *
+ * 409 `team_season_exists` (no ids) when the lineage already has a row in
+ * that season that the caller may not manage; 409 `not_latest_season` (no
+ * ids) when this row is not the lineage's latest team-season; 409
+ * `season_archived` (no ids) when the season resolves to an archived one;
+ * 400 `season_not_after_source` (no ids) when it does not come after the
+ * team's current season.
+ */
+router.post('/:id/rollover', validateUuidParams('id'), async (req, res) => {
+  try {
+    const validationResult = rolloverTeamSchema.safeParse(req.body);
+    if (!validationResult.success) {
+      throw new BadRequestError(
+        validationResult.error.issues.map((e: { message: string }) => e.message).join(', ')
+      );
+    }
+
+    const { team, created, seasonCreated } = await TeamService.rolloverTeam(
+      req.params.id as string,
+      validationResult.data,
+      req.user!.id
+    );
+
+    res.status(created ? 201 : 200).json({
+      success: true,
+      created,
+      // Whether this request created the season (the client's analytics, #461).
+      seasonCreated,
+      team,
+    });
+  } catch (error) {
+    respondWithError(res, error, {
+      log: 'Error rolling over team',
+      fallback: 'Failed to start the next season',
+    });
   }
 });
 

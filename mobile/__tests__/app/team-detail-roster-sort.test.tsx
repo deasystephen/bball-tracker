@@ -5,13 +5,14 @@
  * season "(Active)" marker, which only the detail payload can drive (#767).
  */
 
-import { render, fireEvent, waitFor } from '@testing-library/react-native';
+import { act, render, fireEvent, waitFor } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import TeamDetailsScreen from '../../app/teams/[id]';
 import { useAuthStore } from '../../store/auth-store';
 import { rosterSortStorageKey } from '../../hooks/useRosterSortPreference';
 import type { Team, TeamStaff } from '../../hooks/useTeams';
+import { i18n } from '../../i18n';
 
 const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn(), canGoBack: jest.fn(() => true) };
 let mockTeam: Team | undefined;
@@ -165,5 +166,34 @@ describe('TeamDetailsScreen — season marker (#767)', () => {
     const screen = render(<TeamDetailsScreen />);
     expect(screen.getByText('Bay')).toBeTruthy();
     expect(screen.queryByText(/\(Active\)/)).toBeNull();
+  });
+});
+
+describe('TeamDetailsScreen — Spanish device (#671)', () => {
+  beforeEach(async () => {
+    jest.clearAllMocks();
+    signIn();
+    await i18n.changeLanguage('es');
+  });
+
+  afterEach(async () => {
+    await act(async () => {
+      await i18n.changeLanguage('en');
+    });
+  });
+
+  it('shows Spanish tiles, buttons, sort pills and season marker with no English fallback', () => {
+    mockTeam = baseTeam();
+    const screen = render(<TeamDetailsScreen />);
+
+    expect(screen.getByText('Ver estadísticas del equipo')).toBeTruthy();
+    expect(screen.getByText('Anuncios')).toBeTruthy();
+    expect(screen.getByText('PPP')).toBeTruthy();
+    expect(screen.getByText(/\(Activa\)/)).toBeTruthy();
+    expect(screen.getByLabelText('Ordenar por N.º de camiseta')).toBeTruthy();
+    expect(screen.getByLabelText('Ordenar por Nombre')).toBeTruthy();
+    expect(screen.getByLabelText('Volver')).toBeTruthy();
+    expect(screen.queryByText(/View Team Stats|Announcements|League & Season/)).toBeNull();
+    expect(screen.queryByLabelText(/^Sort by/)).toBeNull();
   });
 });

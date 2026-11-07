@@ -29,6 +29,13 @@ Loads when a file under `mobile/` is read. Detail: `docs/architecture/mobile-app
   (network, 5xx) are captured by the api-client, 4xx are not. Detail: `docs/architecture/mobile-app.md`.
 - Screen tests render the real i18n instance; the brand guard fails on retired names anywhere in
   mobile source, locales or `.maestro/`, comments included.
+- **No translation regressions.** All user-facing copy goes through `t()`; a new or changed English
+  string gets a real translation in every file in `i18n/locales/` in the same PR (Spanish today),
+  then `npm run i18n:mark -- <code> <key>…`. Guards: `hardcoded-copy.test.ts`,
+  `locale-parity.test.ts` (keys, placeholders, no copied English outside `IDENTICAL_TO_ENGLISH`, no
+  translation older than its English per `i18n/translated-from.json`), `locale-registry.test.ts`.
+  Never silence a guard with an allowlist entry or a mark to save translating; flag uncertain
+  translations in the PR. Adding a language: `docs/architecture/mobile-app.md`.
 - Analytics: every user-facing mutation hook fires a catalogued event from `onSuccess`
   (`trackEvent(AnalyticsEvents.X, props)`); names are `snake_case` `<object>_<past-tense verb>`
   and live only in `services/analytics.ts#AnalyticsEvents` with typed props. **No property may
@@ -39,8 +46,8 @@ Loads when a file under `mobile/` is read. Detail: `docs/architecture/mobile-app
   config in `app.config.js` (any key but `name`/`version`/`extra`/`web`, plugin output, referenced
   icons/splash) move only with a native build and a runtime bump; `npm test` fails otherwise. Never edit
   `binary-manifest.json` by hand. Production OTA: `npm ci && npm run ota:production` (the script
-  runs the drift guard, then `eas update --environment production`, which supplies `APP_ENV`);
-  verify the served manifest; publish it in the
-  same session as the merge.
+  needs `SENTRY_AUTH_TOKEN` in the shell, runs the drift guard, then `eas update --environment
+  production`, which supplies `APP_ENV`, then uploads the source maps to Sentry); verify the served
+  manifest; publish it in the same session as the merge.
 - Entitlements, permission strings, icons and splash ship only with an `eas build`.
 - Major new functionality gets a Maestro flow and, if it mutates data, a reset in the seed.

@@ -982,7 +982,7 @@ export class GuardianService {
     const parent = await this.resolveAcceptingParent(invitation.invitedEmail, verifiedParentId);
     const parentId = parent.id;
 
-    return prisma.$transaction(async (tx) => {
+    const { result, linked } = await prisma.$transaction(async (tx) => {
       // Lock the child and the parent in ONE sorted statement (`lockUsers`).
       //  - Child (#664): primacy below is a count-then-insert, and under READ
       //    COMMITTED two accepts for one child (two parents, two invitations)
@@ -1052,27 +1052,37 @@ export class GuardianService {
         }
       }
 
-      logger.info('Guardian linked', {
-        invitationId: invitation.id,
-        teamId: invitation.teamId,
-        guardianId: guardian.id,
-        parentId: guardian.parentId,
-        childId: guardian.childId,
-        isPrimary: guardian.isPrimary,
-        linkExisted: !!existingLink,
-      });
-
       return {
-        kind: 'guardian' as const,
-        invitation: updatedInvitation,
-        guardian: {
-          id: guardian.id,
-          parentId: guardian.parentId,
-          childId: guardian.childId,
-          relationship: guardian.relationship,
-          isPrimary: guardian.isPrimary,
+        linked: { existed: !!existingLink },
+        result: {
+          kind: 'guardian' as const,
+          invitation: updatedInvitation,
+          guardian: {
+            id: guardian.id,
+            parentId: guardian.parentId,
+            childId: guardian.childId,
+            relationship: guardian.relationship,
+            isPrimary: guardian.isPrimary,
+          },
         },
       };
     });
+
+    // After COMMIT (#964): the invite funnel counts this line, so a rolled-back
+    // accept must not log a link that never happened.
+    logger.info('Guardian linked', {
+      invitationId: invitation.id,
+      teamId: invitation.teamId,
+      guardianId: result.guardian.id,
+      parentId: result.guardian.parentId,
+      childId: result.guardian.childId,
+      isPrimary: result.guardian.isPrimary,
+      linkExisted: linked.existed,
+      // How the adult accepted, as on `Invitation accepted`: a verified caller
+      // is the app, no caller is the public by-token link.
+      via: verifiedParentId ? 'app' : 'token',
+    });
+
+    return result;
   }
 }

@@ -49,7 +49,6 @@ import { MIN_TOUCH_TARGET } from '../../utils/touch-target';
  * screen.
  */
 const MY_TEAMS_OPTION = '__my_teams__';
-const MY_TEAMS_LABEL = 'My teams';
 
 export default function CreateTeamScreen() {
   const router = useRouter();
@@ -57,6 +56,7 @@ export default function CreateTeamScreen() {
   const { t } = useTranslation();
   const padding = getHorizontalPadding();
   const insets = useSafeAreaInsets();
+  const myTeamsLabel = t('teams.myTeams');
 
   const [name, setName] = useState('');
   // Per-season bracket (#462); both optional, sent only when set.
@@ -114,13 +114,13 @@ export default function CreateTeamScreen() {
     const newErrors: { name?: string; seasonId?: string } = {};
 
     if (!name.trim()) {
-      newErrors.name = 'Team name is required';
+      newErrors.name = t('teams.nameRequired');
     }
 
     // A league is always selected (the "My teams" default), so only a real
     // league needs a season to go with it.
     if (!usesPersonalLeague && !seasonId) {
-      newErrors.seasonId = 'Season is required';
+      newErrors.seasonId = t('teams.seasonRequired');
     }
 
     setErrors(newErrors);
@@ -144,7 +144,7 @@ export default function CreateTeamScreen() {
           : { name: name.trim(), seasonId, ...bracket }
       );
 
-      toast.showToast('Team created successfully', 'success');
+      toast.showToast(t('teams.createSuccess'), 'success');
       // Replace so the spent create form isn't left under the detail screen
       // (back should return to the Teams tab, matching games/create).
       router.replace(`/teams/${team.id}`);
@@ -153,22 +153,22 @@ export default function CreateTeamScreen() {
       // No tier has one since #445, so the API does not answer 402 here today;
       // the branch stays for the day a cap returns together with a purchase flow.
       Alert.alert(
-        isUpgradeRequiredError(error) ? 'Upgrade required' : t('common.error'),
-        getApiErrorMessage(error, 'Failed to create team')
+        isUpgradeRequiredError(error) ? t('teams.upgradeRequired') : t('common.error'),
+        getApiErrorMessage(error, t('teams.createFailed'))
       );
     }
   };
 
   if (leaguesLoading) {
-    return <LoadingSpinner message="Loading leagues..." fullScreen />;
+    return <LoadingSpinner message={t('leagues.loadingList')} fullScreen />;
   }
 
   const showLeaguePicker = !allLeaguesPersonal;
   const disclosureSummary = usesPersonalLeague
-    ? MY_TEAMS_LABEL
+    ? myTeamsLabel
     : selectedSeason
       ? `${selectedLeague?.name} · ${selectedSeason.name}`
-      : (selectedLeague?.name ?? MY_TEAMS_LABEL);
+      : (selectedLeague?.name ?? myTeamsLabel);
 
   const renderRadio = (isSelected: boolean) =>
     isSelected ? (
@@ -213,7 +213,7 @@ export default function CreateTeamScreen() {
 
           <Input
             label={t('teams.name')}
-            placeholder="Enter team name"
+            placeholder={t('teams.namePlaceholder')}
             value={name}
             onChangeText={setName}
             error={errors.name}
@@ -256,11 +256,11 @@ export default function CreateTeamScreen() {
                 style={[styles.disclosureHeader, { borderColor: colors.border }]}
                 accessibilityRole="button"
                 accessibilityState={{ expanded: pickerExpanded }}
-                accessibilityLabel={`League and season: ${disclosureSummary}`}
+                accessibilityLabel={t('teams.leagueAndSeasonA11y', { summary: disclosureSummary })}
                 testID="league-season-disclosure"
               >
                 <View style={styles.disclosureLabels}>
-                  <ThemedText variant="bodyBold">League &amp; season</ThemedText>
+                  <ThemedText variant="bodyBold">{t('teams.leagueAndSeasonPicker')}</ThemedText>
                   <ThemedText variant="caption" color="textSecondary">
                     {disclosureSummary}
                   </ThemedText>
@@ -280,13 +280,13 @@ export default function CreateTeamScreen() {
                     </ThemedText>
                     <View style={[styles.selectionList, { borderColor: colors.border }]}>
                       <ListItem
-                        title={MY_TEAMS_LABEL}
-                        subtitle="Just for me — not part of a league"
+                        title={myTeamsLabel}
+                        subtitle={t('teams.myTeamsHint')}
                         onPress={() => handleLeagueSelect(MY_TEAMS_OPTION)}
                         rightElement={renderRadio(usesPersonalLeague)}
                         accessibilityRole="radio"
                         accessibilityState={{ selected: usesPersonalLeague }}
-                        accessibilityLabel={MY_TEAMS_LABEL}
+                        accessibilityLabel={myTeamsLabel}
                         testID="league-option-my-teams"
                         style={[
                           styles.selectionItem,
@@ -302,8 +302,8 @@ export default function CreateTeamScreen() {
                             title={league.name}
                             subtitle={
                               league._count?.seasons
-                                ? `${league._count.seasons} season${league._count.seasons === 1 ? '' : 's'}`
-                                : 'No seasons'
+                                ? t('leagues.seasonCount', { count: league._count.seasons })
+                                : t('teams.noSeasons')
                             }
                             onPress={() => handleLeagueSelect(league.id)}
                             rightElement={renderRadio(isSelected)}
@@ -325,11 +325,11 @@ export default function CreateTeamScreen() {
                   {!usesPersonalLeague && (
                     <View style={styles.selectionSection}>
                       <ThemedText variant="captionBold" color="textSecondary" style={styles.label}>
-                        Season
+                        {t('leagues.season')}
                       </ThemedText>
                       {seasonsLoading ? (
                         <View style={styles.loadingContainer}>
-                          <LoadingSpinner message="Loading seasons..." />
+                          <LoadingSpinner message={t('teams.loadingSeasons')} />
                         </View>
                       ) : seasons.length > 0 ? (
                         <View style={[styles.selectionList, { borderColor: colors.border }]}>
@@ -342,8 +342,8 @@ export default function CreateTeamScreen() {
                                 title={season.name}
                                 subtitle={
                                   season._count?.teams
-                                    ? `${season._count.teams} team${season._count.teams === 1 ? '' : 's'}`
-                                    : 'No teams yet'
+                                    ? t('seasons.teamCount', { count: season._count.teams })
+                                    : t('seasons.noTeams')
                                 }
                                 onPress={() => setSeasonId(season.id)}
                                 rightElement={renderRadio(isSelected)}
@@ -368,10 +368,10 @@ export default function CreateTeamScreen() {
                         >
                           <Ionicons name="calendar-outline" size={32} color={colors.textTertiary} />
                           <ThemedText variant="body" color="textTertiary" style={styles.noSeasonsText}>
-                            No active seasons in {selectedLeague?.name}
+                            {t('teams.noActiveSeasons', { league: selectedLeague?.name ?? '' })}
                           </ThemedText>
                           <ThemedText variant="caption" color="textTertiary">
-                            Pick &quot;{MY_TEAMS_LABEL}&quot; instead — you can move the team later.
+                            {t('teams.myTeamsFallbackHint', { myTeams: myTeamsLabel })}
                           </ThemedText>
                         </View>
                       )}
@@ -391,7 +391,7 @@ export default function CreateTeamScreen() {
           {!usesPersonalLeague && selectedLeague && selectedSeason && (
             <View style={[styles.summaryCard, { backgroundColor: colors.backgroundSecondary, borderColor: colors.border }]}>
               <ThemedText variant="caption" color="textSecondary">
-                Creating team in:
+                {t('teams.creatingIn')}
               </ThemedText>
               <ThemedText variant="bodyBold">
                 {selectedLeague.name} - {selectedSeason.name}

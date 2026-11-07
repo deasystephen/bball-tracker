@@ -27,7 +27,13 @@ import { authenticate } from './middleware';
 import { getEffectiveTier, getAllFeatures, getUsageLimits } from '../../utils/entitlements';
 import { NotificationService } from '../../services/notification-service';
 import { getUsage } from '../../services/usage-service';
-import { assertOwnUploadUrl, deletePreviousAvatar } from '../../services/upload-service';
+import {
+  assertOwnUploadUrl,
+  avatarUploadKey,
+  checkAvatarUpload,
+  deletePreviousAvatar,
+  withCheckedAvatar,
+} from '../../services/upload-service';
 import { AccountService } from '../../services/account-service';
 import { listDevUsers } from './dev-users';
 import { emailEquals } from '../../utils/email-match';
@@ -364,11 +370,12 @@ router.get('/callback', async (req, res) => {
     });
   } catch (error) {
     if (error instanceof ConflictError) {
-      // Email already bound to a different WorkOS user. Never a normal client
-      // outcome: it is the signature of the WorkOS key cutover (#24), where every
-      // production row still carries a staging WorkOS id and every sign-in would
-      // land here. Kept at `error` (the alarms key on @level:error) and in Sentry,
-      // unlike the 4xx rule logRouteError applies (#656).
+      // Email already bound to a different WorkOS user that still exists, an
+      // unverified email, or two rows differing only by case. Never a normal
+      // client outcome: a row whose WorkOS id the environment does not know
+      // (every row after the #24 key cutover) is relinked by syncUser instead.
+      // Kept at `error` and in Sentry so it is seen, unlike the 4xx rule
+      // logRouteError applies (#656).
       res.status(409).json({ error: error.message });
       captureException(error, { flow: 'auth-callback-conflict' });
       logger.error('Auth callback email linked to a different WorkOS user', {
@@ -483,20 +490,28 @@ router.patch('/me', authenticate, async (req, res) => {
       profilePictureUrl !== undefined
         ? await prisma.user.findUnique({ where: { id: req.user!.id }, select: { profilePictureUrl: true } })
         : null;
-    // Conditioned on `deletedAt IS NULL` (#444, D9): a request that passed
-    // `authenticate` a moment before an account deletion committed must not
-    // write a real name or photo back onto the tombstone. Zero rows → 401.
-    const updated = await prisma.user.updateMany({
-      where: { id: req.user!.id, deletedAt: null },
-      data: {
-        ...(name !== undefined && { name }),
-        ...(profilePictureUrl !== undefined && { profilePictureUrl: profilePictureUrl || null }),
-        ...(notifyOnReplies !== undefined && { notifyOnReplies }),
-      },
+    // A new upload is checked before it is stored (#1005): an expired one is
+    // a 400 `upload_expired` and nothing is written; its pending tag is removed
+    // only after the write committed. Re-sending the URL already stored skips
+    // the check but is untagged again, which repairs a failed earlier untag.
+    const resave = Boolean(profilePictureUrl) && profilePictureUrl === previous?.profilePictureUrl;
+    const uploadKey = resave ? avatarUploadKey(profilePictureUrl) : await checkAvatarUpload(profilePictureUrl);
+    await withCheckedAvatar(uploadKey, async () => {
+      // Conditioned on `deletedAt IS NULL` (#444, D9): a request that passed
+      // `authenticate` a moment before an account deletion committed must not
+      // write a real name or photo back onto the tombstone. Zero rows → 401.
+      const updated = await prisma.user.updateMany({
+        where: { id: req.user!.id, deletedAt: null },
+        data: {
+          ...(name !== undefined && { name }),
+          ...(profilePictureUrl !== undefined && { profilePictureUrl: profilePictureUrl || null }),
+          ...(notifyOnReplies !== undefined && { notifyOnReplies }),
+        },
+      });
+      if (updated.count === 0) {
+        throw new UnauthorizedError('User not found');
+      }
     });
-    if (updated.count === 0) {
-      throw new UnauthorizedError('User not found');
-    }
     const user = await prisma.user.findUniqueOrThrow({
       where: { id: req.user!.id },
       select: SESSION_USER_SELECT,

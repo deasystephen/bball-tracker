@@ -12,6 +12,9 @@
  * back to production (#721). The device cannot report that by itself: such a
  * manifest also carries no Sentry DSN.
  *
+ * The screen is localized (#671); the Share / support-mail export stays
+ * English on purpose, since support reads it.
+ *
  * The Help card holds the support contact (#450): the row opens the mail app
  * with a message to the support address that already carries the diagnostics.
  *
@@ -37,6 +40,7 @@ import { useToast } from '../components/Toast';
 import { BackButton } from '../components/BackButton';
 import { MIN_TOUCH_TARGET } from '../utils/touch-target';
 import { formatDateTime } from '../utils/format-date';
+import { useTranslation } from '../i18n';
 
 export const APP_NAME = 'Hooplings';
 
@@ -90,13 +94,25 @@ export function getAboutInfo(): AboutInfo {
   };
 }
 
-/** "api.hooplings.com", or a note that the manifest's loopback host was ignored. */
-export function formatApiHost(info: AboutInfo): string {
-  return info.apiManifestIgnored ? `${info.apiHost} (production; update's loopback host ignored)` : info.apiHost;
+type Translate = (key: string, options?: Record<string, unknown>) => string;
+
+/**
+ * "api.hooplings.com", or a note that the manifest's loopback host was ignored.
+ * With `t` the note is localized (the screen); without, English (the diagnostics).
+ */
+export function formatApiHost(info: AboutInfo, t?: Translate): string {
+  if (!info.apiManifestIgnored) return info.apiHost;
+  return t
+    ? t('about.apiHostIgnored', { host: info.apiHost })
+    : `${info.apiHost} (production; update's loopback host ignored)`;
 }
 
-export function formatAppVersion(info: AboutInfo): string {
-  return info.buildNumber ? `v${info.appVersion} (build ${info.buildNumber})` : `v${info.appVersion}`;
+/** "v1.6.0 (build 34)"; localized with `t`, English without (the diagnostics). */
+export function formatAppVersion(info: AboutInfo, t?: Translate): string {
+  if (!t) return info.buildNumber ? `v${info.appVersion} (build ${info.buildNumber})` : `v${info.appVersion}`;
+  return info.buildNumber
+    ? t('about.versionWithBuild', { version: info.appVersion, build: info.buildNumber })
+    : t('about.version', { version: info.appVersion });
 }
 
 export function formatAboutDiagnostics(info: AboutInfo): string {
@@ -121,6 +137,7 @@ export function buildSupportMailto(info: AboutInfo): string {
 export default function AboutScreen() {
   const router = useRouter();
   const { colors } = useTheme();
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const padding = getHorizontalPadding();
   const info = getAboutInfo();
@@ -132,7 +149,7 @@ export default function AboutScreen() {
     } catch {
       // No mail app is set up (a simulator, or a device whose mail app was
       // removed). The address is on the row; say what to do with it.
-      toast.showToast(`No mail app found. Write to ${SUPPORT_EMAIL}`, 'info');
+      toast.showToast(t('about.noMailApp', { email: SUPPORT_EMAIL }), 'info');
     }
   };
 
@@ -144,18 +161,34 @@ export default function AboutScreen() {
     }
   };
 
-  const rows: { icon: keyof typeof Ionicons.glyphMap; label: string; value: string }[] = [
-    { icon: 'pricetag', label: 'App version', value: formatAppVersion(info) },
-    { icon: 'layers', label: 'Runtime version', value: info.runtimeVersion ?? 'unknown' },
+  const unknown = t('about.unknown');
+  // `id` keeps each row's testID stable whatever the language.
+  const rows: { id: string; icon: keyof typeof Ionicons.glyphMap; label: string; value: string }[] = [
     {
-      icon: 'cloud-download',
-      label: 'Update',
-      value: info.isEmbedded
-        ? 'Embedded build (no OTA applied)'
-        : `${info.updateId}\nPublished ${info.updatePublishedAt ? formatDateTime(info.updatePublishedAt) : 'unknown'}`,
+      id: 'app-version',
+      icon: 'pricetag',
+      label: t('about.appVersion'),
+      value: formatAppVersion(info, t),
     },
-    { icon: 'git-branch', label: 'Channel', value: info.channel ?? 'none (development)' },
-    { icon: 'server', label: 'API host', value: formatApiHost(info) },
+    { id: 'runtime-version', icon: 'layers', label: t('about.runtimeVersion'), value: info.runtimeVersion ?? unknown },
+    {
+      id: 'update',
+      icon: 'cloud-download',
+      label: t('about.update'),
+      value: info.isEmbedded
+        ? t('about.embedded')
+        : t('about.updatePublished', {
+            id: info.updateId,
+            date: info.updatePublishedAt ? formatDateTime(info.updatePublishedAt) : unknown,
+          }),
+    },
+    { id: 'channel', icon: 'git-branch', label: t('about.channel'), value: info.channel ?? t('about.noChannel') },
+    {
+      id: 'api-host',
+      icon: 'server',
+      label: t('about.apiHost'),
+      value: formatApiHost(info, t),
+    },
   ];
 
   return (
@@ -173,7 +206,7 @@ export default function AboutScreen() {
       >
         <BackButton onPress={() => router.back()} style={styles.backButton} />
         <View style={styles.headerContent}>
-          <ThemedText variant="h2" heading>About</ThemedText>
+          <ThemedText variant="h2" heading>{t('about.title')}</ThemedText>
         </View>
       </View>
 
@@ -186,7 +219,7 @@ export default function AboutScreen() {
         </ThemedText>
         <Card variant="default" style={styles.card}>
           {rows.map((row, index) => (
-            <React.Fragment key={row.label}>
+            <React.Fragment key={row.id}>
               {index > 0 && <View style={[styles.divider, { backgroundColor: colors.border }]} />}
               <View style={styles.infoRow}>
                 <View style={[styles.infoIcon, { backgroundColor: colors.primary + '20' }]}>
@@ -196,7 +229,7 @@ export default function AboutScreen() {
                   <ThemedText variant="caption" color="textSecondary">
                     {row.label}
                   </ThemedText>
-                  <ThemedText variant="body" testID={`about-${row.label.toLowerCase().replace(/ /g, '-')}`}>
+                  <ThemedText variant="body" testID={`about-${row.id}`}>
                     {row.value}
                   </ThemedText>
                 </View>
@@ -206,7 +239,7 @@ export default function AboutScreen() {
         </Card>
 
         <Button
-          title="Share diagnostics"
+          title={t('about.share')}
           variant="outline"
           onPress={handleShare}
           fullWidth
@@ -214,15 +247,15 @@ export default function AboutScreen() {
         />
 
         <ThemedText variant="h4" heading style={[styles.sectionTitle, styles.helpTitle]}>
-          Help
+          {t('about.help')}
         </ThemedText>
         <Card variant="default" style={styles.card}>
           <TouchableOpacity
             onPress={handleContactSupport}
             style={styles.linkRow}
             accessibilityRole="link"
-            accessibilityLabel={`Contact support, ${SUPPORT_EMAIL}`}
-            accessibilityHint="Opens your mail app"
+            accessibilityLabel={t('about.contactSupportA11y', { email: SUPPORT_EMAIL })}
+            accessibilityHint={t('about.contactSupportHint')}
             testID="about-contact-support"
           >
             <View style={[styles.infoIcon, { backgroundColor: colors.primary + '20' }]}>
@@ -230,7 +263,7 @@ export default function AboutScreen() {
             </View>
             <View style={styles.infoContent}>
               <ThemedText variant="caption" color="textSecondary">
-                Contact support
+                {t('about.contactSupport')}
               </ThemedText>
               <ThemedText variant="body">{SUPPORT_EMAIL}</ThemedText>
             </View>

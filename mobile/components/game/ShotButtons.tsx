@@ -18,6 +18,7 @@ import Animated, {
 import { ThemedText } from '../ThemedText';
 import { useTheme } from '../../hooks/useTheme';
 import { MAX_FONT_SCALE, spacing } from '../../theme';
+import { useTranslation } from '../../i18n';
 
 interface ShotButtonsProps {
   onShot: (points: 1 | 2 | 3, made: boolean) => void;
@@ -44,6 +45,7 @@ interface ShotButtonProps {
 }
 
 const ShotButton: React.FC<ShotButtonProps> = ({ points, made, color, disabled, width, onPress }) => {
+  const { t } = useTranslation();
   const scale = useSharedValue(1);
 
   const animatedStyle = useAnimatedStyle(() => ({
@@ -67,11 +69,15 @@ const ShotButton: React.FC<ShotButtonProps> = ({ points, made, color, disabled, 
   };
 
   const isFreeThrow = points === 1;
-  const label = made ? 'MADE' : 'MISS';
-  const pointsText = isFreeThrow ? 'FT' : `${points}PT`;
+  const label = made ? t('tracker.shot.made') : t('tracker.shot.miss');
+  const pointsText = isFreeThrow ? t('tracker.shot.freeThrowButton') : t('tracker.shot.pointsButton', { points });
   const accessibilityLabel = isFreeThrow
-    ? `free throw ${made ? 'made' : 'missed'}`
-    : `${points}-point shot ${made ? 'made' : 'missed'}`;
+    ? made
+      ? t('tracker.shot.freeThrowMadeA11y')
+      : t('tracker.shot.freeThrowMissedA11y')
+    : made
+      ? t('tracker.shot.fieldGoalMadeA11y', { points })
+      : t('tracker.shot.fieldGoalMissedA11y', { points });
 
   return (
     <AnimatedPressable
@@ -118,6 +124,7 @@ export const ShotButtons: React.FC<ShotButtonsProps> = React.memo(function ShotB
   disabled = false,
 }) {
   const { colors } = useTheme();
+  const { t } = useTranslation();
   const { width: windowWidth } = useWindowDimensions();
   const buttonWidth = (windowWidth - spacing.md * 4) / 3;
 
@@ -186,7 +193,7 @@ export const ShotButtons: React.FC<ShotButtonsProps> = React.memo(function ShotB
       {disabled && (
         <View style={styles.disabledOverlay}>
           <ThemedText variant="caption" color="textTertiary">
-            Select a player first
+            {t('tracker.selectPlayerFirst')}
           </ThemedText>
         </View>
       )}

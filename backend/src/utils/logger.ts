@@ -11,14 +11,21 @@
  * `NODE_ENV === 'development'`, which made it impossible to turn on for a
  * production diagnosis.
  *
- * Inside an HTTP request the ambient `requestId` and `userId` from
+ * Inside an HTTP request the ambient `requestId`, `userId` and `client` from
  * `utils/log-context.ts` are merged into every entry; explicit context wins.
+ *
+ * `service` and `commit` (the deployed commit, `utils/release.ts`; `null` in
+ * development) are written after the context, so no context key can overwrite
+ * them (#966). Datadog adds `env:production` as a tag (the forwarder's
+ * `DdTags`, infra/datadog.tf), so "did errors start with commit X" is one
+ * query on `@commit`.
  *
  * Never log a name, an email address or a URL with a secret in it: ids only,
  * `hashRecipient()` for addresses, `utils/redact.ts` for URLs.
  */
 
 import { getLogContext } from './log-context';
+import { deployedCommit } from './release';
 
 interface LogContext {
   requestId?: string;
@@ -29,6 +36,9 @@ interface LogContext {
   duration?: number;
   [key: string]: unknown;
 }
+
+/** The Datadog `service` of every API line (`service:bball-tracker-api`). */
+export const LOG_SERVICE = 'bball-tracker-api';
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
@@ -61,14 +71,15 @@ function log(level: LogLevel, message: string, context?: LogContext): void {
     return;
   }
 
-  const entry = {
-    timestamp: new Date().toISOString(),
-    level,
-    message,
-    service: 'bball-tracker-api',
-    ...getLogContext(),
-    ...context,
-  };
+  // The fixed fields are written first (so they lead the JSON line) and again
+  // last, so no context key can overwrite `level`, `message`, `service` or
+  // `commit` (#966): a context `level: 'info'` on an error line would hide it
+  // from every `status:error` query.
+  const fixed = { timestamp: new Date().toISOString(), level, message };
+  const entry = Object.assign({ ...fixed }, getLogContext(), context, fixed, {
+    service: LOG_SERVICE,
+    commit: deployedCommit(),
+  });
 
   if (level === 'error') {
     console.error(JSON.stringify(entry));

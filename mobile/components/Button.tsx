@@ -21,6 +21,7 @@ import { useTheme } from '../hooks/useTheme';
 import { borderRadius } from '../theme/border-radius';
 import { getResponsiveValue } from '../utils/responsive';
 import { MIN_TOUCH_TARGET } from '../utils/touch-target';
+import { useTranslation } from '../i18n';
 
 interface ButtonProps extends Omit<PressableProps, 'style'> {
   title: string;
@@ -44,6 +45,7 @@ export const Button: React.FC<ButtonProps> = ({
   ...props
 }) => {
   const { colors } = useTheme();
+  const { t } = useTranslation();
   const scale = useSharedValue(1);
 
   const animatedStyle = useAnimatedStyle(() => ({
@@ -157,7 +159,7 @@ export const Button: React.FC<ButtonProps> = ({
         onPressIn={handlePressIn}
         onPressOut={handlePressOut}
         accessibilityRole="button"
-        accessibilityLabel={loading ? `${title}, loading` : title}
+        accessibilityLabel={loading ? t('common.loadingA11y', { title }) : title}
         accessibilityState={{ disabled: disabled || loading }}
         {...props}
       >
@@ -180,7 +182,7 @@ export const Button: React.FC<ButtonProps> = ({
       onPressIn={handlePressIn}
       onPressOut={handlePressOut}
       accessibilityRole="button"
-      accessibilityLabel={loading ? `${title}, loading` : title}
+      accessibilityLabel={loading ? t('common.loadingA11y', { title }) : title}
       accessibilityState={{ disabled: disabled || loading }}
       {...props}
     >

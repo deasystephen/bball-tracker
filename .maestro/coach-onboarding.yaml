@@ -146,6 +146,9 @@ appId: com.bballtracker.mobile
 - assertVisible: "Roster"
 - tapOn:
     id: "add-player-button"
+# The form will not submit until the age question is answered (#982); the
+# new team has no age group, so nothing is preselected.
+- tapOn: "Is this player 13 or older\\? Yes"
 - tapOn:
     id: "add-player-name-input"
 - inputText: "Jordan Fixture"

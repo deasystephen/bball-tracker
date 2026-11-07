@@ -23,6 +23,10 @@ appId: com.bballtracker.mobile
 # Verify game detail page
 - assertVisible: "Test Rival"
 - assertVisible: "Scheduled"
+# Header controls (E2E plan F.6): the head coach gets the trash icon on a
+# scheduled game, and the share button stays removed (#731, #951).
+- assertVisible: "Delete game"
+- assertNotVisible: "Share game"
 
 # Start the game
 - tapOn: "Start Game"
@@ -36,6 +40,9 @@ appId: com.bballtracker.mobile
 
 # Now on game detail with IN_PROGRESS status
 - assertVisible: "Continue Tracking"
+# No delete mid-tracking and still no share button (F.6).
+- assertNotVisible: "Delete game"
+- assertNotVisible: "Share game"
 
 # End game from detail screen. The button renders below Continue Tracking and
 # sits under the fold on 874pt-class devices — scroll it into view first (60%
@@ -57,3 +64,6 @@ appId: com.bballtracker.mobile
 - extendedWaitUntil:
     visible: "Game completed"
     timeout: 10000
+# A finished game gets the trash icon back, and still no share button (F.6).
+- assertVisible: "Delete game"
+- assertNotVisible: "Share game"

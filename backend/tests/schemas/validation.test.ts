@@ -32,6 +32,14 @@ describe('Schema Validation', () => {
         expect(result.success).toBe(true);
       });
 
+      it('stores the season name trimmed and refuses a whitespace-only one (#461)', () => {
+        expect(createSeasonSchema.safeParse({ leagueId: UUID_ID, name: ' \tSpring 2027\n ' })).toMatchObject({
+          success: true,
+          data: { name: 'Spring 2027' },
+        });
+        expect(createSeasonSchema.safeParse({ leagueId: UUID_ID, name: '   ' }).success).toBe(false);
+      });
+
       it('should accept custom string format for leagueId in createSeasonSchema', () => {
         const result = createSeasonSchema.safeParse({
           leagueId: CUSTOM_STRING_ID,

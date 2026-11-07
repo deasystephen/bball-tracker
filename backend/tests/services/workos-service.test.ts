@@ -15,9 +15,11 @@ const mockAssertWorkOSConfig = jest.fn();
 
 import { Prisma } from '@prisma/client';
 import { WorkOSService } from '../../src/services/workos-service';
-import { ConflictError } from '../../src/utils/errors';
+import { ConflictError, EmailNotVerifiedError, ServiceUnavailableError, UnauthorizedError } from '../../src/utils/errors';
+import { domainEvent, spyOnInfo } from '../support/domain-events';
+import { logger } from '../../src/utils/logger';
 import { mockPrisma } from '../setup';
-import { createPlayer, uniqueViolation } from '../factories';
+import { createPlayer, uniqueViolation, type UserData } from '../factories';
 
 import { mockWorkOSClient } from '../support/workos-mock';
 
@@ -222,6 +224,49 @@ describe('WorkOSService', () => {
     });
   });
 
+  describe('revokeAllSessions (#983)', () => {
+    it('revokes every active session of the user and skips ended ones', async () => {
+      mockWorkOSClient.userManagement.listSessions.mockResolvedValue({
+        autoPagination: jest.fn().mockResolvedValue([
+          { id: 'session_a', status: 'active' },
+          { id: 'session_b', status: 'revoked' },
+          { id: 'session_c', status: 'active' },
+        ]),
+      });
+      mockWorkOSClient.userManagement.revokeSession.mockResolvedValue(undefined);
+
+      await expect(WorkOSService.revokeAllSessions('user_123')).resolves.toEqual({ revoked: 2, failed: 0 });
+
+      expect(mockWorkOSClient.userManagement.listSessions).toHaveBeenCalledWith('user_123');
+      expect(mockWorkOSClient.userManagement.revokeSession).toHaveBeenCalledTimes(2);
+      expect(mockWorkOSClient.userManagement.revokeSession).toHaveBeenCalledWith({ sessionId: 'session_a' });
+      expect(mockWorkOSClient.userManagement.revokeSession).toHaveBeenCalledWith({ sessionId: 'session_c' });
+    });
+
+    it('attempts every revocation and counts the ones that failed', async () => {
+      mockWorkOSClient.userManagement.listSessions.mockResolvedValue({
+        autoPagination: jest.fn().mockResolvedValue([
+          { id: 'session_a', status: 'active' },
+          { id: 'session_b', status: 'active' },
+          { id: 'session_c', status: 'active' },
+        ]),
+      });
+      mockWorkOSClient.userManagement.revokeSession
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(new Error('WorkOS down'))
+        .mockResolvedValueOnce(undefined);
+
+      await expect(WorkOSService.revokeAllSessions('user_123')).resolves.toEqual({ revoked: 2, failed: 1 });
+      expect(mockWorkOSClient.userManagement.revokeSession).toHaveBeenCalledTimes(3);
+    });
+
+    it('propagates a failure to list the sessions', async () => {
+      mockWorkOSClient.userManagement.listSessions.mockRejectedValue(new Error('WorkOS down'));
+
+      await expect(WorkOSService.revokeAllSessions('user_123')).rejects.toThrow('WorkOS down');
+    });
+  });
+
   describe('revokeSession', () => {
     it('revokes the WorkOS session by id', async () => {
       mockWorkOSClient.userManagement.revokeSession.mockResolvedValue(undefined);
@@ -297,6 +342,8 @@ describe('WorkOSService', () => {
     beforeEach(() => {
       delete process.env.ADMIN_EMAIL;
       delete process.env.ADMIN_EMAILS;
+      // The email lookup finds no row unless a test says otherwise.
+      (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([]);
     });
 
     it('should create new user if not exists', async () => {
@@ -321,9 +368,12 @@ describe('WorkOSService', () => {
 
       expect(result).toHaveProperty('id', player.id);
       expect(result).toHaveProperty('email', 'newuser@example.com');
-      // Looked up by WorkOS id first, then by email — never findFirst with OR
+      // Looked up by WorkOS id first, then by email (any case, #955) — never findFirst with OR
       expect(mockPrisma.user.findUnique).toHaveBeenNthCalledWith(1, { where: { workosUserId: 'workos_123' } });
-      expect(mockPrisma.user.findUnique).toHaveBeenNthCalledWith(2, { where: { email: 'newuser@example.com' } });
+      expect(mockPrisma.user.findMany).toHaveBeenCalledWith({
+        where: { email: { equals: 'newuser@example.com', mode: 'insensitive' }, deletedAt: null },
+        take: 2,
+      });
       expect(mockPrisma.user.findFirst).not.toHaveBeenCalled();
       expect(mockPrisma.user.create).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -375,9 +425,10 @@ describe('WorkOSService', () => {
       expect(result).toHaveProperty('name', 'Edited In App');
       expect(mockPrisma.user.findUnique).toHaveBeenCalledTimes(1);
       // Guarded write (#444 D9): a row deleted between the read and this write
-      // must not be re-identified, so the update is conditioned on deletedAt.
+      // must not be re-identified, so the update is conditioned on deletedAt;
+      // and on the WorkOS id, so a row un-linked meanwhile (#983) is not either.
       expect(mockPrisma.user.updateMany).toHaveBeenCalledWith({
-        where: { id: existingUser.id, deletedAt: null },
+        where: { id: existingUser.id, deletedAt: null, workosUserId: 'workos_123' },
         data: { emailVerified: true },
       });
     });
@@ -439,9 +490,9 @@ describe('WorkOSService', () => {
 
     it('creates a fresh account when the linked row was deleted during sign-in (#444 D9)', async () => {
       const existingUser = createPlayer({ email: 'gone@example.com', workosUserId: 'workos_123' });
-      (mockPrisma.user.findUnique as jest.Mock)
-        .mockResolvedValueOnce(existingUser) // by workosUserId (read before the deletion committed)
-        .mockResolvedValueOnce(null); // by email: the tombstone has no email
+      // by workosUserId (read before the deletion committed); by email finds
+      // nothing (the findMany default): the tombstone has no email
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValueOnce(existingUser);
       (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
       (mockPrisma.user.create as jest.Mock).mockResolvedValue({ ...existingUser, id: 'fresh-id' });
 
@@ -450,6 +501,38 @@ describe('WorkOSService', () => {
       expect(result).toHaveProperty('id', 'fresh-id');
       expect(mockPrisma.user.findUniqueOrThrow).not.toHaveBeenCalled();
       expect(mockPrisma.user.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('refuses a sign-in whose linked row lost this login meanwhile, writing nothing (#983)', async () => {
+      const existingUser = createPlayer({ email: 'kid@example.com', workosUserId: 'workos_kid' });
+      (mockPrisma.user.findUnique as jest.Mock)
+        .mockResolvedValueOnce(existingUser) // by workosUserId, read before the conversion committed
+        .mockResolvedValueOnce({ deletedAt: null, workosUserId: null }); // re-read: live, but un-linked
+      (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+
+      await expect(
+        WorkOSService.syncUser({ id: 'workos_kid', email: 'kid@example.com', emailVerified: true })
+      ).rejects.toThrow(UnauthorizedError);
+      expect(mockPrisma.user.updateMany).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.user.create).not.toHaveBeenCalled();
+      expect(mockPrisma.user.findMany).not.toHaveBeenCalled();
+    });
+
+    it('continues to the email branches when the linked row was relinked to another login meanwhile', async () => {
+      const existingUser = createPlayer({ email: 'moved@example.com', workosUserId: 'workos_old' });
+      (mockPrisma.user.findUnique as jest.Mock)
+        .mockResolvedValueOnce(existingUser) // by workosUserId, before the relink committed
+        .mockResolvedValueOnce({ deletedAt: null, workosUserId: 'workos_other' }); // re-read: relinked
+      (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+      // The email lookup finds the row, now bound to the other identity: the
+      // usual refusal for an email owned by another login.
+      (mockPrisma.user.findMany as jest.Mock).mockResolvedValueOnce([{ ...existingUser, workosUserId: 'workos_other' }]);
+
+      await expect(
+        WorkOSService.syncUser({ id: 'workos_old', email: 'moved@example.com', emailVerified: true })
+      ).rejects.toThrow(ConflictError);
+      expect(mockPrisma.user.findMany).toHaveBeenCalled();
+      expect(mockPrisma.user.create).not.toHaveBeenCalled();
     });
 
     it('should claim a pre-provisioned row by email and clear managed-player ownership (audit #2)', async () => {
@@ -467,9 +550,8 @@ describe('WorkOSService', () => {
         emailVerified: true,
       };
 
-      (mockPrisma.user.findUnique as jest.Mock)
-        .mockResolvedValueOnce(null)          // by workosUserId
-        .mockResolvedValueOnce(existingUser); // by email
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValueOnce(null); // by workosUserId
+      (mockPrisma.user.findMany as jest.Mock).mockResolvedValueOnce([existingUser]); // by email
       (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
       (mockPrisma.user.findUniqueOrThrow as jest.Mock).mockResolvedValue({
         ...existingUser,
@@ -499,9 +581,8 @@ describe('WorkOSService', () => {
 
     it('creates a fresh account when the pre-provisioned row was deleted or claimed during sign-in (#444 D9)', async () => {
       const existingUser = { ...createPlayer({ email: 'user@example.com' }), workosUserId: null };
-      (mockPrisma.user.findUnique as jest.Mock)
-        .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce(existingUser);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValueOnce(null); // by workosUserId
+      (mockPrisma.user.findMany as jest.Mock).mockResolvedValueOnce([existingUser]); // by email
       (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
       (mockPrisma.user.create as jest.Mock).mockResolvedValue({ ...existingUser, id: 'fresh-id', workosUserId: 'workos_456' });
 
@@ -515,9 +596,8 @@ describe('WorkOSService', () => {
       process.env.ADMIN_EMAILS = 'Boss@Example.com';
       const existingUser = { ...createPlayer({ email: 'boss@example.com' }), workosUserId: null };
 
-      (mockPrisma.user.findUnique as jest.Mock)
-        .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce(existingUser);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValueOnce(null); // by workosUserId
+      (mockPrisma.user.findMany as jest.Mock).mockResolvedValueOnce([existingUser]); // by email
       (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
       (mockPrisma.user.findUniqueOrThrow as jest.Mock).mockResolvedValue({ ...existingUser, role: 'ADMIN' });
 
@@ -531,15 +611,87 @@ describe('WorkOSService', () => {
     it('should refuse (409) to link an email already bound to a different WorkOS identity', async () => {
       const existingUser = createPlayer({ email: 'taken@example.com', workosUserId: 'workos_other' });
 
-      (mockPrisma.user.findUnique as jest.Mock)
-        .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce(existingUser);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValueOnce(null); // by workosUserId
+      (mockPrisma.user.findMany as jest.Mock).mockResolvedValueOnce([existingUser]); // by email
 
       await expect(
         WorkOSService.syncUser({ id: 'workos_new', email: 'taken@example.com', emailVerified: true })
       ).rejects.toBeInstanceOf(ConflictError);
       expect(mockPrisma.user.updateMany).not.toHaveBeenCalled();
       expect(mockPrisma.user.create).not.toHaveBeenCalled();
+    });
+
+    describe('unverified email (#907)', () => {
+      const managedRow = (): UserData & { isManaged: boolean; managedById: string | null } => ({
+        ...createPlayer({ email: 'kid@example.com', name: 'Roster Name' }),
+        workosUserId: null,
+        isManaged: true,
+        managedById: 'coach-1',
+      });
+
+      it('refuses (403 email_not_verified) to claim a pre-provisioned row and writes nothing', async () => {
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValueOnce(null); // by workosUserId
+        (mockPrisma.user.findMany as jest.Mock).mockResolvedValueOnce([managedRow()]); // by email
+
+        const attempt = WorkOSService.syncUser({ id: 'workos_unverified', email: 'kid@example.com', emailVerified: false });
+
+        await expect(attempt).rejects.toBeInstanceOf(EmailNotVerifiedError);
+        await expect(attempt).rejects.toMatchObject({ statusCode: 403, code: 'email_not_verified' });
+        expect(mockPrisma.user.updateMany).not.toHaveBeenCalled();
+        expect(mockPrisma.user.update).not.toHaveBeenCalled();
+        expect(mockPrisma.user.create).not.toHaveBeenCalled();
+      });
+
+      it('does not let an allowlisted admin email bypass the check', async () => {
+        process.env.ADMIN_EMAILS = 'kid@example.com';
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValueOnce(null);
+        (mockPrisma.user.findMany as jest.Mock).mockResolvedValueOnce([managedRow()]);
+
+        await expect(
+          WorkOSService.syncUser({ id: 'workos_unverified', email: 'kid@example.com', emailVerified: false })
+        ).rejects.toBeInstanceOf(EmailNotVerifiedError);
+        expect(mockPrisma.user.updateMany).not.toHaveBeenCalled();
+      });
+
+      it('still answers 409 when the email is linked to a different identity', async () => {
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValueOnce(null);
+        (mockPrisma.user.findMany as jest.Mock).mockResolvedValueOnce([
+          createPlayer({ email: 'kid@example.com', workosUserId: 'workos_other' }),
+        ]);
+
+        await expect(
+          WorkOSService.syncUser({ id: 'workos_unverified', email: 'kid@example.com', emailVerified: false })
+        ).rejects.toBeInstanceOf(ConflictError);
+      });
+
+      it('still refreshes an already-linked user (the gate is only on the claim)', async () => {
+        const linked = createPlayer({ email: 'linked@example.com', workosUserId: 'workos_linked', profilePictureUrl: 'x' });
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValueOnce(linked);
+        (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+        (mockPrisma.user.findUniqueOrThrow as jest.Mock).mockResolvedValue({ ...linked, emailVerified: false });
+
+        const result = await WorkOSService.syncUser({ id: 'workos_linked', email: 'linked@example.com', emailVerified: false });
+
+        expect(result.claimedInvite).toBe(false);
+        expect(mockPrisma.user.updateMany).toHaveBeenCalledWith({
+          where: { id: linked.id, deletedAt: null, workosUserId: 'workos_linked' },
+          data: { emailVerified: false },
+        });
+      });
+
+      it('still creates a brand-new account (no row to claim)', async () => {
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(null);
+        (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([]);
+        const created = createPlayer({ email: 'new@example.com', workosUserId: 'workos_new' });
+        (mockPrisma.user.create as jest.Mock).mockResolvedValue(created);
+
+        const result = await WorkOSService.syncUser({ id: 'workos_new', email: 'new@example.com', emailVerified: false });
+
+        expect(result).toEqual({ user: created, claimedInvite: false, wasManaged: false });
+        expect(mockPrisma.user.create).toHaveBeenCalledWith({
+          data: expect.objectContaining({ workosUserId: 'workos_new', emailVerified: false }),
+        });
+      });
     });
 
     it('should map a unique-constraint race on create to ConflictError (not 500)', async () => {
@@ -617,9 +769,8 @@ describe('WorkOSService', () => {
         managedById: isManaged ? 'coach-1' : null,
       };
       const claimedRow = { ...existingUser, workosUserId: 'workos_456', isManaged: false, managedById: null };
-      (mockPrisma.user.findUnique as jest.Mock)
-        .mockResolvedValueOnce(null) // by workosUserId
-        .mockResolvedValueOnce(existingUser); // by email
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValueOnce(null); // by workosUserId
+      (mockPrisma.user.findMany as jest.Mock).mockResolvedValueOnce([existingUser]); // by email
       (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
       (mockPrisma.user.findUniqueOrThrow as jest.Mock).mockResolvedValue(claimedRow);
 
@@ -634,9 +785,8 @@ describe('WorkOSService', () => {
 
     it('reports a lost claim race that fell through to a create as not claimed', async () => {
       const existingUser = { ...createPlayer({ email: 'user@example.com' }), workosUserId: null, isManaged: true };
-      (mockPrisma.user.findUnique as jest.Mock)
-        .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce(existingUser);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValueOnce(null); // by workosUserId
+      (mockPrisma.user.findMany as jest.Mock).mockResolvedValueOnce([existingUser]); // by email
       (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
       (mockPrisma.user.create as jest.Mock).mockResolvedValue({ ...existingUser, id: 'fresh-id' });
 
@@ -649,6 +799,303 @@ describe('WorkOSService', () => {
       expect(result.user).toHaveProperty('id', 'fresh-id');
       expect(result.claimedInvite).toBe(false);
       expect(result.wasManaged).toBe(false);
+    });
+
+    // Case-insensitive email (#955).
+    describe('email case (#955)', () => {
+      it('stores a new account under the trimmed, lower-cased WorkOS email', async () => {
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(null);
+        (mockPrisma.user.create as jest.Mock).mockResolvedValue(createPlayer());
+
+        await WorkOSService.syncUser({ id: 'workos_new', email: '  New.Person@Example.COM ', emailVerified: true });
+
+        expect(mockPrisma.user.findMany).toHaveBeenCalledWith({
+          where: { email: { equals: 'new.person@example.com', mode: 'insensitive' }, deletedAt: null },
+          take: 2,
+        });
+        expect(mockPrisma.user.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ email: 'new.person@example.com', name: 'new.person' }),
+          })
+        );
+      });
+
+      it('escapes LIKE wildcards in the email lookup', async () => {
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(null);
+        (mockPrisma.user.create as jest.Mock).mockResolvedValue(createPlayer());
+
+        await WorkOSService.syncUser({ id: 'workos_new', email: 'first_last@example.com', emailVerified: true });
+
+        expect(mockPrisma.user.findMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: { email: { equals: 'first\\_last@example.com', mode: 'insensitive' }, deletedAt: null },
+          })
+        );
+      });
+
+      it('claims a lower-case pre-provisioned row for a mixed-case WorkOS email', async () => {
+        const row = { ...createPlayer({ email: 'kid@example.com' }), workosUserId: null, isManaged: true };
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValueOnce(null);
+        (mockPrisma.user.findMany as jest.Mock).mockResolvedValueOnce([row]);
+        (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+        (mockPrisma.user.findUniqueOrThrow as jest.Mock).mockResolvedValue({ ...row, workosUserId: 'workos_kid' });
+
+        const result = await WorkOSService.syncUser({ id: 'workos_kid', email: 'Kid@Example.com', emailVerified: true });
+
+        expect(result.claimedInvite).toBe(true);
+        expect(mockPrisma.user.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({ where: { id: row.id, workosUserId: null, deletedAt: null } })
+        );
+        expect(mockPrisma.user.create).not.toHaveBeenCalled();
+      });
+
+      it('refuses (409) when two live rows differ only by case, and writes nothing', async () => {
+        const a = { ...createPlayer({ email: 'Dup@example.com' }), workosUserId: null };
+        const b = { ...createPlayer({ email: 'dup@example.com' }), workosUserId: null };
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValueOnce(null);
+        (mockPrisma.user.findMany as jest.Mock).mockResolvedValueOnce([a, b]);
+
+        await expect(
+          WorkOSService.syncUser({ id: 'workos_dup', email: 'dup@example.com', emailVerified: true })
+        ).rejects.toBeInstanceOf(ConflictError);
+        expect(mockPrisma.user.updateMany).not.toHaveBeenCalled();
+        expect(mockPrisma.user.create).not.toHaveBeenCalled();
+      });
+
+      it('refuses (409) a WorkOS email change to an address another live row holds in another case', async () => {
+        const existingUser = createPlayer({ email: 'old@example.com', workosUserId: 'workos_123' });
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValueOnce(existingUser);
+        (mockPrisma.user.findFirst as jest.Mock).mockResolvedValueOnce({ id: 'other-row' });
+
+        await expect(
+          WorkOSService.syncUser({ id: 'workos_123', email: 'Bob@Example.com', emailVerified: true })
+        ).rejects.toBeInstanceOf(ConflictError);
+        expect(mockPrisma.user.findFirst).toHaveBeenCalledWith({
+          where: {
+            email: { equals: 'bob@example.com', mode: 'insensitive' },
+            deletedAt: null,
+            NOT: { id: existingUser.id },
+          },
+          select: { id: true },
+        });
+        expect(mockPrisma.user.updateMany).not.toHaveBeenCalled();
+      });
+
+      it('does not rewrite a linked legacy mixed-case email that differs from WorkOS by case only', async () => {
+        const existingUser = createPlayer({ email: 'Legacy@Example.com', workosUserId: 'workos_123' });
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValueOnce(existingUser);
+        (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+        (mockPrisma.user.findUniqueOrThrow as jest.Mock).mockResolvedValue(existingUser);
+
+        await WorkOSService.syncUser({ id: 'workos_123', email: 'legacy@example.com', emailVerified: true });
+
+        expect(mockPrisma.user.updateMany).toHaveBeenCalledWith({
+          where: { id: existingUser.id, deletedAt: null, workosUserId: 'workos_123' },
+          data: { emailVerified: true },
+        });
+      });
+    });
+
+    // WorkOS key cutover (#24): a row linked to an identity the current
+    // WorkOS environment does not know is relinked on a verified sign-in.
+    describe('relink after the WorkOS key cutover (#24)', () => {
+      const notFound = (): Error => Object.assign(new Error('Not Found'), { status: 404 });
+
+      function stagingLinkedRow(extra: Record<string, unknown> = {}): ReturnType<typeof createPlayer> {
+        return { ...createPlayer({ email: 'coach@example.com', workosUserId: 'user_staging_1' }), ...extra };
+      }
+
+      function arrange(row: ReturnType<typeof createPlayer>): void {
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValueOnce(null); // by the new production id
+        (mockPrisma.user.findMany as jest.Mock).mockResolvedValueOnce([row]); // by email
+      }
+
+      // The owner turns the relink on for the cutover window only.
+      beforeEach(() => {
+        process.env.WORKOS_RELINK_UNKNOWN_IDENTITIES = 'true';
+      });
+
+      afterEach(() => {
+        delete process.env.WORKOS_RELINK_UNKNOWN_IDENTITIES;
+        mockWorkOSClient.userManagement.getUser.mockReset();
+      });
+
+      it.each([undefined, 'false', '1'])(
+        'is off unless WORKOS_RELINK_UNKNOWN_IDENTITIES is exactly "true" (%s): 409, no WorkOS call',
+        async (flag) => {
+          if (flag === undefined) delete process.env.WORKOS_RELINK_UNKNOWN_IDENTITIES;
+          else process.env.WORKOS_RELINK_UNKNOWN_IDENTITIES = flag;
+          arrange(stagingLinkedRow());
+          const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+
+          await expect(
+            WorkOSService.syncUser({ id: 'user_prod_1', email: 'coach@example.com', emailVerified: true })
+          ).rejects.toBeInstanceOf(ConflictError);
+          expect(mockWorkOSClient.userManagement.getUser).not.toHaveBeenCalled();
+          expect(mockPrisma.user.updateMany).not.toHaveBeenCalled();
+          expect(warn).toHaveBeenCalledWith(
+            'Refusing to link WorkOS identity to an email owned by another identity',
+            expect.objectContaining({ reason: 'disabled' })
+          );
+          warn.mockRestore();
+        }
+      );
+
+      it('moves the row to the new identity when the old one is unknown here and the email is verified', async () => {
+        const row = stagingLinkedRow({ role: 'ADMIN', isManaged: false });
+        const relinkedRow = { ...row, workosUserId: 'user_prod_1' };
+        arrange(row);
+        mockWorkOSClient.userManagement.getUser.mockRejectedValueOnce(notFound());
+        (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+        (mockPrisma.user.findUniqueOrThrow as jest.Mock).mockResolvedValue(relinkedRow);
+        const info = spyOnInfo();
+
+        const result = await WorkOSService.syncUser({ id: 'user_prod_1', email: 'coach@example.com', emailVerified: true });
+
+        expect(mockWorkOSClient.userManagement.getUser).toHaveBeenCalledWith('user_staging_1');
+        // Compare-and-set on the stale id; role, memberships, name and
+        // isManaged are untouched.
+        expect(mockPrisma.user.updateMany).toHaveBeenCalledWith({
+          where: { id: row.id, workosUserId: 'user_staging_1', deletedAt: null },
+          data: { workosUserId: 'user_prod_1', emailVerified: true },
+        });
+        expect(result).toEqual({ user: relinkedRow, claimedInvite: false, wasManaged: false });
+        expect(domainEvent(info, 'Relinked user to a new WorkOS identity')).toEqual({
+          userId: row.id,
+          previousWorkosUserId: 'user_staging_1',
+        });
+        expect(mockPrisma.user.create).not.toHaveBeenCalled();
+      });
+
+      it('fills in the avatar on relink only when the row has none', async () => {
+        const row = stagingLinkedRow({ profilePictureUrl: null });
+        arrange(row);
+        mockWorkOSClient.userManagement.getUser.mockRejectedValueOnce(notFound());
+        (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+        (mockPrisma.user.findUniqueOrThrow as jest.Mock).mockResolvedValue(row);
+
+        await WorkOSService.syncUser({
+          id: 'user_prod_1',
+          email: 'coach@example.com',
+          emailVerified: true,
+          profilePictureUrl: 'https://workos.example.com/pic.jpg',
+        });
+
+        expect(mockPrisma.user.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ profilePictureUrl: 'https://workos.example.com/pic.jpg' }),
+          })
+        );
+      });
+
+      it('refuses (409) when the old identity still exists in this environment', async () => {
+        arrange(stagingLinkedRow());
+        mockWorkOSClient.userManagement.getUser.mockResolvedValueOnce({ id: 'user_staging_1' });
+
+        await expect(
+          WorkOSService.syncUser({ id: 'user_prod_1', email: 'coach@example.com', emailVerified: true })
+        ).rejects.toBeInstanceOf(ConflictError);
+        expect(mockPrisma.user.updateMany).not.toHaveBeenCalled();
+      });
+
+      it('refuses (409) an unverified email without asking WorkOS', async () => {
+        arrange(stagingLinkedRow());
+
+        await expect(
+          WorkOSService.syncUser({ id: 'user_prod_1', email: 'coach@example.com', emailVerified: false })
+        ).rejects.toBeInstanceOf(ConflictError);
+        expect(mockWorkOSClient.userManagement.getUser).not.toHaveBeenCalled();
+        expect(mockPrisma.user.updateMany).not.toHaveBeenCalled();
+      });
+
+      it('refuses (409) when the row moved to another identity between the read and the relink', async () => {
+        const row = stagingLinkedRow();
+        arrange(row);
+        mockWorkOSClient.userManagement.getUser.mockRejectedValueOnce(notFound());
+        (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValueOnce({ ...row, workosUserId: 'user_someone_else' });
+        const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+
+        await expect(
+          WorkOSService.syncUser({ id: 'user_prod_1', email: 'coach@example.com', emailVerified: true })
+        ).rejects.toBeInstanceOf(ConflictError);
+        expect(mockPrisma.user.findUniqueOrThrow).not.toHaveBeenCalled();
+        expect(mockPrisma.user.create).not.toHaveBeenCalled();
+        expect(warn).toHaveBeenCalledWith(
+          'Refusing to link WorkOS identity to an email owned by another identity',
+          { userId: row.id, reason: 'row_changed' }
+        );
+        warn.mockRestore();
+      });
+
+      it('treats a lost race to the same identity (a retried first sign-in) as success', async () => {
+        const row = stagingLinkedRow();
+        const relinkedRow = { ...row, workosUserId: 'user_prod_1' };
+        arrange(row);
+        mockWorkOSClient.userManagement.getUser.mockRejectedValueOnce(notFound());
+        (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValueOnce(relinkedRow);
+
+        const result = await WorkOSService.syncUser({ id: 'user_prod_1', email: 'coach@example.com', emailVerified: true });
+
+        expect(result).toEqual({ user: relinkedRow, claimedInvite: false, wasManaged: false });
+        expect(mockPrisma.user.findUnique).toHaveBeenLastCalledWith({ where: { id: row.id } });
+      });
+
+      it.each([
+        { label: 'an unverified email', verified: false, exists: false, reason: 'email_unverified' },
+        { label: 'an old identity that still exists', verified: true, exists: true, reason: 'identity_exists' },
+      ])('logs why it refused: $label', async ({ verified, exists, reason }) => {
+        arrange(stagingLinkedRow());
+        if (exists) mockWorkOSClient.userManagement.getUser.mockResolvedValueOnce({ id: 'user_staging_1' });
+        const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+
+        await expect(
+          WorkOSService.syncUser({ id: 'user_prod_1', email: 'coach@example.com', emailVerified: verified })
+        ).rejects.toBeInstanceOf(ConflictError);
+        expect(warn).toHaveBeenCalledWith(
+          'Refusing to link WorkOS identity to an email owned by another identity',
+          expect.objectContaining({ reason })
+        );
+        warn.mockRestore();
+      });
+
+      it.each([
+        { label: 'a WorkOS 5xx', error: Object.assign(new Error('Bad Gateway'), { status: 502 }) },
+        { label: 'a network error', error: new Error('ECONNRESET') },
+      ])('answers 503 and writes nothing on $label from the identity check', async ({ error }) => {
+        arrange(stagingLinkedRow());
+        mockWorkOSClient.userManagement.getUser.mockRejectedValueOnce(error);
+
+        await expect(
+          WorkOSService.syncUser({ id: 'user_prod_1', email: 'coach@example.com', emailVerified: true })
+        ).rejects.toBeInstanceOf(ServiceUnavailableError);
+        expect(mockPrisma.user.updateMany).not.toHaveBeenCalled();
+      });
+    });
+  });
+
+  describe('identityExists', () => {
+    it('is true when WorkOS returns the user', async () => {
+      mockWorkOSClient.userManagement.getUser.mockResolvedValueOnce({ id: 'user_1' });
+
+      await expect(WorkOSService.identityExists('user_1')).resolves.toBe(true);
+    });
+
+    it('is false only on a 404', async () => {
+      mockWorkOSClient.userManagement.getUser.mockRejectedValueOnce(
+        Object.assign(new Error('Not Found'), { status: 404 })
+      );
+
+      await expect(WorkOSService.identityExists('user_1')).resolves.toBe(false);
+    });
+
+    it('throws ServiceUnavailableError on any other failure', async () => {
+      mockWorkOSClient.userManagement.getUser.mockRejectedValueOnce(
+        Object.assign(new Error('Unauthorized'), { status: 401 })
+      );
+
+      await expect(WorkOSService.identityExists('user_1')).rejects.toBeInstanceOf(ServiceUnavailableError);
     });
   });
 

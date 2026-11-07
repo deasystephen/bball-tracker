@@ -9,6 +9,10 @@
  * The line carries `userId` when the request authenticated (#617): the
  * middleware is mounted before any router, but it logs on `finish`, by which
  * time `authenticate` has set `req.user`. `/health` is never logged.
+ *
+ * It carries `client` when the request sent a valid `X-Hooplings-Client`
+ * (`request-headers.ts`, #963): which app build or the web site made it. An
+ * invalid value was already dropped by `requestContext`.
  */
 
 import { Request, Response, NextFunction } from 'express';
@@ -47,6 +51,7 @@ export function requestLogger(req: Request, res: Response, next: NextFunction): 
       statusCode: res.statusCode,
       duration,
       requestId: req.requestId,
+      client: req.hooplingsClient,
       ...(req.user ? { userId: req.user.id } : {}),
     });
   });

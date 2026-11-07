@@ -16,6 +16,7 @@ import { ThemedText } from '../ThemedText';
 import { useTheme } from '../../hooks/useTheme';
 import { spacing } from '../../theme';
 import { MIN_TOUCH_TARGET } from '../../utils/touch-target';
+import { useTranslation } from '../../i18n';
 
 export type StatType = 'OREB' | 'DREB' | 'STL' | 'BLK' | 'AST';
 
@@ -51,6 +52,7 @@ const StatButtonItem: React.FC<StatButtonItemProps> = ({
   textColor,
   onPress,
 }) => {
+  const { t } = useTranslation();
   const bgOpacity = useSharedValue(0);
   const iconScale = useSharedValue(1);
 
@@ -94,7 +96,7 @@ const StatButtonItem: React.FC<StatButtonItemProps> = ({
       onPress={handlePress}
       disabled={disabled}
       accessibilityRole="button"
-      accessibilityLabel={`Record ${stat.label}`}
+      accessibilityLabel={t('tracker.recordStat', { stat: stat.label })}
       accessibilityState={{ disabled }}
     >
       <Animated.View style={iconAnimatedStyle}>
@@ -125,19 +127,20 @@ export const StatButtons: React.FC<StatButtonsProps> = React.memo(function StatB
   disabled = false,
 }) {
   const { colors } = useTheme();
+  const { t } = useTranslation();
 
   const stats: StatButtonConfig[] = useMemo(() => [
-    { type: 'OREB', label: 'Off Reb', shortLabel: 'OREB', icon: 'arrow-up-circle', color: colors.success },
-    { type: 'DREB', label: 'Def Reb', shortLabel: 'DREB', icon: 'arrow-down-circle', color: colors.info },
-    { type: 'AST', label: 'Assist', shortLabel: 'AST', icon: 'people', color: colors.primary },
-    { type: 'STL', label: 'Steal', shortLabel: 'STL', icon: 'hand-left', color: colors.warning },
-    { type: 'BLK', label: 'Block', shortLabel: 'BLK', icon: 'stop-circle', color: colors.error },
-  ], [colors]);
+    { type: 'OREB', label: t('tracker.stat.offReb'), shortLabel: t('tracker.stat.offRebShort'), icon: 'arrow-up-circle', color: colors.success },
+    { type: 'DREB', label: t('tracker.stat.defReb'), shortLabel: t('tracker.stat.defRebShort'), icon: 'arrow-down-circle', color: colors.info },
+    { type: 'AST', label: t('tracker.stat.assist'), shortLabel: t('tracker.stat.assistShort'), icon: 'people', color: colors.primary },
+    { type: 'STL', label: t('tracker.stat.steal'), shortLabel: t('tracker.stat.stealShort'), icon: 'hand-left', color: colors.warning },
+    { type: 'BLK', label: t('tracker.stat.block'), shortLabel: t('tracker.stat.blockShort'), icon: 'stop-circle', color: colors.error },
+  ], [colors, t]);
 
   return (
     <View style={styles.container}>
       <ThemedText variant="captionBold" color="textSecondary" style={styles.label}>
-        Other Stats
+        {t('tracker.otherStats')}
       </ThemedText>
       <View style={styles.buttonGrid}>
         {stats.map((stat) => (
@@ -154,7 +157,7 @@ export const StatButtons: React.FC<StatButtonsProps> = React.memo(function StatB
       </View>
       {disabled && (
         <ThemedText variant="caption" color="textTertiary" style={styles.hint}>
-          Select a player first
+          {t('tracker.selectPlayerFirst')}
         </ThemedText>
       )}
     </View>

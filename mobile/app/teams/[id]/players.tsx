@@ -7,6 +7,8 @@
  * already has an account → invitation only (appears in the "Invited" section
  * until they accept). An optional parent email invites a guardian in the same
  * step (rostered cases only — the server refuses it for existing accounts).
+ * "Is this player 13 or older?" gates the player email: No (the default on a
+ * youth age group, utils/age-group.ts) means guardian email only (#982).
  *
  * Chips derive via utils/roster-status.ts (never inline). Resend targets only
  * PENDING rows; "Invite"/"Resend" are the same supersede create call.
@@ -36,6 +38,7 @@ import {
   ErrorState,
   Card,
   AvatarPicker,
+  SortPills,
 } from '../../../components';
 import {
   useTeam,
@@ -71,6 +74,7 @@ import { isInvitationExpired } from '../../../utils/invitation-expiry';
 import { RelationshipChips } from '../../../components/RelationshipChips';
 import { ActionMenu, type ActionMenuItem } from '../../../components/ActionMenu';
 import { displayName } from '../../../utils/display-name';
+import { isUnder13AgeGroup } from '../../../utils/age-group';
 import type { GuardianRelationship } from '../../../../shared/types';
 import { useToast } from '../../../components/Toast';
 import { useTheme } from '../../../hooks/useTheme';
@@ -80,6 +84,7 @@ import { getHorizontalPadding, getResponsiveValue } from '../../../utils/respons
 import { MIN_TOUCH_TARGET, touchTargetHitSlop } from '../../../utils/touch-target';
 import { Ionicons } from '@expo/vector-icons';
 import { uploadAvatar } from '../../../services/upload-service';
+import { uploadAwareErrorMessage } from '../../../utils/upload-error';
 import { useAccessGuard } from '../../../hooks/useAccessGuard';
 import { useAuthUser } from '../../../store/auth-store';
 import { useGoBack } from '../../../hooks/useGoBack';
@@ -105,13 +110,14 @@ function StatusChip({
   playerName: string;
   colors: ChipPalette;
 }) {
+  const { t } = useTranslation();
   const color = rosterStatusColor(status, colors);
   return (
     <View
       style={[styles.chip, { borderColor: color }]}
       // Row-anchored so an E2E assertion can't false-pass off a neighboring
       // row's chip (red-team review) — Maestro asserts this exact string.
-      accessibilityLabel={`${playerName} status: ${rosterStatusLabel(status)}`}
+      accessibilityLabel={t('roster.statusA11y', { name: playerName, status: rosterStatusLabel(status) })}
     >
       <ThemedText variant="caption" style={{ color }}>
         {rosterStatusLabel(status)}
@@ -130,11 +136,12 @@ function EmailIssueChip({
   playerName: string;
   color: string;
 }) {
+  const { t } = useTranslation();
   return (
     <View
       style={[styles.chip, { borderColor: color }]}
       // Row-anchored, like StatusChip.
-      accessibilityLabel={`${playerName} email: ${emailDeliveryIssueLabel(issue)}`}
+      accessibilityLabel={t('roster.emailIssueA11y', { name: playerName, issue: emailDeliveryIssueLabel(issue) })}
     >
       <ThemedText variant="caption" style={{ color }}>
         {emailDeliveryIssueLabel(issue)}
@@ -145,6 +152,12 @@ function EmailIssueChip({
 
 /** Same shape the backend's `z.string().email()` accepts for everyday addresses. */
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/**
+ * Answer to "Is this player 13 or older?" in Add Player (#982). Drives the form
+ * only: never sent to the API and never stored (it would be age data about a child).
+ */
+type AgeAnswer = 'yes' | 'no';
 
 /** Roster statuses where the player is still waiting on an invitation email. */
 const AWAITING_INVITE: ReadonlySet<RosterStatus> = new Set(['invited', 'invite_expired', 'not_invited']);
@@ -168,6 +181,11 @@ export default function ManagePlayersScreen() {
   const [guardianEmail, setGuardianEmail] = useState('');
   const [guardianRelationship, setGuardianRelationship] =
     useState<GuardianRelationship>('GUARDIAN');
+  // The coach's explicit answer; null falls back to the team-derived default.
+  const [ageAnswerChoice, setAgeAnswerChoice] = useState<AgeAnswer | null>(null);
+  // Email errors show once the field has been left, not from the first keystroke.
+  const [playerEmailTouched, setPlayerEmailTouched] = useState(false);
+  const [guardianEmailTouched, setGuardianEmailTouched] = useState(false);
   const [jerseyNumber, setJerseyNumber] = useState('');
   const [position, setPosition] = useState('');
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
@@ -182,6 +200,34 @@ export default function ManagePlayersScreen() {
   const [editEmail, setEditEmail] = useState('');
 
   const { data: team, isLoading, error, refetch } = useTeam(id);
+  // A youth age group ("U10", "5th Grade") defaults the question to No;
+  // otherwise there is no default and the form waits for an answer (#982).
+  const ageAnswer: AgeAnswer | null =
+    ageAnswerChoice ?? (isUnder13AgeGroup(team?.ageGroup) ? 'no' : null);
+  const isUnder13 = ageAnswer === 'no';
+  // Under 13 there is never a player email, whatever is left in state.
+  const trimmedPlayerEmail = isUnder13 ? '' : playerEmail.trim();
+  const trimmedGuardianEmail = guardianEmail.trim();
+  // A typed email must be well formed (player: Yes branch; parent: either
+  // branch); under 13 the parent email is also required.
+  const playerEmailInvalid = trimmedPlayerEmail !== '' && !EMAIL_PATTERN.test(trimmedPlayerEmail);
+  const guardianEmailInvalid =
+    trimmedGuardianEmail !== '' && !EMAIL_PATTERN.test(trimmedGuardianEmail);
+  // The submit button is disabled until this holds (before any avatar upload);
+  // the name field, the unanswered question and the inline email errors show
+  // what is missing.
+  const canSubmitAddPlayer =
+    !!name.trim() &&
+    ageAnswer !== null &&
+    !playerEmailInvalid &&
+    !guardianEmailInvalid &&
+    (!isUnder13 || trimmedGuardianEmail !== '');
+
+  const selectAgeAnswer = (answer: AgeAnswer) => {
+    setAgeAnswerChoice(answer);
+    // Under 13: the player gets no login, so drop any player email typed so far.
+    if (answer === 'no') setPlayerEmail('');
+  };
   const removePlayer = useRemovePlayerFromTeam();
   const updateTeamMember = useUpdateTeamMember();
   const updatePlayer = useUpdatePlayer();
@@ -222,6 +268,9 @@ export default function ManagePlayersScreen() {
     setPlayerEmail('');
     setGuardianEmail('');
     setGuardianRelationship('GUARDIAN');
+    setAgeAnswerChoice(null);
+    setPlayerEmailTouched(false);
+    setGuardianEmailTouched(false);
     setJerseyNumber('');
     setPosition('');
     setAvatarUri(null);
@@ -230,21 +279,15 @@ export default function ManagePlayersScreen() {
 
   const toastAddResult = (result: AddRosterPlayerResponse, hadGuardianEmail: boolean) => {
     if (!result.rostered && result.invited) {
-      toast.showToast(
-        "This email already has an account — invitation sent. They'll appear on the roster once they accept.",
-        'info'
-      );
+      toast.showToast(t('roster.addedExistingAccount'), 'info');
     } else if (result.invited) {
-      toast.showToast('Player added to roster and invitation sent', 'success');
+      toast.showToast(t('roster.addedAndInvited'), 'success');
     } else {
-      toast.showToast('Player added to roster', 'success');
+      toast.showToast(t('roster.added'), 'success');
     }
 
     if (result.emails?.player === false) {
-      toast.showToast(
-        'The invitation email failed to send — use Resend on the roster to retry.',
-        'error'
-      );
+      toast.showToast(t('roster.addEmailFailed'), 'error');
     }
     if (hadGuardianEmail) {
       if (!result.guardianInvited && result.guardianReason) {
@@ -256,12 +299,7 @@ export default function ManagePlayersScreen() {
   };
 
   const handleAddPlayer = async () => {
-    if (!name.trim()) {
-      Alert.alert('Error', 'Player name is required');
-      return;
-    }
-    const trimmedGuardianEmail = guardianEmail.trim();
-
+    if (!canSubmitAddPlayer) return;
     try {
       let profilePictureUrl: string | undefined;
       if (avatarUri) {
@@ -274,7 +312,8 @@ export default function ManagePlayersScreen() {
         teamId: id,
         data: {
           name: name.trim(),
-          playerEmail: playerEmail.trim() || undefined,
+          // Never a player email for a player under 13 (#982).
+          playerEmail: trimmedPlayerEmail || undefined,
           guardianEmail: trimmedGuardianEmail || undefined,
           guardianRelationship: trimmedGuardianEmail ? guardianRelationship : undefined,
           jerseyNumber: jerseyNumber ? parseInt(jerseyNumber, 10) : undefined,
@@ -289,16 +328,13 @@ export default function ManagePlayersScreen() {
       toastAddResult(result, !!trimmedGuardianEmail);
     } catch (err) {
       setUploadingAvatar(false);
-      toast.showToast(
-        err instanceof Error ? err.message : 'Failed to add player',
-        'error'
-      );
+      toast.showToast(uploadAwareErrorMessage(err, t, 'roster.addFailed'), 'error');
     }
   };
 
   const handleInviteSelectedPlayer = async () => {
     if (!selectedPlayer) {
-      Alert.alert('Error', 'Please select a player');
+      Alert.alert(t('common.error'), t('roster.selectPlayer'));
       return;
     }
 
@@ -316,15 +352,12 @@ export default function ManagePlayersScreen() {
       setPosition('');
       setSelectedPlayer(null);
       setSearchQuery('');
-      toast.showToast('Invitation sent to player', 'success');
+      toast.showToast(t('roster.invitationSent'), 'success');
       if (response.emailSent === false) {
-        toast.showToast('The invitation email failed to send — use Resend to retry.', 'error');
+        toast.showToast(t('roster.inviteEmailFailed'), 'error');
       }
     } catch (err) {
-      toast.showToast(
-        err instanceof Error ? err.message : 'Failed to send invitation',
-        'error'
-      );
+      toast.showToast(err instanceof Error ? err.message : t('guardians.inviteFailed'), 'error');
     }
   };
 
@@ -336,38 +369,32 @@ export default function ManagePlayersScreen() {
         data: { playerId, supersede: true },
       });
       if (response.emailSent === false) {
-        toast.showToast(`Invitation refreshed, but the email to ${playerName} failed to send.`, 'error');
+        toast.showToast(t('roster.resendEmailFailed', { name: playerName }), 'error');
       } else if (response.emailSent === null) {
-        toast.showToast(`${playerName} has no email address on file.`, 'info');
+        toast.showToast(t('roster.noEmailOnFile', { name: playerName }), 'info');
       } else {
-        toast.showToast(`Invitation re-sent to ${playerName}`, 'success');
+        toast.showToast(t('roster.resent', { name: playerName }), 'success');
       }
     } catch (err) {
-      toast.showToast(
-        err instanceof Error ? err.message : 'Failed to resend invitation',
-        'error'
-      );
+      toast.showToast(err instanceof Error ? err.message : t('guardians.resendFailed'), 'error');
     }
   };
 
   const handleCancelInvite = (invitationId: string, playerName: string) => {
     Alert.alert(
-      'Cancel Invitation',
-      `Cancel the pending invitation for ${playerName}? They stay on the roster and can be re-invited later.`,
+      t('roster.cancelInvitationTitle'),
+      t('roster.cancelInvitationBody', { name: playerName }),
       [
-        { text: 'Keep invitation', style: 'cancel' },
+        { text: t('roster.keepInvitation'), style: 'cancel' },
         {
-          text: 'Cancel invitation',
+          text: t('roster.cancelInvitation'),
           style: 'destructive',
           onPress: async () => {
             try {
               await cancelInvitation.mutateAsync({ invitationId, teamId: id });
-              toast.showToast('Invitation cancelled', 'success');
+              toast.showToast(t('roster.invitationCancelled'), 'success');
             } catch (err) {
-              toast.showToast(
-                err instanceof Error ? err.message : 'Failed to cancel invitation',
-                'error'
-              );
+              toast.showToast(err instanceof Error ? err.message : t('roster.cancelInvitationFailed'), 'error');
             }
           },
         },
@@ -399,17 +426,22 @@ export default function ManagePlayersScreen() {
         },
       });
       setEditingMember(null);
-      toast.showToast('Player details updated', 'success');
+      toast.showToast(t('roster.detailsUpdated'), 'success');
     } catch (err) {
-      toast.showToast(
-        err instanceof Error ? err.message : 'Failed to update player',
-        'error'
-      );
+      toast.showToast(err instanceof Error ? err.message : t('roster.updateFailed'), 'error');
     }
   };
 
+  /**
+   * Corrects an address the player already has (it opens only from "Fix email
+   * address", which needs a bounced or complained address). It never attaches a
+   * first email to a player who has none: that would hand a possibly under-13
+   * player a login invite past the Add Player age question (#982). A player with
+   * no email is reached through "Invite a parent" instead.
+   */
   const openEmailEdit = (member: TeamMember) => {
-    setEditEmail(member.player.email ?? '');
+    if (!member.player.email) return;
+    setEditEmail(member.player.email);
     setEmailEditMember(member);
   };
 
@@ -417,6 +449,7 @@ export default function ManagePlayersScreen() {
   // The flag follows the address: saving the same one would change nothing
   // server-side, so the sheet only accepts a different, well-formed address.
   const canSaveEmail =
+    !!emailEditMember?.player.email &&
     EMAIL_PATTERN.test(trimmedEditEmail) &&
     trimmedEditEmail !== (emailEditMember?.player.email ?? '').trim().toLowerCase();
 
@@ -437,10 +470,10 @@ export default function ManagePlayersScreen() {
       const forbidden = (err as NormalizedApiError).apiError?.status === 403;
       toast.showToast(
         forbidden
-          ? `Only the coach who added ${playerName} can change this email address.`
+          ? t('roster.emailEditForbidden', { name: playerName })
           : err instanceof Error
             ? err.message
-            : 'Failed to update email address',
+            : t('roster.emailUpdateFailed'),
         'error'
       );
       return;
@@ -450,28 +483,25 @@ export default function ManagePlayersScreen() {
     if (resend) {
       await handleResendInvite(playerId, playerName);
     } else {
-      toast.showToast('Email address updated', 'success');
+      toast.showToast(t('roster.emailUpdated'), 'success');
     }
   };
 
   const handleRemovePlayer = (playerId: string, playerName: string) => {
     Alert.alert(
-      'Remove Player',
-      `Remove ${playerName} from the team?`,
+      t('roster.removeTitle'),
+      t('roster.removeBody', { name: playerName }),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         {
-          text: 'Remove',
+          text: t('guardians.remove'),
           style: 'destructive',
           onPress: async () => {
             try {
               await removePlayer.mutateAsync({ teamId: id, playerId });
-              toast.showToast('Player removed from team', 'success');
+              toast.showToast(t('roster.removed'), 'success');
             } catch (err) {
-              toast.showToast(
-                err instanceof Error ? err.message : 'Failed to remove player',
-                'error'
-              );
+              toast.showToast(err instanceof Error ? err.message : t('roster.removeFailed'), 'error');
             }
           },
         },
@@ -486,7 +516,7 @@ export default function ManagePlayersScreen() {
   if (error || !team) {
     return (
       <ErrorState
-        message={error instanceof Error ? error.message : 'Team not found'}
+        message={error instanceof Error ? error.message : t('teams.notFound')}
         onRetry={refetch}
         onBack={goBack}
       />
@@ -540,7 +570,7 @@ export default function ManagePlayersScreen() {
     // only Remove from team (which never touches stats).
     if (status === 'deleted') {
       items.push({
-        label: 'Remove player',
+        label: t('roster.menu.remove'),
         destructive: true,
         onPress: () => handleRemovePlayer(member.playerId, playerName),
       });
@@ -552,41 +582,41 @@ export default function ManagePlayersScreen() {
     // claimed account's email belongs to its login (#449).
     if (getEmailDeliveryIssue(member.player) && member.player.isManaged) {
       items.push({
-        label: 'Fix email address',
+        label: t('roster.menu.fixEmail'),
         onPress: () => openEmailEdit(member),
       });
     }
 
     if (status === 'invited' || status === 'invite_expired') {
       items.push({
-        label: 'Resend invitation',
+        label: t('roster.menu.resend'),
         onPress: () => handleResendInvite(member.playerId, playerName),
       });
     } else if (status === 'not_invited' && member.player.email) {
       // A never/no-longer-invited player needs an address on file
       items.push({
-        label: 'Send invitation',
+        label: t('roster.menu.send'),
         onPress: () => handleResendInvite(member.playerId, playerName),
       });
     }
     if (status === 'invited' && pendingInvitation) {
       items.push({
-        label: 'Cancel invitation',
+        label: t('roster.cancelInvitation'),
         onPress: () => handleCancelInvite(pendingInvitation.id, playerName),
       });
     }
     if (member.player.isManaged) {
       items.push({
-        label: 'Invite a parent',
+        label: t('guardians.inviteParent'),
         onPress: () => router.push(`/teams/${id}/players/${member.playerId}/guardians`),
       });
     }
     items.push({
-      label: 'Edit jersey & position',
+      label: t('roster.menu.editDetails'),
       onPress: () => openMemberEdit(member),
     });
     items.push({
-      label: 'Remove player',
+      label: t('roster.menu.remove'),
       destructive: true,
       onPress: () => handleRemovePlayer(member.playerId, playerName),
     });
@@ -630,7 +660,7 @@ export default function ManagePlayersScreen() {
             <TouchableOpacity
               onPress={() => setMenuForPlayerId(member.playerId)}
               accessibilityRole="button"
-              accessibilityLabel={`Player options: ${displayName(member.player)}`}
+              accessibilityLabel={t('roster.optionsA11y', { name: displayName(member.player) })}
               style={styles.rowButton}
             >
               <Ionicons name="ellipsis-horizontal" size={22} color={colors.textSecondary} />
@@ -684,7 +714,7 @@ export default function ManagePlayersScreen() {
           <TouchableOpacity
             onPress={() => handleResendInvite(invitation.playerId, displayName(invitation.player))}
             accessibilityRole="button"
-            accessibilityLabel={`Resend invitation: ${displayName(invitation.player)}`}
+            accessibilityLabel={t('roster.resendA11y', { name: displayName(invitation.player) })}
             style={styles.rowButton}
             disabled={createInvitation.isPending}
           >
@@ -693,7 +723,7 @@ export default function ManagePlayersScreen() {
           <TouchableOpacity
             onPress={() => handleCancelInvite(invitation.id, displayName(invitation.player))}
             accessibilityRole="button"
-            accessibilityLabel={`Cancel invitation: ${displayName(invitation.player)}`}
+            accessibilityLabel={t('roster.cancelA11y', { name: displayName(invitation.player) })}
             style={styles.rowButton}
             disabled={cancelInvitation.isPending}
           >
@@ -737,15 +767,15 @@ export default function ManagePlayersScreen() {
         {/* Add Player card */}
         <Card variant="elevated" style={styles.formCard}>
           <ThemedText variant="h4" heading style={styles.formTitle}>
-            {showAddForm ? 'Add Player' : 'Invite Player'}
+            {showAddForm ? t('teams.addPlayer') : t('roster.invitePlayer')}
           </ThemedText>
 
           {!showAddForm ? (
             <>
               {/* Search for an existing account */}
               <Input
-                label="Search Players"
-                placeholder="Search by name or email..."
+                label={t('roster.searchLabel')}
+                placeholder={t('roster.searchPlaceholder')}
                 value={searchQuery}
                 onChangeText={setSearchQuery}
                 autoCapitalize="none"
@@ -756,7 +786,7 @@ export default function ManagePlayersScreen() {
                 <View style={styles.searchResults}>
                   {searchingPlayers ? (
                     <ThemedText variant="caption" color="textTertiary" style={styles.searchText}>
-                      Searching...
+                      {t('roster.searching')}
                     </ThemedText>
                   ) : players.length > 0 ? (
                     players
@@ -787,7 +817,7 @@ export default function ManagePlayersScreen() {
                       ))
                   ) : (
                     <ThemedText variant="caption" color="textTertiary" style={styles.searchText}>
-                      No players found
+                      {t('roster.noPlayersFound')}
                     </ThemedText>
                   )}
                 </View>
@@ -800,7 +830,7 @@ export default function ManagePlayersScreen() {
                     <View style={styles.selectedPlayerDetails}>
                       <ThemedText variant="bodyBold">{displayName(selectedPlayer)}</ThemedText>
                       <ThemedText variant="caption" color="textSecondary">
-                        {selectedPlayer.email || 'Roster player'}
+                        {selectedPlayer.email || t('teams.rosterPlayer')}
                       </ThemedText>
                     </View>
                     <TouchableOpacity
@@ -820,7 +850,7 @@ export default function ManagePlayersScreen() {
                 <>
                   <Input
                     label={t('players.jerseyNumber')}
-                    placeholder="e.g., 23"
+                    placeholder={t('roster.jerseyPlaceholder')}
                     value={jerseyNumber}
                     onChangeText={(text) => setJerseyNumber(text.replace(/[^0-9]/g, ''))}
                     keyboardType="number-pad"
@@ -829,7 +859,7 @@ export default function ManagePlayersScreen() {
 
                   <Input
                     label={t('players.position')}
-                    placeholder="e.g., Forward, Guard"
+                    placeholder={t('roster.positionPlaceholder')}
                     value={position}
                     onChangeText={setPosition}
                     autoCapitalize="words"
@@ -840,14 +870,14 @@ export default function ManagePlayersScreen() {
               <View style={styles.actionButtons}>
                 {selectedPlayer ? (
                   <Button
-                    title="Send Invitation"
+                    title={t('roster.sendInvitation')}
                     onPress={handleInviteSelectedPlayer}
                     loading={createInvitation.isPending}
                     fullWidth
                   />
                 ) : (
                   <Button
-                    title="Add Player"
+                    title={t('teams.addPlayer')}
                     variant="outline"
                     onPress={() => setShowAddForm(true)}
                     fullWidth
@@ -870,28 +900,50 @@ export default function ManagePlayersScreen() {
               </View>
 
               <Input
-                label="Player Name"
-                placeholder="Enter player name"
+                label={t('players.name')}
+                placeholder={t('roster.namePlaceholder')}
                 value={name}
                 onChangeText={setName}
                 autoCapitalize="words"
                 testID="add-player-name-input"
               />
 
-              <Input
-                label="Player Email (optional)"
-                placeholder="Invitation is emailed when provided"
-                value={playerEmail}
-                onChangeText={setPlayerEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                autoCorrect={false}
-                testID="add-player-email-input"
-              />
+              {/* Under-13 steer (#980/#982): the answer only shapes this form. */}
+              <View style={styles.ageQuestion}>
+                <ThemedText variant="captionBold" style={styles.relationshipLabel}>
+                  {t('roster.ageQuestion')}
+                </ThemedText>
+                <SortPills
+                  options={[
+                    { key: 'yes', label: t('roster.ageYes') },
+                    { key: 'no', label: t('roster.ageNo') },
+                  ]}
+                  selected={ageAnswer}
+                  onSelect={selectAgeAnswer}
+                  labelPrefix={`${t('roster.ageQuestion')} `}
+                />
+              </View>
+
+              {ageAnswer === 'yes' && (
+                <Input
+                  label={t('roster.playerEmailLabel')}
+                  placeholder={t('roster.playerEmailPlaceholder')}
+                  value={playerEmail}
+                  onChangeText={setPlayerEmail}
+                  onBlur={() => setPlayerEmailTouched(true)}
+                  error={
+                    playerEmailTouched && playerEmailInvalid ? t('common.invalidEmail') : undefined
+                  }
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  testID="add-player-email-input"
+                />
+              )}
 
               <Input
                 label={t('players.jerseyNumber')}
-                placeholder="e.g., 23"
+                placeholder={t('roster.jerseyPlaceholder')}
                 value={jerseyNumber}
                 onChangeText={(text) => setJerseyNumber(text.replace(/[^0-9]/g, ''))}
                 keyboardType="number-pad"
@@ -901,15 +953,30 @@ export default function ManagePlayersScreen() {
 
               <Input
                 label={t('players.position')}
-                placeholder="e.g., Forward, Guard"
+                placeholder={t('roster.positionPlaceholder')}
                 value={position}
                 onChangeText={setPosition}
                 autoCapitalize="words"
               />
 
+              {/* Its own text, not the Input's helperText: Input shows
+                  `error || helperText`, and the explanation must stay
+                  visible while the address is invalid. */}
+              {isUnder13 && (
+                <ThemedText variant="footnote" color="textSecondary" style={styles.under13Hint}>
+                  {t('roster.under13Hint')}
+                </ThemedText>
+              )}
+
               <Input
-                label="Parent/Guardian Email (optional)"
-                placeholder="Invite a parent to follow this player"
+                label={
+                  isUnder13 ? t('roster.guardianEmailRequiredLabel') : t('roster.guardianEmailLabel')
+                }
+                placeholder={t('roster.guardianEmailPlaceholder')}
+                error={
+                  guardianEmailTouched && guardianEmailInvalid ? t('common.invalidEmail') : undefined
+                }
+                onBlur={() => setGuardianEmailTouched(true)}
                 value={guardianEmail}
                 onChangeText={setGuardianEmail}
                 keyboardType="email-address"
@@ -921,7 +988,7 @@ export default function ManagePlayersScreen() {
               {guardianEmail.trim() !== '' && (
                 <>
                   <ThemedText variant="captionBold" style={styles.relationshipLabel}>
-                    Relationship
+                    {t('guardians.relationshipLabel')}
                   </ThemedText>
                   <RelationshipChips
                     value={guardianRelationship}
@@ -932,15 +999,15 @@ export default function ManagePlayersScreen() {
 
               <View style={styles.actionButtons}>
                 <Button
-                  title={uploadingAvatar ? 'Uploading photo...' : 'Add Player'}
+                  title={uploadingAvatar ? t('roster.uploadingPhoto') : t('teams.addPlayer')}
                   onPress={handleAddPlayer}
                   loading={addRosterPlayer.isPending || uploadingAvatar}
-                  disabled={!name.trim()}
+                  disabled={!canSubmitAddPlayer}
                   fullWidth
                   testID="add-player-submit"
                 />
                 <Button
-                  title="Cancel"
+                  title={t('common.cancel')}
                   variant="outline"
                   onPress={resetAddForm}
                   style={styles.cancelButton}
@@ -954,13 +1021,13 @@ export default function ManagePlayersScreen() {
         {/* Current Players */}
         <View style={styles.section}>
           <ThemedText variant="h4" heading style={styles.sectionTitle}>
-            Current Players ({members.length})
+            {t('roster.currentPlayers', { count: members.length })}
           </ThemedText>
 
           {members.length === 0 ? (
             <Card variant="default" style={styles.emptyCard}>
               <ThemedText variant="body" color="textTertiary" style={styles.emptyText}>
-                No players added yet
+                {t('teams.noPlayersYet')}
               </ThemedText>
             </Card>
           ) : (
@@ -976,20 +1043,20 @@ export default function ManagePlayersScreen() {
         {teamInvitationsError != null && (
           <View style={styles.section}>
             <ThemedText variant="h4" heading style={styles.sectionTitle}>
-              Invited
+              {t('roster.invitedHeading')}
             </ThemedText>
             <Card variant="default" style={styles.playersCard}>
               <View style={styles.inviteErrorRow}>
                 <ThemedText variant="caption" color="textSecondary">
-                  Couldn’t load pending invitations.
+                  {t('roster.invitationsLoadFailed')}
                 </ThemedText>
                 <TouchableOpacity
                   onPress={() => refetchTeamInvitations()}
                   accessibilityRole="button"
-                  accessibilityLabel="Retry loading invitations"
+                  accessibilityLabel={t('roster.retryInvitationsA11y')}
                 >
                   <ThemedText variant="captionBold" style={{ color: colors.primary }}>
-                    Retry
+                    {t('roster.retry')}
                   </ThemedText>
                 </TouchableOpacity>
               </View>
@@ -999,10 +1066,10 @@ export default function ManagePlayersScreen() {
         {pendingNonMemberInvites.length > 0 && (
           <View style={styles.section}>
             <ThemedText variant="h4" heading style={styles.sectionTitle}>
-              Invited ({pendingNonMemberInvites.length})
+              {t('roster.invitedCount', { count: pendingNonMemberInvites.length })}
             </ThemedText>
             <ThemedText variant="caption" color="textTertiary" style={styles.sectionHint}>
-              These players already have accounts and join the roster when they accept.
+              {t('roster.invitedHint')}
             </ThemedText>
             <Card variant="default" style={styles.playersCard}>
               {pendingNonMemberInvites.map(renderPendingInviteRow)}
@@ -1043,7 +1110,7 @@ export default function ManagePlayersScreen() {
             style={styles.editBackdrop}
             onPress={() => setEditingMember(null)}
             accessibilityRole="button"
-            accessibilityLabel="Close edit"
+            accessibilityLabel={t('roster.closeEditA11y')}
           />
           <View
             style={[
@@ -1055,11 +1122,11 @@ export default function ManagePlayersScreen() {
             ]}
           >
             <ThemedText variant="h4" heading style={styles.editTitle}>
-              {editingMember ? `Edit ${displayName(editingMember.player)}` : ''}
+              {editingMember ? t('roster.editTitle', { name: displayName(editingMember.player) }) : ''}
             </ThemedText>
             <Input
               label={t('players.jerseyNumber')}
-              placeholder="e.g., 23 (leave empty to clear)"
+              placeholder={t('roster.jerseyClearPlaceholder')}
               value={editJersey}
               onChangeText={(text) => setEditJersey(text.replace(/[^0-9]/g, ''))}
               keyboardType="number-pad"
@@ -1068,21 +1135,21 @@ export default function ManagePlayersScreen() {
             />
             <Input
               label={t('players.position')}
-              placeholder="e.g., Forward, Guard"
+              placeholder={t('roster.positionPlaceholder')}
               value={editPosition}
               onChangeText={setEditPosition}
               autoCapitalize="words"
               testID="edit-member-position-input"
             />
             <Button
-              title="Save"
+              title={t('common.save')}
               onPress={handleSaveMemberEdit}
               loading={updateTeamMember.isPending}
               fullWidth
               testID="edit-member-save"
             />
             <Button
-              title="Cancel"
+              title={t('common.cancel')}
               variant="outline"
               onPress={() => setEditingMember(null)}
               style={styles.cancelButton}
@@ -1118,7 +1185,7 @@ export default function ManagePlayersScreen() {
                 style={styles.editBackdrop}
                 onPress={() => setEmailEditMember(null)}
                 accessibilityRole="button"
-                accessibilityLabel="Close email edit"
+                accessibilityLabel={t('roster.closeEmailEditA11y')}
               />
               <View
                 style={[
@@ -1130,7 +1197,7 @@ export default function ManagePlayersScreen() {
                 ]}
               >
                 <ThemedText variant="h4" heading style={styles.editTitle}>
-                  {emailEditMember ? `Email for ${displayName(emailEditMember.player)}` : ''}
+                  {emailEditMember ? t('roster.emailForTitle', { name: displayName(emailEditMember.player) }) : ''}
                 </ThemedText>
                 {issue && (
                   <ThemedText variant="caption" color="textSecondary" style={styles.editHint}>
@@ -1138,8 +1205,8 @@ export default function ManagePlayersScreen() {
                   </ThemedText>
                 )}
                 <Input
-                  label="Email address"
-                  placeholder="name@example.com"
+                  label={t('roster.emailLabel')}
+                  placeholder={t('roster.emailPlaceholder')}
                   value={editEmail}
                   onChangeText={setEditEmail}
                   keyboardType="email-address"
@@ -1148,7 +1215,7 @@ export default function ManagePlayersScreen() {
                   testID="edit-player-email-input"
                 />
                 <Button
-                  title={awaitingInvite ? 'Save & send invitation' : 'Save'}
+                  title={awaitingInvite ? t('roster.saveAndSend') : t('common.save')}
                   onPress={() => handleSaveEmail(awaitingInvite)}
                   loading={saving}
                   disabled={!canSaveEmail || saving}
@@ -1156,7 +1223,7 @@ export default function ManagePlayersScreen() {
                   testID="edit-player-email-save"
                 />
                 <Button
-                  title="Cancel"
+                  title={t('common.cancel')}
                   variant="outline"
                   onPress={() => setEmailEditMember(null)}
                   style={styles.cancelButton}
@@ -1302,6 +1369,12 @@ const styles = StyleSheet.create({
   relationshipLabel: {
     marginTop: spacing.sm,
     marginBottom: spacing.xs,
+  },
+  ageQuestion: {
+    marginBottom: spacing.md,
+  },
+  under13Hint: {
+    marginBottom: spacing.sm,
   },
   editBackdropContainer: {
     flex: 1,

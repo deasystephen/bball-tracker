@@ -80,6 +80,14 @@ describe('format-date', () => {
     expect(formatClockTime(iso)).toBe(formatClockTime(DATE));
   });
 
+  it('capitalizes the weekday that starts a Spanish game date, and leaves the rest lowercase', () => {
+    withLocales([{ languageTag: 'es-ES' }]);
+    expect(formatLongDate(DATE)).toBe('Sábado, 3 de octubre de 2026');
+    expect(formatShortDate(DATE)).toMatch(/^Sáb,? 3 oct/);
+    // Formats that do not start with a weekday keep the runtime's own case.
+    expect(formatCalendarDate(DATE)).toBe('3 de octubre de 2026');
+  });
+
   it('returns the fallback for a missing season date', () => {
     expect(formatSeasonDate(null, 'Not set')).toBe('Not set');
   });

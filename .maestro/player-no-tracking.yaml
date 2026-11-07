@@ -53,3 +53,5 @@ appId: com.bballtracker.mobile
 - assertNotVisible: "Continue Tracking"
 - assertNotVisible: "End Game"
 - assertNotVisible: "Record Assist"
+# …and nobody gets a share button (#731, #951; E2E plan F.6).
+- assertNotVisible: "Share game"

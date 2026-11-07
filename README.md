@@ -85,6 +85,8 @@ npx prisma migrate dev
 npm run dev
 ```
 
+Avatar uploads use a real S3 bucket. The AWS user in `.env` needs `s3:PutObject`, `s3:GetObject` and `s3:DeleteObject` on the dev bucket's objects. With `AVATAR_PENDING_TAG_ENABLED` off (the default) nothing else is needed. To test with the flag on, add `s3:PutObjectTagging` and `s3:DeleteObjectTagging` on the objects and `s3:ListBucket` on the bucket, or avatar uploads and saves fail with a 5xx (`docs/architecture/backend-services.md`, "Unsaved uploads expire").
+
 4. Start the mobile app:
 ```bash
 cd mobile
@@ -183,8 +185,14 @@ Mobile builds use Expo Application Services (EAS):
 - **Production builds** create IPA files for TestFlight/App Store submission
 - Native module changes (e.g., adding `@sentry/react-native`) require a new
   production build — OTA cannot ship native code
-- **Sentry source maps** upload automatically on EAS build via the post-build hook
-  (`mobile/scripts/sentry-upload-sourcemaps.js`)
+- **Sentry source maps** (runtime 1.7.0 on, #644): every bundle carries a Debug ID
+  (`getSentryExpoConfig` in `mobile/metro.config.js`). An EAS build uploads the embedded
+  bundle's maps and the dSYMs from the Xcode phases of the `@sentry/react-native/expo`
+  plugin, and `npm run ota:production` uploads each OTA bundle's maps after `eas update`
+  (it needs `SENTRY_AUTH_TOKEN` for that command, read from the macOS Keychain and never
+  exported from `~/.zshrc`; see the docs' "Publishing a production OTA: the Sentry token"). The post-build hook
+  (`mobile/scripts/sentry-set-commits.js`) only attaches commits to the build's release.
+  Detail: `docs/deployment/mobile-builds-and-ota.md`, "Sentry symbolication"
 
 ## Automation
 

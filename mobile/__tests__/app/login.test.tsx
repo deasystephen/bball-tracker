@@ -11,14 +11,31 @@ import { render, fireEvent, waitFor, act } from '@testing-library/react-native';
 import { AppState } from 'react-native';
 import * as Linking from 'expo-linking';
 
-import Login from '../../app/login';
+import Login, { BROWSER_DISMISS_GRACE_MS } from '../../app/login';
 import { apiClient } from '../../services/api-client';
+import { trackEvent } from '../../services/analytics';
 
+const mockLinkingState: { urlHandler: ((event: { url: string }) => void) | null; remove: jest.Mock } = {
+  urlHandler: null,
+  remove: jest.fn(),
+};
 jest.mock('expo-linking', () => ({
   createURL: jest.fn((path: string, options?: { scheme?: string }) => `${options?.scheme ?? 'exp'}://${path}`),
   canOpenURL: jest.fn(() => Promise.resolve(true)),
   openURL: jest.fn(() => Promise.resolve()),
+  addEventListener: jest.fn((_type: string, handler: (event: { url: string }) => void) => {
+    mockLinkingState.urlHandler = handler;
+    return { remove: mockLinkingState.remove };
+  }),
 }));
+
+jest.mock('../../services/analytics', () => ({
+  ...jest.requireActual('../../services/analytics'),
+  trackEvent: jest.fn(),
+}));
+const mockedTrack = trackEvent as jest.Mock;
+const signInEvents = () =>
+  mockedTrack.mock.calls.filter(([event]) => event === 'sign_in_started' || event === 'sign_in_failed');
 
 jest.mock('../../services/sentry', () => ({ captureException: jest.fn() }));
 
@@ -111,5 +128,116 @@ describe('Login screen', () => {
     const { unmount } = render(<Login />);
     unmount();
     expect(removeSubscription).toHaveBeenCalled();
+    expect(mockLinkingState.remove).toHaveBeenCalled();
+  });
+
+  describe('sign-in funnel events (#967)', () => {
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    async function startSignIn() {
+      const utils = render(<Login />);
+      fireEvent.press(utils.getByLabelText('Sign in'));
+      await waitFor(() => expect(Linking.openURL).toHaveBeenCalled());
+      return utils;
+    }
+
+    it('fires sign_in_started once the PKCE sign-in has begun', async () => {
+      await startSignIn();
+      expect(signInEvents()).toEqual([['sign_in_started']]);
+    });
+
+    it('fires sign_in_failed { stage: initiate } with the status when the authorization URL fails', async () => {
+      mockedGet.mockRejectedValueOnce({ isAxiosError: true, response: { status: 503 }, message: 'busy' });
+      const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+      const { getByLabelText } = render(<Login />);
+
+      fireEvent.press(getByLabelText('Sign in'));
+
+      await waitFor(() => expect(getByLabelText('Sign in')).toBeTruthy());
+      expect(signInEvents()).toEqual([['sign_in_started'], ['sign_in_failed', { stage: 'initiate', status: 503 }]]);
+      errorSpy.mockRestore();
+    });
+
+    it('counts the start even when the PKCE sign-in cannot begin', async () => {
+      const { beginPkceLogin } = jest.requireMock('../../utils/pkce') as { beginPkceLogin: jest.Mock };
+      beginPkceLogin.mockRejectedValueOnce(new Error('keychain unavailable'));
+      const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+      const { getByLabelText } = render(<Login />);
+
+      fireEvent.press(getByLabelText('Sign in'));
+
+      await waitFor(() => expect(signInEvents()).toHaveLength(2));
+      expect(signInEvents()).toEqual([['sign_in_started'], ['sign_in_failed', { stage: 'initiate' }]]);
+      errorSpy.mockRestore();
+    });
+
+    it('does not take a link that is not this sign-in\'s callback for one', async () => {
+      await startSignIn();
+      jest.useFakeTimers();
+
+      act(() => {
+        appStateHandler?.('active');
+        mockLinkingState.urlHandler?.({ url: 'hooplings://invite/auth/callback-lookalike' });
+        jest.advanceTimersByTime(BROWSER_DISMISS_GRACE_MS);
+      });
+
+      expect(signInEvents()).toEqual([['sign_in_started'], ['sign_in_failed', { stage: 'browser_dismissed' }]]);
+    });
+
+    it('fires sign_in_failed { stage: initiate } without a status when the browser cannot open', async () => {
+      (Linking.canOpenURL as jest.Mock).mockResolvedValueOnce(false);
+      const { getByLabelText } = render(<Login />);
+
+      fireEvent.press(getByLabelText('Sign in'));
+
+      await waitFor(() => expect(getByLabelText('Sign in')).toBeTruthy());
+      expect(signInEvents()).toEqual([['sign_in_started'], ['sign_in_failed', { stage: 'initiate' }]]);
+    });
+
+    it('fires sign_in_failed { stage: browser_dismissed } when the app returns with no callback', async () => {
+      await startSignIn();
+      jest.useFakeTimers();
+
+      act(() => {
+        appStateHandler?.('background');
+        appStateHandler?.('active');
+      });
+      expect(signInEvents()).toEqual([['sign_in_started']]);
+
+      act(() => {
+        jest.advanceTimersByTime(BROWSER_DISMISS_GRACE_MS);
+      });
+      expect(signInEvents()).toEqual([['sign_in_started'], ['sign_in_failed', { stage: 'browser_dismissed' }]]);
+    });
+
+    it('does not count a return that brought the callback deep link as a dismissal', async () => {
+      await startSignIn();
+      jest.useFakeTimers();
+
+      act(() => {
+        appStateHandler?.('active');
+        mockLinkingState.urlHandler?.({ url: 'hooplings://auth/callback?code=c&state=s' });
+        jest.advanceTimersByTime(BROWSER_DISMISS_GRACE_MS);
+      });
+
+      expect(signInEvents()).toEqual([['sign_in_started']]);
+    });
+
+    it('reports nothing if the screen unmounts within the grace period (sign-in completed)', async () => {
+      const { unmount } = await startSignIn();
+      jest.useFakeTimers();
+
+      act(() => {
+        appStateHandler?.('active');
+      });
+      unmount();
+      act(() => {
+        jest.advanceTimersByTime(BROWSER_DISMISS_GRACE_MS);
+      });
+
+      expect(signInEvents()).toEqual([['sign_in_started']]);
+    });
   });
 });

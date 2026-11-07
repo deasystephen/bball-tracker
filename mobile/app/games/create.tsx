@@ -37,10 +37,12 @@ import { borderRadius } from '../../theme/border-radius';
 import { getHorizontalPadding } from '../../utils/responsive';
 import { formatClockTime, formatLongDate } from '../../utils/format-date';
 import { BackButton } from '../../components/BackButton';
+import { useTranslation } from '../../i18n';
 
 export default function CreateGameScreen() {
   const router = useRouter();
   const { colors } = useTheme();
+  const { t } = useTranslation();
   const padding = getHorizontalPadding();
   const insets = useSafeAreaInsets();
 
@@ -71,7 +73,7 @@ export default function CreateGameScreen() {
   const allowed = useAccessGuard(
     !teamsLoading && !!user,
     teams.length > 0,
-    'You need a team-manager or coach role to schedule games',
+    t('games.scheduleNotAllowed'),
     { fallback: '/(tabs)/games' }
   );
 
@@ -79,11 +81,11 @@ export default function CreateGameScreen() {
     const newErrors: { opponent?: string; teamId?: string } = {};
 
     if (!opponent.trim()) {
-      newErrors.opponent = 'Opponent name is required';
+      newErrors.opponent = t('games.opponentRequired');
     }
 
     if (!teamId) {
-      newErrors.teamId = 'Team is required';
+      newErrors.teamId = t('games.teamRequired');
     }
 
     setErrors(newErrors);
@@ -100,12 +102,12 @@ export default function CreateGameScreen() {
         date: date.toISOString(),
       });
 
-      toast.showToast('Game created successfully', 'success');
+      toast.showToast(t('games.createSuccess'), 'success');
       router.replace(`/games/${game.id}`);
     } catch (error) {
       Alert.alert(
-        'Error',
-        error instanceof Error ? error.message : 'Failed to create game'
+        t('common.error'),
+        error instanceof Error ? error.message : t('games.createFailed')
       );
     }
   };
@@ -118,7 +120,7 @@ export default function CreateGameScreen() {
   };
 
   if (teamsLoading || !allowed) {
-    return <LoadingSpinner message="Loading teams..." fullScreen />;
+    return <LoadingSpinner message={t('games.loadingTeams')} fullScreen />;
   }
 
   return (
@@ -138,7 +140,7 @@ export default function CreateGameScreen() {
         <BackButton onPress={() => router.back()} style={styles.backButton} icon="close" />
         <View style={styles.headerContent}>
           <ThemedText variant="h3" heading numberOfLines={1}>
-            New Game
+            {t('games.newGame')}
           </ThemedText>
         </View>
         <TouchableOpacity
@@ -146,7 +148,7 @@ export default function CreateGameScreen() {
           disabled={!opponent.trim() || !teamId || createGame.isPending}
           style={styles.headerAction}
           accessibilityRole="button"
-          accessibilityLabel="Create game"
+          accessibilityLabel={t('games.createA11y')}
         >
           <ThemedText
             variant="bodyBold"
@@ -154,7 +156,7 @@ export default function CreateGameScreen() {
               color: (!opponent.trim() || !teamId) ? colors.textTertiary : colors.primary,
             }}
           >
-            Create
+            {t('common.create')}
           </ThemedText>
         </TouchableOpacity>
       </View>
@@ -175,11 +177,11 @@ export default function CreateGameScreen() {
             <View style={styles.sectionHeader}>
               <Ionicons name="basketball-outline" size={20} color={colors.primary} />
               <ThemedText variant="captionBold" color="textSecondary">
-                Opponent
+                {t('games.opponent')}
               </ThemedText>
             </View>
             <Input
-              placeholder="Enter opponent team name"
+              placeholder={t('games.opponentPlaceholder')}
               value={opponent}
               onChangeText={setOpponent}
               error={errors.opponent}
@@ -194,7 +196,7 @@ export default function CreateGameScreen() {
             <View style={styles.sectionHeader}>
               <Ionicons name="people-outline" size={20} color={colors.primary} />
               <ThemedText variant="captionBold" color="textSecondary">
-                Your Team
+                {t('games.yourTeam')}
               </ThemedText>
             </View>
             {teams && teams.length > 0 ? (
@@ -242,7 +244,7 @@ export default function CreateGameScreen() {
                 color="textTertiary"
                 style={styles.noTeams}
               >
-                No teams available. Create a team first.
+                {t('games.noTeamsAvailable')}
               </ThemedText>
             )}
             {errors.teamId && (
@@ -261,7 +263,7 @@ export default function CreateGameScreen() {
             <View style={styles.sectionHeader}>
               <Ionicons name="calendar-outline" size={20} color={colors.primary} />
               <ThemedText variant="captionBold" color="textSecondary">
-                Game Date & Time
+                {t('games.dateAndTime')}
               </ThemedText>
             </View>
             <TouchableOpacity
@@ -274,7 +276,7 @@ export default function CreateGameScreen() {
               ]}
               onPress={() => openPicker('date')}
               accessibilityRole="button"
-              accessibilityLabel={`Game date: ${formatLongDate(date)}`}
+              accessibilityLabel={t('games.gameDateA11y', { date: formatLongDate(date) })}
               testID="game-date-button"
             >
               <Ionicons
@@ -295,7 +297,7 @@ export default function CreateGameScreen() {
               ]}
               onPress={() => openPicker('time')}
               accessibilityRole="button"
-              accessibilityLabel={`Game time: ${formatClockTime(date)}`}
+              accessibilityLabel={t('games.gameTimeA11y', { time: formatClockTime(date) })}
               testID="game-time-button"
             >
               <Ionicons name="time" size={20} color={colors.primary} />
@@ -305,7 +307,7 @@ export default function CreateGameScreen() {
 
           <View style={styles.buttonContainer}>
             <Button
-              title="Create Game"
+              title={t('games.create')}
               onPress={handleSubmit}
               loading={createGame.isPending}
               disabled={!opponent.trim() || !teamId}
@@ -313,7 +315,7 @@ export default function CreateGameScreen() {
               size="large"
             />
             <Button
-              title="Cancel"
+              title={t('common.cancel')}
               variant="outline"
               onPress={() => router.back()}
               fullWidth
@@ -326,7 +328,7 @@ export default function CreateGameScreen() {
         visible={picker !== null}
         mode={picker ?? 'date'}
         value={date}
-        title={picker === 'time' ? 'Game time' : 'Game date'}
+        title={picker === 'time' ? t('games.gameTime') : t('games.gameDate')}
         onConfirm={(selected) => {
           setDate(selected);
           setPicker(null);

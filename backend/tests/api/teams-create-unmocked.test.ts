@@ -11,7 +11,7 @@
 import request from 'supertest';
 import { app, httpServer } from '../../src/index';
 import { mockPrisma } from '../setup';
-import { withFiniteFreeTeamLimit } from '../helpers';
+import { lineageRows, withFiniteFreeTeamLimit } from '../helpers';
 
 const COACH_ID = 'a1b2c3d4-e5f6-4890-a234-567890abcdef';
 const LEAGUE_ID = 'c3d4e5f6-a7b8-4012-a456-7890abcdef01';
@@ -83,7 +83,14 @@ describe('POST /api/v1/teams through the real TeamService', () => {
     });
     (mockPrisma.league.upsert as jest.Mock).mockResolvedValue({ id: LEAGUE_ID });
     (mockPrisma.leagueAdmin.upsert as jest.Mock).mockResolvedValue({ id: 'la-1' });
-    (mockPrisma.season.upsert as jest.Mock).mockResolvedValue({ id: SEASON_ID });
+    // The personal season goes through findOrCreateSeason (#461): the User
+    // lock and League lock find their rows, no season by that name yet, then
+    // ON CONFLICT DO NOTHING inserts it and reads it back.
+    (mockPrisma.$queryRaw as jest.Mock).mockImplementation((strings: TemplateStringsArray) =>
+      Promise.resolve(strings.join('?').includes('FROM "Season"') ? [] : [{ id: 'locked' }])
+    );
+    (mockPrisma.season.createMany as jest.Mock).mockResolvedValue({ count: 1 });
+    (mockPrisma.season.findUniqueOrThrow as jest.Mock).mockResolvedValue({ id: SEASON_ID, isActive: true });
     (mockPrisma.teamLineage.create as jest.Mock).mockResolvedValue({ id: LINEAGE_ID });
     (mockPrisma.team.create as jest.Mock).mockResolvedValue(createdTeam);
     (mockPrisma.teamRole.createMany as jest.Mock).mockResolvedValue({ count: 3 });
@@ -130,14 +137,14 @@ describe('POST /api/v1/teams through the real TeamService', () => {
     withFiniteFreeTeamLimit();
 
     it('takes the User-row lock before the in-transaction cap re-check and before provisioning', async () => {
-      (mockPrisma.teamStaff.count as jest.Mock).mockResolvedValue(0);
+      (mockPrisma.team.groupBy as jest.Mock).mockResolvedValue(lineageRows(0));
 
       const res = await request(app).post('/api/v1/teams').send({ name: 'Hornets' });
 
       expect(res.status).toBe(201);
       // Two team counts: the route middleware's pre-check, then the service's
       // authoritative re-check inside the transaction.
-      const counts = (mockPrisma.teamStaff.count as jest.Mock).mock.invocationCallOrder;
+      const counts = (mockPrisma.team.groupBy as jest.Mock).mock.invocationCallOrder;
       expect(counts).toHaveLength(2);
       const lockOrder = expectUserRowLockFirst();
       expect(counts[0]).toBeLessThan(lockOrder);
@@ -154,6 +161,10 @@ describe('POST /api/v1/teams through the real TeamService', () => {
     expect(res.status).toBe(500);
     expect(mockInvalidateUsage).not.toHaveBeenCalled();
   });
+});
+
+afterEach(() => {
+  (mockPrisma.$queryRaw as jest.Mock).mockReset().mockResolvedValue([{ '?column?': 1 }]);
 });
 
 afterAll((done) => {

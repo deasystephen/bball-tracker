@@ -17,6 +17,7 @@ import { useTheme } from '../../hooks/useTheme';
 import { spacing, typography } from '../../theme';
 import { scoreAccessibilityLabel, useScoreAnnouncement } from '../../hooks/useScoreAnnouncement';
 import { BackButton } from '../BackButton';
+import { useTranslation } from '../../i18n';
 
 interface ScoreDisplayProps {
   homeTeamName: string;
@@ -38,6 +39,7 @@ export const ScoreDisplay: React.FC<ScoreDisplayProps> = ({
   showEndButton = true,
 }) => {
   const { colors, colorScheme } = useTheme();
+  const { t } = useTranslation();
 
   // VoiceOver hears score changes through this; TalkBack through the live
   // region on the score row (#774).
@@ -103,7 +105,7 @@ export const ScoreDisplay: React.FC<ScoreDisplayProps> = ({
           <View style={[styles.liveBadge, { backgroundColor: colors.success }]}>
             <Animated.View style={[styles.liveDot, liveDotAnimatedStyle]} />
             <ThemedText variant="caption" style={styles.liveText}>
-              LIVE
+              {t('games.liveBadge')}
             </ThemedText>
           </View>
         </View>
@@ -112,13 +114,13 @@ export const ScoreDisplay: React.FC<ScoreDisplayProps> = ({
             onPress={onEndGame}
             style={[styles.endButton, { backgroundColor: colors.error + '20' }]}
             accessibilityRole="button"
-            accessibilityLabel="End game"
+            accessibilityLabel={t('games.endGameA11y')}
           >
             <ThemedText
               variant="captionBold"
               style={{ color: colors.error }}
             >
-              End
+              {t('tracker.end')}
             </ThemedText>
           </TouchableOpacity>
         ) : (

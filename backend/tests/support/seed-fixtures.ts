@@ -10,7 +10,9 @@
  *   removes flow-created managed players must leave alone (#782);
  * - the event logs of the two FINISHED games and the scores they add up to
  *   under `GameEventService.computeHomeScore` (#787);
- * - the five seeded games and the state every reseed puts them back in (#788).
+ * - the five seeded games and the state every reseed puts them back in (#788);
+ * - the one invitation token a Maestro flow opens by deep link, and the rule
+ *   that it is written only into a local database (#972, #973).
  *
  * Pure data and builders only: nothing here touches a database
  * (`seed-resets.ts` does).
@@ -18,6 +20,7 @@
 
 import { GameEventType, GameStatus, InvitationStatus } from '@prisma/client';
 import { hashRecipient } from '../../src/utils/hash-recipient';
+import { databaseHost, LOCAL_DATABASE_HOSTS } from '../../prisma/reset-guard';
 
 /** Deterministic UUIDs for seed data (reproducible across runs). */
 export const SEED_IDS = {
@@ -679,6 +682,52 @@ export interface InviteStateFixture {
   acceptedAt?: Date;
   /** The address hard-bounced (#449): drives the "Email bounced" chip. */
   bounced?: boolean;
+  /**
+   * A fixed token a Maestro flow opens by deep link. Written only when the
+   * seed run opts in (`invitationFixtureToken`); otherwise the row gets a random one.
+   */
+  deepLinkToken?: string;
+}
+
+/**
+ * The token `.maestro/invite-deep-link.yaml` opens as
+ * `hooplings://invite/<token>?src=web` (#972, #973): Iris Invited's PENDING
+ * Lakers invitation. The flow needs a stable one; a random token per run
+ * cannot be typed into a flow.
+ *
+ * This is a bearer secret for the unauthenticated by-token routes, and it is
+ * in the repo, so the seed writes it only when all three hold:
+ *
+ * - the run opts in with `SEED_MAESTRO_INVITE_TOKEN=true` on the command line
+ *   (never in `.env`). This is the guard that matters: a production database
+ *   reached through a tunnel on `localhost` passes the two checks below;
+ * - `NODE_ENV` is not `production` and `SEED_ALLOW_PRODUCTION` is not set;
+ * - `DATABASE_URL` names a local host (`LOCAL_DATABASE_HOSTS`, the list
+ *   `npm run db:reset` trusts).
+ *
+ * Any other seed run writes random tokens for every fixture, Iris included.
+ */
+export const MAESTRO_INVITE_TOKEN = 'maestro-fixture-iris-pending-invite';
+
+/** The environment variable a seed run sets to write `MAESTRO_INVITE_TOKEN`. */
+export const MAESTRO_INVITE_TOKEN_FLAG = 'SEED_MAESTRO_INVITE_TOKEN';
+
+/**
+ * The token the seed writes for an invite-state fixture: the fixture's fixed
+ * `deepLinkToken` when `env` allows it (see `MAESTRO_INVITE_TOKEN`),
+ * otherwise `randomToken()`.
+ */
+export function invitationFixtureToken(
+  fixture: InviteStateFixture,
+  env: NodeJS.ProcessEnv,
+  randomToken: () => string
+): string {
+  if (!fixture.deepLinkToken) return randomToken();
+  const optedIn = env[MAESTRO_INVITE_TOKEN_FLAG] === 'true';
+  const production = env.NODE_ENV === 'production' || env.SEED_ALLOW_PRODUCTION === 'true';
+  const host = env.DATABASE_URL ? databaseHost(env.DATABASE_URL) : null;
+  const isLocal = host !== null && LOCAL_DATABASE_HOSTS.includes(host);
+  return optedIn && !production && isLocal ? fixture.deepLinkToken : randomToken();
 }
 
 /**
@@ -699,6 +748,7 @@ export function inviteStateFixtures(now: Date, ids: { iris: string; xander: stri
       status: InvitationStatus.PENDING,
       createdAt: new Date(t - 1 * DAY_MS),
       expiresAt: new Date(t + 6 * DAY_MS),
+      deepLinkToken: MAESTRO_INVITE_TOKEN,
     },
     {
       id: ids.xander,

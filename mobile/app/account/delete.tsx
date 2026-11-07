@@ -152,7 +152,7 @@ export default function DeleteAccountScreen() {
                 key={team.id}
                 style={[styles.teamRow, { borderTopColor: colors.border }]}
                 accessibilityRole="button"
-                accessibilityLabel={`Open team ${team.name}`}
+                accessibilityLabel={t('account.delete.openTeamA11y', { name: team.name })}
                 onPress={() => router.push(`/teams/${team.id}`)}
               >
                 <ThemedText variant="body">{team.name}</ThemedText>
@@ -163,8 +163,8 @@ export default function DeleteAccountScreen() {
         )}
 
         <Input
-          label={t('account.delete.confirmLabel')}
-          placeholder={t('account.delete.confirmPlaceholder')}
+          label={t('account.delete.confirmLabel', { word: DELETE_CONFIRMATION })}
+          placeholder={DELETE_CONFIRMATION}
           value={confirmation}
           onChangeText={setConfirmation}
           autoCapitalize="characters"

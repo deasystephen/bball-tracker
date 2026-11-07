@@ -79,6 +79,22 @@ describe('legal pages (#25)', () => {
     }
   });
 
+  it('both pages state the #980 posture: accounts 13+ (16 in the EU/EEA/UK/CH), children as roster records, no consent program', () => {
+    const privacy = text(PrivacyPolicyPage);
+    const terms = text(TermsOfServicePage);
+    expect(privacy).toContain('Account holders must be 13 or older');
+    expect(privacy).toContain('not directed to children under 13');
+    expect(privacy).toContain('within 5 business days');
+    expect(privacy).toContain('birth month and year');
+    expect(terms).toContain('at least 13 years old to hold an account');
+    for (const body of [privacy, terms]) {
+      expect(body).toMatch(/United Kingdom (and|or) Switzerland/);
+      // The posture has no verifiable-parental-consent program; the pages must not claim one.
+      expect(body).not.toMatch(/verifiable parental consent/i);
+      expect(body).not.toMatch(/no age check/i);
+    }
+  });
+
   it('terms page links to the privacy policy', () => {
     expect(render(TermsOfServicePage)).toContain('href="/privacy"');
   });

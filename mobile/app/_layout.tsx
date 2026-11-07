@@ -9,7 +9,8 @@ import { ToastProvider } from '../components/Toast';
 import * as SplashScreen from 'expo-splash-screen';
 import { useFonts, Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold } from '@expo-google-fonts/inter';
 import { Oswald_700Bold } from '@expo-google-fonts/oswald';
-import { initAnalytics, trackEvent, AnalyticsEvents } from '../services/analytics';
+import { initAnalytics } from '../services/analytics';
+import { trackAppOpened } from '../services/app-opened';
 import { initSentry } from '../services/sentry';
 import { queryClient } from '../services/query-client';
 import '../services/session-logout'; // registers logout side effects with the auth store
@@ -66,7 +67,8 @@ export default function RootLayout() {
 
   useEffect(() => {
     initAnalytics().then(() => {
-      trackEvent(AnalyticsEvents.APP_OPENED);
+      // Which OTA is running (#967): app_version alone cannot tell two OTAs apart.
+      trackAppOpened();
     });
   }, []);
 

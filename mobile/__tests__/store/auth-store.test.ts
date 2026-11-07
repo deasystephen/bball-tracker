@@ -16,9 +16,11 @@ import {
   useAuthActions,
   getLogoutEpoch,
   AUTH_STORAGE_KEY,
+  userPropertiesFrom,
 } from '../../store/auth-store';
 import { ACCESS_TOKEN_KEY, REFRESH_TOKEN_KEY, SecureStoreNative } from '../../services/secure-storage';
 import { setSessionHooks } from '../../store/session-hooks';
+import { log } from '../../services/log';
 import {
   trackEvent,
   identifyUser,
@@ -99,12 +101,14 @@ describe('auth-store', () => {
     expect(state.isAuthenticated).toBe(true);
     expect(state.isLoading).toBe(false);
 
-    // User properties (#616) ride on identify: role flags and app version, never name or email.
+    // User properties (#616) ride on identify: role flags, app version and the
+    // running OTA (#967; `embedded` here: Jest has no ExpoUpdates module), never name or email.
     expect(identifyUser).toHaveBeenCalledWith('user-1', {
       role: UserRole.COACH,
       is_parent: false,
       is_player: false,
       app_version: '1.5.0',
+      update_id: 'embedded',
     });
     expect(JSON.stringify((identifyUser as jest.Mock).mock.calls)).not.toContain('test@example.com');
     // No outcome passed: the flags are left out rather than reported as false (#790).
@@ -450,6 +454,30 @@ describe('auth-store logout sequence', () => {
   });
 });
 
+describe('userPropertiesFrom update_id (#967)', () => {
+  const mockedRequire = requireOptionalNativeModule as jest.Mock;
+  const original = mockedRequire.getMockImplementation();
+  afterEach(() => {
+    if (original) mockedRequire.mockImplementation(original);
+  });
+
+  it('is the running OTA id, so a regression after an OTA can be segmented', () => {
+    mockedRequire.mockImplementation((name: string) =>
+      name === 'ExpoUpdates'
+        ? { isEnabled: true, isEmbeddedLaunch: false, updateId: '01A15220-8B6D-7172-A9A5-2D5FCE7C6954', runtimeVersion: '1.6.0' }
+        : original?.(name)
+    );
+    expect(userPropertiesFrom(makeUser()).update_id).toBe('01a15220-8b6d-7172-a9a5-2d5fce7c6954');
+  });
+
+  it('is "embedded" when the binary\'s bundled JS runs', () => {
+    mockedRequire.mockImplementation((name: string) =>
+      name === 'ExpoUpdates' ? { isEnabled: true, isEmbeddedLaunch: true, updateId: 'x', runtimeVersion: '1.6.0' } : original?.(name)
+    );
+    expect(userPropertiesFrom(makeUser()).update_id).toBe('embedded');
+  });
+});
+
 describe('auth-store rehydration', () => {
   type RehydrateCb = (state: unknown, error?: unknown) => void;
   const getOnRehydrate = (): RehydrateCb =>
@@ -466,7 +494,14 @@ describe('auth-store rehydration', () => {
   // app/index.tsx shows "Loading…" forever.
   it('clears isLoading and starts logged out when hydration fails', () => {
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    // #963: the user silently starts signed out (the symptom of the SDK 57
+    // keychain trap), so the failure must be logged.
+    const logWarn = jest.spyOn(log, 'warn');
     getOnRehydrate()(undefined, new Error('corrupt'));
+    expect(logWarn).toHaveBeenCalledWith('Auth storage rehydration failed; starting logged out', {
+      error: expect.any(Error),
+    });
+    logWarn.mockRestore();
     expect(useAuthStore.getState()).toMatchObject({
       isLoading: false,
       isAuthenticated: false,
@@ -504,6 +539,7 @@ describe('auth-store updateUser', () => {
       is_parent: false,
       is_player: false,
       app_version: '1.5.0',
+      update_id: 'embedded',
     });
   });
 

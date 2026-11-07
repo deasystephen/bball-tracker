@@ -1,4 +1,4 @@
-import { emailEquals, escapeLikePattern, isSameEmail } from '../../src/utils/email-match';
+import { emailEquals, escapeLikePattern, isSameEmail, normaliseEmail } from '../../src/utils/email-match';
 
 describe('escapeLikePattern', () => {
   it.each([
@@ -59,5 +59,12 @@ describe('isSameEmail', () => {
     ['', ''],
   ])('%j and %j are not', (a, b) => {
     expect(isSameEmail(a, b)).toBe(false);
+  });
+});
+
+describe('normaliseEmail', () => {
+  it('trims and lower-cases, the form a new account stores (#955)', () => {
+    expect(normaliseEmail('  Jo.Smith@Example.COM ')).toBe('jo.smith@example.com');
+    expect(normaliseEmail('first_last@example.com')).toBe('first_last@example.com');
   });
 });

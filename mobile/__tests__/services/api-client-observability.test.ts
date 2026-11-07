@@ -21,17 +21,17 @@ jest.unmock('../../services/api-client');
 
 jest.mock('expo-constants', () => ({
   __esModule: true,
-  default: { expoConfig: { extra: { apiUrl: 'https://api.example.test' } } },
+  default: { expoConfig: { version: '1.6.0', extra: { apiUrl: 'https://api.example.test' } } },
 }));
 
-const authState = { accessToken: 'tok_abc' as string | null, epoch: 0 };
+const authState = { accessToken: 'tok_abc' as string | null, refreshToken: null as string | null, epoch: 0 };
 jest.mock('../../store/auth-store', () => ({
   __esModule: true,
   getLogoutEpoch: () => authState.epoch,
   useAuthStore: {
     getState: () => ({
       accessToken: authState.accessToken,
-      refreshToken: null,
+      refreshToken: authState.refreshToken,
       setAuthToken: jest.fn(),
       clearSession: jest.fn(),
     }),
@@ -75,6 +75,8 @@ const adapter: AxiosAdapter = async (config) => {
 const networkError = (config: InternalAxiosRequestConfig, code = 'ERR_NETWORK'): AxiosError =>
   new AxiosError('Network Error', code, config);
 
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
 const crumbs = () => mockedCrumb.mock.calls.map((c) => c[0]);
 const lastCrumb = () => crumbs()[crumbs().length - 1];
 
@@ -86,6 +88,7 @@ describe('api-client observability (#617)', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     authState.accessToken = 'tok_abc';
+    authState.refreshToken = null;
     reply = () => ({ status: 200, data: { ok: true } });
   });
 
@@ -101,6 +104,7 @@ describe('api-client observability (#617)', () => {
         url: '/api/v1/teams/:id/games',
         status_code: 200,
         duration: expect.any(Number),
+        request_id: expect.stringMatching(UUID_V4),
       },
     });
     expect(mockedCapture).not.toHaveBeenCalled();
@@ -129,7 +133,7 @@ describe('api-client observability (#617)', () => {
     const [error, context, tags] = mockedCapture.mock.calls[0];
     expect(error).toBeInstanceOf(AxiosError);
     expect(context).toEqual({ endpoint: '/api/v1/games/:id' });
-    expect(tags).toEqual({ endpoint_pattern: '/api/v1/games/:id', status: 503 });
+    expect(tags).toEqual({ endpoint_pattern: '/api/v1/games/:id', status: 503, request_id: expect.stringMatching(UUID_V4) });
   });
 
   it('does not capture a retryable 503 (Retry-After), only a warning breadcrumb', async () => {
@@ -158,7 +162,7 @@ describe('api-client observability (#617)', () => {
     expect(mockedCapture).toHaveBeenCalledWith(
       expect.any(AxiosError),
       { endpoint: '/api/v1/auth/me', code: 'ERR_NETWORK' },
-      { endpoint_pattern: '/api/v1/auth/me', status: 'network' }
+      { endpoint_pattern: '/api/v1/auth/me', status: 'network', request_id: expect.stringMatching(UUID_V4) }
     );
   });
 
@@ -200,6 +204,97 @@ describe('api-client observability (#617)', () => {
     authState.epoch += 1;
     await expect(apiClient.get('/auth/me/usage')).rejects.toBeInstanceOf(NoSessionError);
     expect(mockedCapture).toHaveBeenCalledTimes(3);
+  });
+
+  describe('request headers (#963)', () => {
+    const sent: InternalAxiosRequestConfig[] = [];
+    const header = (config: InternalAxiosRequestConfig, name: string): unknown => config.headers.get(name);
+
+    beforeEach(() => {
+      sent.length = 0;
+      reply = (config) => {
+        sent.push(config);
+        return { status: 200, data: { ok: true } };
+      };
+    });
+
+    it('sends a fresh UUID v4 X-Request-Id on every request', async () => {
+      await apiClient.get('/teams');
+      await apiClient.post('/teams', { name: 'x' });
+
+      const ids = sent.map((config) => header(config, 'X-Request-Id'));
+      expect(ids).toEqual([expect.stringMatching(UUID_V4), expect.stringMatching(UUID_V4)]);
+      expect(ids[0]).not.toBe(ids[1]);
+    });
+
+    it('crumbs the request id the request was sent with', async () => {
+      await apiClient.get('/teams');
+      expect(lastCrumb().data.request_id).toBe(header(sent[0], 'X-Request-Id'));
+    });
+
+    it('tags a captured 5xx with the request id the API logged', async () => {
+      reply = (config) => {
+        sent.push(config);
+        return { status: 500, data: { error: 'boom' } };
+      };
+      await expect(apiClient.get('/teams')).rejects.toBeDefined();
+
+      const [, , tags] = mockedCapture.mock.calls[0];
+      expect(tags.request_id).toBe(header(sent[0], 'X-Request-Id'));
+      expect(lastCrumb().data.request_id).toBe(tags.request_id);
+    });
+
+    it('does not capture a 4xx, whatever its request id', async () => {
+      reply = (config) => {
+        sent.push(config);
+        return { status: 404, data: { error: 'Not found' } };
+      };
+      await expect(apiClient.get('/teams/12345')).rejects.toBeDefined();
+      expect(mockedCapture).not.toHaveBeenCalled();
+      expect(lastCrumb().data.request_id).toBe(header(sent[0], 'X-Request-Id'));
+    });
+
+    it('sends X-Hooplings-Client with the platform and app version', async () => {
+      await apiClient.get('/teams');
+      // jest-expo runs as iOS; jest.setup.js has no ExpoUpdates native module, so
+      // the bundled JS is what runs.
+      expect(header(sent[0], 'X-Hooplings-Client')).toBe('ios/1.6.0+embedded');
+    });
+
+    it('gives the refresh and the replay of a 401 their own request ids', async () => {
+      authState.refreshToken = 'refresh_1';
+      let first = true;
+      reply = (config) => {
+        sent.push(config);
+        if (config.url === '/auth/refresh') return { status: 200, data: { accessToken: 'tok_new', refreshToken: 'refresh_2' } };
+        if (first) {
+          first = false;
+          return { status: 401, data: { error: 'expired' } };
+        }
+        return { status: 200, data: { ok: true } };
+      };
+
+      await apiClient.get('/teams');
+
+      expect(sent.map((config) => config.url)).toEqual(['/teams', '/auth/refresh', '/teams']);
+      const ids = sent.map((config) => header(config, 'X-Request-Id'));
+      expect(new Set(ids).size).toBe(3);
+      expect(lastCrumb().data.request_id).toBe(ids[2]);
+    });
+
+    it('stamps a public request sent without a session', async () => {
+      authState.accessToken = null;
+      await apiClient.get('/invitations/by-token/abcdefghijklmnop');
+      expect(header(sent[0], 'X-Request-Id')).toEqual(expect.stringMatching(UUID_V4));
+    });
+
+    it('never stamps a request refused on the device for lack of a session', async () => {
+      authState.accessToken = null;
+      await expect(apiClient.get('/teams')).rejects.toBeInstanceOf(NoSessionError);
+      expect(sent).toHaveLength(0);
+      expect(lastCrumb().data).not.toHaveProperty('request_id');
+      expect(mockedCapture.mock.calls[0][2]).not.toHaveProperty('request_id');
+    });
   });
 
   it('never crumbs or captures a token, OAuth code or email', async () => {

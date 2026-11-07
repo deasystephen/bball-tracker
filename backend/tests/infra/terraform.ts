@@ -1,6 +1,6 @@
 /**
  * Shared helpers for the config-bound tests that read `infra/*.tf`
- * (`prevent-destroy.test.ts`, `ses-events.test.ts`).
+ * (`prevent-destroy.test.ts`, `ses-events.test.ts`, `ecs-deploy-timing.test.ts`).
  *
  * This is not an HCL parser. It is a small scanner that knows the three things
  * that can hide or fake a brace or an attribute: comments (`#`, `//`, `/* *\/`),

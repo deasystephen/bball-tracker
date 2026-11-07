@@ -19,7 +19,7 @@ import {
   type TeamInvitation,
   type GuardianInvitationView,
 } from '../../hooks/useInvitations';
-import { relationshipLabel } from '../../utils/guardian';
+import { relationshipNoun } from '../../utils/guardian';
 import { apiClient } from '../../services/api-client';
 import { useQueryErrorState } from '../../hooks/useQueryErrorState';
 import type { User } from '../../../shared/types';
@@ -56,7 +56,7 @@ export default function InvitationsScreen() {
   // invitations (#888, hooks/useQueryErrorState.ts).
   const errorState = useQueryErrorState(
     { error, data: invitationsData, refetch, onRefreshError: (m) => toast.showToast(m, 'error') },
-    'Failed to load invitations'
+    t('invitations.loadFailed')
   );
 
   const invitations = invitationsData?.invitations || [];
@@ -71,13 +71,13 @@ export default function InvitationsScreen() {
       await acceptInvitation.mutateAsync(invitation.id);
       toast.showToast(
         isForChild(invitation)
-          ? `${displayName(invitation.player)} has been added to ${invitation.team.name}!`
-          : `You've been added to ${invitation.team.name}!`,
+          ? t('invitations.childAdded', { name: displayName(invitation.player), team: invitation.team.name })
+          : t('invitations.youWereAdded', { team: invitation.team.name }),
         'success'
       );
     } catch (error) {
       toast.showToast(
-        error instanceof Error ? error.message : 'Failed to accept invitation',
+        error instanceof Error ? error.message : t('invitations.acceptFailed'),
         'error'
       );
     }
@@ -85,20 +85,20 @@ export default function InvitationsScreen() {
 
   const handleReject = (invitation: TeamInvitation) => {
     Alert.alert(
-      'Reject Invitation',
-      `Reject invitation from ${invitation.team.name}?`,
+      t('invitations.rejectTitle'),
+      t('invitations.rejectBody', { team: invitation.team.name }),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         {
-          text: 'Reject',
+          text: t('invitations.reject'),
           style: 'destructive',
           onPress: async () => {
             try {
               await rejectInvitation.mutateAsync(invitation.id);
-              toast.showToast('Invitation rejected', 'success');
+              toast.showToast(t('invitations.rejected'), 'success');
             } catch (error) {
               toast.showToast(
-                error instanceof Error ? error.message : 'Failed to reject invitation',
+                error instanceof Error ? error.message : t('invitations.rejectFailed'),
                 'error'
               );
             }
@@ -123,10 +123,16 @@ export default function InvitationsScreen() {
       } catch {
         // useSessionRefresh will catch up on the next foreground.
       }
-      toast.showToast(`You are now ${childDisplayName(invitation)}'s ${relationshipLabel(invitation.relationship).toLowerCase()}`, 'success');
+      toast.showToast(
+        t('invitations.guardianAccepted', {
+          child: childDisplayName(invitation),
+          relationship: relationshipNoun(invitation.relationship),
+        }),
+        'success'
+      );
     } catch (error) {
       toast.showToast(
-        error instanceof Error ? error.message : 'Failed to accept invitation',
+        error instanceof Error ? error.message : t('invitations.acceptFailed'),
         'error'
       );
     }
@@ -134,20 +140,23 @@ export default function InvitationsScreen() {
 
   const handleRejectGuardian = (invitation: GuardianInvitationView) => {
     Alert.alert(
-      'Decline Invitation',
-      `Decline the invitation to become ${childDisplayName(invitation)}'s ${relationshipLabel(invitation.relationship).toLowerCase()}?`,
+      t('invitations.declineTitle'),
+      t('invitations.declineBody', {
+        child: childDisplayName(invitation),
+        relationship: relationshipNoun(invitation.relationship),
+      }),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         {
-          text: 'Decline',
+          text: t('invitations.decline'),
           style: 'destructive',
           onPress: async () => {
             try {
               await rejectInvitation.mutateAsync(invitation.id);
-              toast.showToast('Invitation declined', 'success');
+              toast.showToast(t('invitations.declined'), 'success');
             } catch (error) {
               toast.showToast(
-                error instanceof Error ? error.message : 'Failed to decline invitation',
+                error instanceof Error ? error.message : t('invitations.declineFailed'),
                 'error'
               );
             }
@@ -160,7 +169,7 @@ export default function InvitationsScreen() {
   const renderGuardianInvitation = (item: GuardianInvitationView) => {
     const isExpired = isInvitationExpired(item.expiresAt);
     const canAccept = item.status === 'PENDING' && !isExpired;
-    const relationship = relationshipLabel(item.relationship).toLowerCase();
+    const relationship = relationshipNoun(item.relationship);
 
     return (
       <Card
@@ -172,16 +181,17 @@ export default function InvitationsScreen() {
         <View style={styles.invitationHeader}>
           <View style={styles.invitationInfo}>
             <ThemedText variant="h4">
-              Become {relationship} of {childDisplayName(item)}
-              {item.teamName ? ` on ${item.teamName}` : ''}
+              {item.teamName
+                ? t('invitations.guardianTitleTeam', { relationship, child: childDisplayName(item), team: item.teamName })
+                : t('invitations.guardianTitle', { relationship, child: childDisplayName(item) })}
             </ThemedText>
             <ThemedText variant="caption" color="textSecondary">
-              Parent / guardian invitation
+              {t('invitations.guardianSubtitle')}
             </ThemedText>
           </View>
           <View style={[styles.statusBadge, { backgroundColor: colors.warning + '20' }]}>
             <ThemedText variant="captionBold" style={{ color: colors.warning }}>
-              {item.status}
+              {t(`invitations.statusLabel.${item.status}`, { defaultValue: item.status })}
             </ThemedText>
           </View>
         </View>
@@ -190,7 +200,7 @@ export default function InvitationsScreen() {
           <View style={styles.detailRow}>
             <Ionicons name="person-outline" size={16} color={colors.textTertiary} />
             <ThemedText variant="caption" color="textSecondary">
-              Invited by {inviterDisplayName(item)}
+              {t('invitations.invitedBy', { name: inviterDisplayName(item) })}
             </ThemedText>
           </View>
           <View style={styles.detailRow}>
@@ -204,7 +214,7 @@ export default function InvitationsScreen() {
         <View style={styles.actionButtons}>
           {canAccept ? (
             <Button
-              title={`Accept for ${childDisplayName(item)}`}
+              title={t('invitations.acceptFor', { name: childDisplayName(item) })}
               onPress={() => handleAcceptGuardian(item)}
               loading={acceptInvitation.isPending}
               style={styles.acceptButton}
@@ -212,11 +222,11 @@ export default function InvitationsScreen() {
             />
           ) : (
             <ThemedText variant="caption" color="error" style={styles.expiredText}>
-              This invitation has expired
+              {t('invitations.expiredNotice')}
             </ThemedText>
           )}
           <Button
-            title="Decline"
+            title={t('invitations.decline')}
             variant="outline"
             onPress={() => handleRejectGuardian(item)}
             loading={rejectInvitation.isPending}
@@ -256,7 +266,7 @@ export default function InvitationsScreen() {
             <ThemedText variant="h4">{item.team.name}</ThemedText>
             {forChild && (
               <ThemedText variant="captionBold" color="primary">
-                For {displayName(item.player)}
+                {t('invitations.forPlayer', { name: displayName(item.player) })}
               </ThemedText>
             )}
             <ThemedText variant="caption" color="textSecondary">
@@ -273,7 +283,7 @@ export default function InvitationsScreen() {
               variant="captionBold"
               style={{ color: getStatusColor(item.status) }}
             >
-              {item.status}
+              {t(`invitations.statusLabel.${item.status}`, { defaultValue: item.status })}
             </ThemedText>
           </View>
         </View>
@@ -288,14 +298,14 @@ export default function InvitationsScreen() {
           <View style={styles.detailRow}>
             <Ionicons name="person-outline" size={16} color={colors.textTertiary} />
             <ThemedText variant="caption" color="textSecondary">
-              Invited by {displayName(item.invitedBy)}
+              {t('invitations.invitedBy', { name: displayName(item.invitedBy) })}
             </ThemedText>
           </View>
           {item.jerseyNumber != null && (
             <View style={styles.detailRow}>
               <Ionicons name="shirt-outline" size={16} color={colors.textTertiary} />
               <ThemedText variant="caption" color="textSecondary">
-                Jersey #{item.jerseyNumber}
+                {t('invitations.jersey', { number: item.jerseyNumber })}
               </ThemedText>
             </View>
           )}
@@ -345,7 +355,7 @@ export default function InvitationsScreen() {
           <View style={styles.actionButtons}>
             {canAccept && (
               <Button
-                title={forChild ? `Accept for ${displayName(item.player)}` : 'Accept'}
+                title={forChild ? t('invitations.acceptFor', { name: displayName(item.player) }) : t('invitations.accept')}
                 onPress={() => handleAccept(item)}
                 loading={acceptInvitation.isPending}
                 style={styles.acceptButton}
@@ -354,11 +364,11 @@ export default function InvitationsScreen() {
             )}
             {isExpired && (
               <ThemedText variant="caption" color="error" style={styles.expiredText}>
-                This invitation has expired
+                {t('invitations.expiredNotice')}
               </ThemedText>
             )}
             <Button
-              title="Reject"
+              title={t('invitations.reject')}
               variant="outline"
               onPress={() => handleReject(item)}
               loading={rejectInvitation.isPending}
@@ -439,13 +449,13 @@ export default function InvitationsScreen() {
     return (
       <ThemedView variant="background" style={styles.container}>
         <View style={[styles.header, { paddingHorizontal: padding }]}>
-          <ThemedText variant="h1" heading>Invitations</ThemedText>
+          <ThemedText variant="h1" heading>{t('tabs.invitations')}</ThemedText>
         </View>
         {renderDebugCard()}
         <EmptyState
           icon="mail-outline"
-          title="No Invitations"
-          message="You don't have any pending invitations"
+          title={t('invitations.emptyTitle')}
+          message={t('invitations.emptyMessage')}
         />
       </ThemedView>
     );
@@ -454,10 +464,9 @@ export default function InvitationsScreen() {
   return (
     <ThemedView variant="background" style={styles.container}>
       <View style={[styles.header, { paddingHorizontal: padding }]}>
-        <ThemedText variant="h1" heading>Invitations</ThemedText>
+        <ThemedText variant="h1" heading>{t('tabs.invitations')}</ThemedText>
         <ThemedText variant="caption" color="textSecondary">
-          {invitations.length + guardianInvitations.length}{' '}
-          {invitations.length + guardianInvitations.length === 1 ? 'invitation' : 'invitations'}
+          {t('invitations.count', { count: invitations.length + guardianInvitations.length })}
         </ThemedText>
       </View>
       <View style={{ paddingHorizontal: padding }}>{renderDebugCard()}</View>

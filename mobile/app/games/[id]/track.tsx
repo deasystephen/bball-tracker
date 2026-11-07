@@ -31,6 +31,7 @@ import { formatShotDescription } from '../../../utils/shot-label';
 import { getGameResult } from '../../../utils/game-result';
 import type { CreateGameEventInput, ShotMetadata } from '../../../types/game';
 import { useGoBack } from '../../../hooks/useGoBack';
+import { useTranslation } from '../../../i18n';
 
 const UNDO_DURATION = 5; // seconds
 
@@ -40,6 +41,7 @@ export default function TrackGameScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const goBackToGame = useGoBack(`/games/${id}`);
   const insets = useSafeAreaInsets();
+  const { t } = useTranslation();
 
   // Confetti ref
   const confettiRef = useRef<ConfettiCannon>(null);
@@ -61,7 +63,7 @@ export default function TrackGameScreen() {
   const allowed = useAccessGuard(
     !!game && !!user,
     canTrack,
-    'You do not have permission to track stats for this game',
+    t('games.trackNotAllowed'),
     { fallback: `/games/${id}`, mode: 'replace' }
   );
 
@@ -133,10 +135,10 @@ export default function TrackGameScreen() {
       } catch {
         // Revert on error
         setOpponentScoreOverride(opponentScore);
-        Alert.alert('Error', 'Failed to update opponent score');
+        Alert.alert(t('common.error'), t('tracker.opponentScoreFailed'));
       }
     },
-    [opponentScore, id, updateGame]
+    [opponentScore, id, updateGame, t]
   );
 
   const handleSubtractOpponentPoint = useCallback(async () => {
@@ -154,9 +156,9 @@ export default function TrackGameScreen() {
     } catch {
       // Revert on error
       setOpponentScoreOverride(opponentScore);
-      Alert.alert('Error', 'Failed to update opponent score');
+      Alert.alert(t('common.error'), t('tracker.opponentScoreFailed'));
     }
-  }, [opponentScore, id, updateGame]);
+  }, [opponentScore, id, updateGame, t]);
 
   // Every submit takes the next number, so a failed create can tell whether
   // the coach has recorded anything since it was sent.
@@ -218,9 +220,9 @@ export default function TrackGameScreen() {
         if (nothingSince && !useGameTrackingStore.getState().selectedPlayerId) {
           selectPlayer(playerId, playerName);
         }
-        const who = playerName || 'this player';
+        const who = playerName || t('tracker.thisPlayer');
         const reason = error instanceof Error && error.message ? `\n\n${error.message}` : '';
-        Alert.alert('Error', `Could not save ${eventLabel} for ${who}.${reason}`);
+        Alert.alert(t('common.error'), `${t('tracker.saveFailed', { play: eventLabel, player: who })}${reason}`);
       }
     },
     [
@@ -233,6 +235,7 @@ export default function TrackGameScreen() {
       selectPlayer,
       refetchEvents,
       discardEvent,
+      t,
     ]
   );
 
@@ -258,24 +261,24 @@ export default function TrackGameScreen() {
         case 'OREB':
           eventType = 'REBOUND';
           metadata = { type: 'offensive' };
-          statLabel = 'Off Rebound';
+          statLabel = t('tracker.play.offRebound');
           break;
         case 'DREB':
           eventType = 'REBOUND';
           metadata = { type: 'defensive' };
-          statLabel = 'Def Rebound';
+          statLabel = t('tracker.play.defRebound');
           break;
         case 'STL':
           eventType = 'STEAL';
-          statLabel = 'Steal';
+          statLabel = t('tracker.event.steal');
           break;
         case 'BLK':
           eventType = 'BLOCK';
-          statLabel = 'Block';
+          statLabel = t('tracker.event.block');
           break;
         case 'AST':
           eventType = 'ASSIST';
-          statLabel = 'Assist';
+          statLabel = t('tracker.event.assist');
           break;
         default:
           return Promise.resolve();
@@ -283,7 +286,7 @@ export default function TrackGameScreen() {
 
       return submitEvent(eventType, metadata, statLabel);
     },
-    [submitEvent]
+    [submitEvent, t]
   );
 
   // Handle undo — deletes the exact server event the banner refers to. The
@@ -308,18 +311,18 @@ export default function TrackGameScreen() {
       refetchEvents();
     } catch (error) {
       Alert.alert(
-        'Error',
-        error instanceof Error ? error.message : 'Failed to undo'
+        t('common.error'),
+        error instanceof Error ? error.message : t('tracker.undoFailed')
       );
     }
-  }, [undoLast, id, deleteEvent, refetchEvents]);
+  }, [undoLast, id, deleteEvent, refetchEvents, t]);
 
   // Handle end game
   const handleEndGame = useCallback(() => {
-    Alert.alert('End Game', 'Are you sure you want to end this game?', [
-      { text: 'Cancel', style: 'cancel' },
+    Alert.alert(t('games.endGame'), t('games.endGameConfirm'), [
+      { text: t('common.cancel'), style: 'cancel' },
       {
-        text: 'End Game',
+        text: t('games.endGame'),
         style: 'destructive',
         onPress: async () => {
           try {
@@ -346,24 +349,24 @@ export default function TrackGameScreen() {
             }
           } catch (error) {
             Alert.alert(
-              'Error',
-              error instanceof Error ? error.message : 'Failed to end game'
+              t('common.error'),
+              error instanceof Error ? error.message : t('games.endFailed')
             );
           }
         },
       },
     ]);
-  }, [id, updateGame, homeScore, opponentScore, clearSession, router]);
+  }, [id, updateGame, homeScore, opponentScore, clearSession, router, t]);
 
   // Handle back
   const handleBack = useCallback(() => {
     Alert.alert(
-      'Leave Tracking',
-      'Are you sure you want to leave? You can continue tracking later.',
+      t('games.leaveTrackingTitle'),
+      t('games.leaveTrackingConfirm'),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         {
-          text: 'Leave',
+          text: t('games.leave'),
           onPress: () => {
             clearSession();
             router.back();
@@ -371,18 +374,18 @@ export default function TrackGameScreen() {
         },
       ]
     );
-  }, [clearSession, router]);
+  }, [clearSession, router, t]);
 
   // Loading state
   if (gameLoading || eventsLoading) {
-    return <LoadingSpinner message="Loading game..." fullScreen />;
+    return <LoadingSpinner message={t('games.loadingGame')} fullScreen />;
   }
 
   // Error state
   if (gameError || !game) {
     return (
       <ErrorState
-        message={gameError instanceof Error ? gameError.message : 'Game not found'}
+        message={gameError instanceof Error ? gameError.message : t('games.notFound')}
         onRetry={refetchGame}
         onBack={goBack}
       />
@@ -391,14 +394,14 @@ export default function TrackGameScreen() {
 
   // Never flash the tracker to someone being bounced out by the guard.
   if (!allowed) {
-    return <LoadingSpinner message="Loading game..." fullScreen />;
+    return <LoadingSpinner message={t('games.loadingGame')} fullScreen />;
   }
 
   // Check if game is in progress
   if (game.status !== 'IN_PROGRESS') {
     return (
       <ErrorState
-        message="This game is not in progress"
+        message={t('games.notInProgress')}
         // Nothing to retry: the only way on is out.
         onBack={goBackToGame}
       />
@@ -412,24 +415,30 @@ export default function TrackGameScreen() {
   const getUndoMessage = (): string => {
     if (!lastEvent) return '';
 
-    const playerName = lastEvent.playerName || 'Player';
+    const player = lastEvent.playerName || t('tracker.playerFallback');
+    const undo = (play: string) => t('tracker.undoMessage', { player, play });
 
     switch (lastEvent.eventType) {
       case 'SHOT':
-        return `${playerName} - ${formatShotDescription(lastEvent.metadata as ShotMetadata)}`;
+        return undo(formatShotDescription(lastEvent.metadata as ShotMetadata));
       case 'REBOUND': {
         const meta = lastEvent.metadata as { type?: string };
-        const type = meta?.type === 'offensive' ? 'Off' : 'Def';
-        return `${playerName} - ${type} Rebound`;
+        return undo(
+          meta?.type === 'offensive' ? t('tracker.play.offRebound') : t('tracker.play.defRebound')
+        );
       }
       case 'ASSIST':
-        return `${playerName} - Assist`;
+        return undo(t('tracker.event.assist'));
       case 'STEAL':
-        return `${playerName} - Steal`;
+        return undo(t('tracker.event.steal'));
       case 'BLOCK':
-        return `${playerName} - Block`;
+        return undo(t('tracker.event.block'));
+      case 'TURNOVER':
+        return undo(t('tracker.event.turnover'));
+      case 'FOUL':
+        return undo(t('tracker.event.foul'));
       default:
-        return `${playerName} - ${lastEvent.eventType}`;
+        return undo(lastEvent.eventType);
     }
   };
 
@@ -440,7 +449,7 @@ export default function TrackGameScreen() {
       {/* Score Header */}
       <View style={{ paddingTop: insets.top }}>
         <ScoreDisplay
-          homeTeamName={game.team?.name || 'Your Team'}
+          homeTeamName={game.team?.name || t('games.yourTeam')}
           awayTeamName={game.opponent}
           homeScore={homeScore}
           awayScore={opponentScore}

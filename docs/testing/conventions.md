@@ -128,6 +128,13 @@ The fix: Add API integration tests AND schema validation tests for every endpoin
   names differ from `en.json` (i18next format syntax counts by name: `{{count, number}}` is
   `count`), naming each offender. Add a new key to both files in the same change; a new locale file is
   picked up automatically.
+- **No user-facing literal in source (#671).** `__tests__/i18n/hardcoded-copy.test.ts` parses `app/`,
+  `components/`, `hooks/`, `services/` and `utils/` and fails on JSX text, a copy prop (`title`, `label`,
+  `placeholder`, `accessibilityLabel`, …), an `Alert.alert` / toast / `useAccessGuard` message or a
+  validation error written as a literal. Use `t()` (or `i18n.t()` outside a component). A Spanish
+  render test switches the real instance with `await i18n.changeLanguage('es')` and restores `en` in an
+  `afterEach` wrapped in `act` (mounted components re-render on the switch); see
+  `__tests__/i18n/spanish-shared.test.tsx`.
 
 ## Real-database suites (`backend/tests/integration/*.db.test.ts`)
 - They unmock Prisma and write real rows, in CI's Postgres and in a developer's local one,
@@ -209,6 +216,22 @@ The fix: Add API integration tests AND schema validation tests for every endpoin
 - **Hard-deleting users goes through `test-leftovers.ts#deleteUsersWhere`**: it deletes the
   invitations they sent first (both `invitedById` foreign keys are `RESTRICT`, #783).
   `removeTestRows` and the seed's tombstone and managed-player resets use it.
+
+## Real-Redis suite (`backend/tests/redis/*.redis.test.ts`, #452)
+- **Not part of `npm test`.** Redis is not a prerequisite for the default suite, so `jest.config.js`
+  ignores `*.redis.test.ts`. Run it with `npm run test:redis` (overrides the ignore list) against the
+  docker-compose Redis (`docker-compose up -d`). CI's backend job starts `redis:7-alpine` and runs it
+  in its own step, "Run real-Redis tests", after the main suite.
+- Every other suite runs without Redis: `tests/setup.ts` sets `REDIS_URL` and
+  `REDIS_SOCKET_ADAPTER_URL` to empty strings (deleting them is not enough, `src/config/env.ts` re-runs
+  dotenv and `.env` points at the docker-compose Redis), so rate limiters count in memory and
+  counters never leak between workers or runs.
+- `tests/redis/socket-redis-adapter.redis.test.ts` reads `REDIS_TEST_URL` (default
+  `redis://localhost:6379`). It proves the Socket.io Redis adapter delivers across two servers, the
+  degradation with an unreachable Redis (including closing during a reconnect), and the shared
+  rate-limit counters (two stores and two Express apps sharing one budget, the handshake window seen
+  by a fresh task). Keys and rooms carry a per-run id and are deleted in `afterAll`. It fails rather
+  than skips when Redis is down.
 
 ## Migration backfill guard (#493)
 - `ci.yml` applies migrations to an **empty** database, so it cannot see a backfill fail. The

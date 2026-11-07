@@ -10,6 +10,7 @@ import { ThemedText } from './ThemedText';
 import { useTheme } from '../hooks/useTheme';
 import { spacing } from '../theme';
 import { MIN_TOUCH_TARGET } from '../utils/touch-target';
+import { useTranslation } from '../i18n';
 
 interface PrintButtonProps {
   title?: string;
@@ -60,10 +61,12 @@ const PRINT_STYLES = `
 `;
 
 export const PrintButton: React.FC<PrintButtonProps> = ({
-  title = 'Print',
+  title: titleProp,
   showLabel = true,
 }) => {
   const { colors } = useTheme();
+  const { t } = useTranslation();
+  const title = titleProp ?? t('common.print');
 
   // Inject print styles on mount
   useEffect(() => {

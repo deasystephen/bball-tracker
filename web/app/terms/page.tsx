@@ -45,10 +45,15 @@ export default function TermsOfServicePage() {
           </li>
           <li>Give us accurate information and keep it up to date.</li>
           <li>
-            <Placeholder>
-              OWNER DECISION: minimum age to hold an account, and whether a younger player may sign in with a parent’s
-              or guardian’s permission. This must match the decision in section 8 of the Privacy Policy.
-            </Placeholder>
+            <strong>You must be at least 13 years old to hold an account</strong>, or 16 if you live in the European
+            Union, the European Economic Area, the United Kingdom or Switzerland. When you first sign in we ask your
+            birth month and year to confirm this; we keep only the fact that you confirmed. Younger players take part as
+            roster records that a coach or a parent or guardian keeps, without an account of their own (see section 4
+            and the Privacy Policy, section 8).
+          </li>
+          <li>
+            If we learn that an account belongs to someone under the minimum age, we will turn it into a roster record
+            kept by the team’s coach or a parent, or delete it, and delete the sign-in account at our provider.
           </li>
           <li>One person, one account. Do not share your account or sign in as someone else.</li>
         </ul>
@@ -59,8 +64,10 @@ export default function TermsOfServicePage() {
         <ul>
           <li>you have the authority of the team, club or league to manage it in Hooplings;</li>
           <li>
-            before you add a child to a roster, or add a child’s email address or photo, you have the permission of the
-            child’s parent or guardian to do so;
+            before you add a child to a roster, or add a child’s email address or photo, you are the child’s parent or
+            guardian or have that person’s permission, and you will remove the information if that permission is
+            withdrawn; and you never enter an email address for a player under 13 (invite a parent or guardian
+            instead);
           </li>
           <li>
             you enter only information that is accurate and needed to run the team, and you invite only email

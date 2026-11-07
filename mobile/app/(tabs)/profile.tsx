@@ -23,6 +23,7 @@ import { ThemedView, ThemedText, Card, AvatarPicker, UsageMeter, ActionMenu, typ
 import { spacing, borderRadius } from '../../theme';
 import { getHorizontalPadding } from '../../utils/responsive';
 import { uploadAvatar } from '../../services/upload-service';
+import { uploadAwareErrorMessage } from '../../utils/upload-error';
 import { useTranslation } from '../../i18n';
 import { captureException } from '../../services/sentry';
 import { MIN_TOUCH_TARGET } from '../../utils/touch-target';
@@ -87,7 +88,7 @@ export default function Profile() {
         // into the auth store (audit #10).
         await updateProfile.mutateAsync({ profilePictureUrl: '' });
       } catch {
-        Alert.alert('Error', 'Failed to remove photo');
+        Alert.alert(t('common.error'), t('profile.removePhotoFailed'));
       }
       return;
     }
@@ -98,18 +99,17 @@ export default function Profile() {
       await updateProfile.mutateAsync({ profilePictureUrl: imageUrl });
     } catch (err) {
       captureException(err, { flow: 'avatar-change' });
-      const message = err instanceof Error && err.message ? err.message : 'Failed to upload photo';
-      Alert.alert('Error', message);
+      Alert.alert(t('common.error'), uploadAwareErrorMessage(err, t, 'profile.uploadPhotoFailed'));
     } finally {
       setUploadingAvatar(false);
     }
   };
 
   const handleLogout = () => {
-    Alert.alert('Logout', 'Are you sure you want to logout?', [
-      { text: 'Cancel', style: 'cancel' },
+    Alert.alert(t('profile.logout'), t('profile.logoutConfirm'), [
+      { text: t('common.cancel'), style: 'cancel' },
       {
-        text: 'Logout',
+        text: t('profile.logout'),
         style: 'destructive',
         onPress: () => {
           logout();
@@ -153,12 +153,12 @@ export default function Profile() {
             />
             {uploadingAvatar && (
               <ThemedText variant="caption" color="textSecondary" style={styles.uploadingText}>
-                Uploading...
+                {t('profile.uploading')}
               </ThemedText>
             )}
           </View>
           <ThemedText variant="h2" heading style={styles.userName}>
-            {user?.name || 'User'}
+            {user?.name || t('profile.userFallback')}
           </ThemedText>
           <View style={styles.roleChip}>
             <Ionicons
@@ -167,12 +167,12 @@ export default function Profile() {
               color={colors.primary}
             />
             <ThemedText variant="caption" color="primary" style={styles.roleText}>
-              {user?.role || 'Player'}
+              {user?.role ? t(`profile.role.${user.role}`, { defaultValue: user.role }) : t('profile.playerFallback')}
             </ThemedText>
           </View>
           {/* Season summary line */}
           <ThemedText variant="caption" color="textSecondary" style={styles.seasonSummary}>
-            {teams?.length || 0} team{(teams?.length || 0) !== 1 ? 's' : ''}
+            {t('seasons.teamCount', { count: teams?.length || 0 })}
           </ThemedText>
         </View>
 
@@ -187,9 +187,9 @@ export default function Profile() {
               <Ionicons name="stats-chart" size={20} color={colors.primary} />
             </View>
             <View style={styles.myStatsInfo}>
-              <ThemedText variant="bodyBold">My Stats</ThemedText>
+              <ThemedText variant="bodyBold">{t('profile.myStats')}</ThemedText>
               <ThemedText variant="caption" color="textSecondary">
-                View your personal statistics
+                {t('profile.myStatsHint')}
               </ThemedText>
             </View>
             <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
@@ -202,7 +202,7 @@ export default function Profile() {
         {isGuardian(user) && (
           <View style={styles.section} testID="my-kids-section">
             <ThemedText variant="h4" heading style={styles.sectionTitle}>
-              My kids
+              {t('profile.myKids')}
             </ThemedText>
             <Card variant="default" style={styles.settingsCard}>
               {guardianChildren(user).map((child, index) => (
@@ -225,8 +225,9 @@ export default function Profile() {
                       <View style={styles.settingContent}>
                         <ThemedText variant="body">{childDisplayName(child)}</ThemedText>
                         <ThemedText variant="caption" color="textSecondary">
-                          {relationshipLabel(child.relationship)}
-                          {child.isPrimary ? ' \u00B7 Primary' : ''}
+                          {child.isPrimary
+                            ? t('guardians.primaryRelationship', { relationship: relationshipLabel(child.relationship) })
+                            : relationshipLabel(child.relationship)}
                         </ThemedText>
                       </View>
                     </TouchableOpacity>
@@ -249,7 +250,7 @@ export default function Profile() {
         {/* Account Info */}
         <View style={styles.section}>
           <ThemedText variant="h4" heading style={styles.sectionTitle}>
-            Account
+            {t('profile.accountSection')}
           </ThemedText>
           <Card variant="default" style={styles.infoCard}>
             {/* Name row opens the shared display-name screen in edit mode
@@ -257,7 +258,7 @@ export default function Profile() {
             <TouchableOpacity
               style={styles.infoRow}
               accessibilityRole="button"
-              accessibilityLabel="Edit name"
+              accessibilityLabel={t('profile.editNameA11y')}
               onPress={() => router.push('/onboarding/name?from=profile')}
             >
               <View style={[styles.infoIcon, { backgroundColor: colors.primary + '20' }]}>
@@ -265,9 +266,9 @@ export default function Profile() {
               </View>
               <View style={styles.infoContent}>
                 <ThemedText variant="caption" color="textSecondary">
-                  Name
+                  {t('profile.nameLabel')}
                 </ThemedText>
-                <ThemedText variant="body">{user?.name || 'Not set'}</ThemedText>
+                <ThemedText variant="body">{user?.name || t('profile.notSet')}</ThemedText>
               </View>
               <Ionicons name="pencil" size={18} color={colors.textTertiary} />
             </TouchableOpacity>
@@ -278,9 +279,9 @@ export default function Profile() {
               </View>
               <View style={styles.infoContent}>
                 <ThemedText variant="caption" color="textSecondary">
-                  Email
+                  {t('profile.emailLabel')}
                 </ThemedText>
-                <ThemedText variant="body">{user?.email || 'Not set'}</ThemedText>
+                <ThemedText variant="body">{user?.email || t('profile.notSet')}</ThemedText>
               </View>
             </View>
             <View style={[styles.divider, { backgroundColor: colors.border }]} />
@@ -290,9 +291,9 @@ export default function Profile() {
               </View>
               <View style={styles.infoContent}>
                 <ThemedText variant="caption" color="textSecondary">
-                  Account Status
+                  {t('profile.accountStatus')}
                 </ThemedText>
-                <ThemedText variant="body">Active</ThemedText>
+                <ThemedText variant="body">{t('profile.statusActive')}</ThemedText>
               </View>
             </View>
             <View style={[styles.divider, { backgroundColor: colors.border }]} />
@@ -376,7 +377,7 @@ export default function Profile() {
         {canAccessAdmin(user) && (
           <View style={styles.section}>
             <ThemedText variant="h4" heading style={styles.sectionTitle}>
-              Management
+              {t('profile.management')}
             </ThemedText>
             <Card variant="default" style={styles.settingsCard}>
               <TouchableOpacity
@@ -389,9 +390,9 @@ export default function Profile() {
                     <Ionicons name="trophy" size={18} color={colors.primary} />
                   </View>
                   <View style={styles.settingContent}>
-                    <ThemedText variant="body">Leagues & Seasons</ThemedText>
+                    <ThemedText variant="body">{t('profile.leaguesAndSeasons')}</ThemedText>
                     <ThemedText variant="caption" color="textSecondary">
-                      Create and manage leagues
+                      {t('profile.leaguesHint')}
                     </ThemedText>
                   </View>
                 </View>
@@ -404,14 +405,14 @@ export default function Profile() {
         {/* Settings */}
         <View style={styles.section}>
           <ThemedText variant="h4" heading style={styles.sectionTitle}>
-            Settings
+            {t('profile.settings')}
           </ThemedText>
           <Card variant="default" style={styles.settingsCard}>
             <TouchableOpacity
               style={styles.settingRow}
               onPress={toggleColorScheme}
               accessibilityRole="switch"
-              accessibilityLabel="Toggle dark mode"
+              accessibilityLabel={t('profile.darkModeA11y')}
               accessibilityState={{ checked: colorScheme === 'dark' }}
             >
               <View style={styles.settingLeft}>
@@ -423,9 +424,9 @@ export default function Profile() {
                   />
                 </View>
                 <View style={styles.settingContent}>
-                  <ThemedText variant="body">Appearance</ThemedText>
+                  <ThemedText variant="body">{t('profile.appearance')}</ThemedText>
                   <ThemedText variant="caption" color="textSecondary">
-                    {colorScheme === 'dark' ? 'Dark Mode' : 'Light Mode'}
+                    {colorScheme === 'dark' ? t('profile.darkMode') : t('profile.lightMode')}
                   </ThemedText>
                 </View>
               </View>
@@ -489,16 +490,16 @@ export default function Profile() {
               style={styles.settingRow}
               onPress={() => router.push('/about')}
               accessibilityRole="button"
-              accessibilityLabel="About"
+              accessibilityLabel={t('about.title')}
             >
               <View style={styles.settingLeft}>
                 <View style={[styles.settingIcon, { backgroundColor: colors.primary + '20' }]}>
                   <Ionicons name="information-circle" size={18} color={colors.primary} />
                 </View>
                 <View style={styles.settingContent}>
-                  <ThemedText variant="body">About</ThemedText>
+                  <ThemedText variant="body">{t('about.title')}</ThemedText>
                   <ThemedText variant="caption" color="textSecondary">
-                    {`Version ${Constants.expoConfig?.version ?? 'unknown'}`}
+                    {t('profile.version', { version: Constants.expoConfig?.version ?? t('about.unknown') })}
                   </ThemedText>
                 </View>
               </View>
@@ -513,11 +514,11 @@ export default function Profile() {
             style={[styles.logoutButton, { backgroundColor: colors.error + '15' }]}
             onPress={handleLogout}
             accessibilityRole="button"
-            accessibilityLabel="Logout"
+            accessibilityLabel={t('profile.logout')}
           >
             <Ionicons name="log-out-outline" size={20} color={colors.error} />
             <ThemedText variant="body" style={[styles.logoutText, { color: colors.error }]}>
-              Logout
+              {t('profile.logout')}
             </ThemedText>
           </TouchableOpacity>
         </View>

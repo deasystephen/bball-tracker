@@ -21,7 +21,7 @@
 3. Click **"Copy"** or **"Show"** to reveal the key
 4. **Save this key** - you'll need it for your `.env` file
 
-**Note**: For development, use the test key (`sk_test_...`). For production, create a live key (`sk_live_...`).
+**Note**: For development, use the test key (`sk_test_...`). Production uses the WorkOS Production environment (`sk_live_...`); its setup and the switch are in `docs/runbooks/workos-production-cutover.md` (#24).
 
 ## Step 4: Get Your Client ID
 

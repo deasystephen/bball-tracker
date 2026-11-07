@@ -4,6 +4,7 @@
 
 import { create } from 'zustand';
 import type { CreateGameEventInput, GameEvent, GameEventType, ShotMetadata } from '../types/game';
+import { i18n } from '../i18n';
 
 export interface LocalEvent extends CreateGameEventInput {
   localId: string;
@@ -131,19 +132,19 @@ function detectMilestone(
   pid: string,
   playerName?: string
 ): string | null {
-  const name = playerName || 'Player';
+  const name = playerName || i18n.t('tracker.playerFallback');
   const prevPts = prev.playerPoints[pid] || 0;
   const newPts = next.playerPoints[pid] || 0;
 
   let milestone: string | null = null;
   if (newPts >= 20 && prevPts < 20) {
-    milestone = `${name} hit 20 points!`;
+    milestone = i18n.t('tracker.milestone.points', { name, points: 20 });
   } else if (newPts >= 10 && prevPts < 10) {
-    milestone = `${name} hit 10 points!`;
+    milestone = i18n.t('tracker.milestone.points', { name, points: 10 });
   }
 
   if (doubleDoubleCategories(next, pid) >= 2 && doubleDoubleCategories(prev, pid) < 2) {
-    milestone = `${name} has a double-double!`;
+    milestone = i18n.t('tracker.milestone.doubleDouble', { name });
   }
 
   return milestone;

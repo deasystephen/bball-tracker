@@ -5,6 +5,31 @@
 jest.mock('../../src/services/upload-service', () => ({
   deletePreviousAvatar: jest.fn().mockResolvedValue(undefined),
   assertOwnUploadUrl: jest.fn(),
+  // Like the real one: a key for an upload of ours, null for nothing to do
+  checkAvatarUpload: jest.fn(async (url: unknown) => (url ? 'avatars/k/v.jpg' : null)),
+  untagAvatarUpload: jest.fn().mockResolvedValue(undefined),
+  avatarUploadKey: jest.fn((url: unknown) => (url ? 'avatars/k/v.jpg' : null)),
+  // The real wrappers' order over the mocked steps (#1005): write, then untag
+  // only after the write resolved and kept the URL; the promoted one checks first.
+  withCheckedAvatar: jest.fn(
+    async (key: string | null, write: () => Promise<unknown>, stored: (r: unknown) => boolean = () => true) => {
+      const m = jest.requireMock('../../src/services/upload-service') as {
+        untagAvatarUpload: (k: string) => Promise<void>;
+      };
+      const result = await write();
+      if (key !== null && stored(result)) await m.untagAvatarUpload(key);
+      return result;
+    }
+  ),
+  withPromotedAvatar: jest.fn(
+    async (url: unknown, write: () => Promise<unknown>, stored: (r: unknown) => boolean = () => true) => {
+      const m = jest.requireMock('../../src/services/upload-service') as {
+        checkAvatarUpload: (u: unknown) => Promise<string | null>;
+        withCheckedAvatar: (k: string | null, w: () => Promise<unknown>, s: (r: unknown) => boolean) => Promise<unknown>;
+      };
+      return m.withCheckedAvatar(await m.checkAvatarUpload(url), write, stored);
+    }
+  ),
 }));
 
 // Only reached by the deletePlayer cases that run the real
@@ -13,13 +38,14 @@ const mockS3Send = jest.fn();
 jest.mock('@aws-sdk/client-s3', () => ({
   S3Client: jest.fn().mockImplementation(() => ({ send: mockS3Send })),
   DeleteObjectCommand: jest.fn().mockImplementation((input: unknown) => ({ input })),
+  DeleteObjectTaggingCommand: jest.fn().mockImplementation((input: unknown) => ({ input })),
 }));
 
 import { Prisma } from '@prisma/client';
 import { PlayerService } from '../../src/services/player-service';
 import { teamAccessWhere } from '../../src/utils/permissions';
 import { emailEquals } from '../../src/utils/email-match';
-import { BadRequestError, ConflictError, NotFoundError } from '../../src/utils/errors';
+import { BadRequestError, ConflictError, NotFoundError, UploadExpiredError } from '../../src/utils/errors';
 import { mockPrisma } from '../setup';
 import {
   createPlayer,
@@ -36,7 +62,9 @@ import {
 import { expectNotFoundError, expectBadRequestError } from '../helpers';
 import { domainEvent, spyOnInfo } from '../support/domain-events';
 
-import { assertOwnUploadUrl, deletePreviousAvatar } from '../../src/services/upload-service';
+import { assertOwnUploadUrl, deletePreviousAvatar, checkAvatarUpload, untagAvatarUpload } from '../../src/services/upload-service';
+const mockCheck = checkAvatarUpload as jest.Mock;
+const mockUntag = untagAvatarUpload as jest.Mock;
 
 const mockDeletePreviousAvatar = deletePreviousAvatar as jest.MockedFunction<typeof deletePreviousAvatar>;
 const mockAssertOwnUploadUrl = assertOwnUploadUrl as jest.Mock;
@@ -121,6 +149,31 @@ describe('PlayerService', () => {
       ).rejects.toBeInstanceOf(BadRequestError);
 
       expect(mockAssertOwnUploadUrl).toHaveBeenCalledWith(url, ADMIN_CALLER.id);
+      expect(mockPrisma.user.create).not.toHaveBeenCalled();
+    });
+
+    it('promotes a supplied upload before the row is created (#1005)', async () => {
+      const url = `https://bball-tracker-avatars-dev.s3.amazonaws.com/avatars/${ADMIN_CALLER.id}/pic.jpg`;
+      (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.user.create as jest.Mock).mockResolvedValue(createPlayer({ profilePictureUrl: url }));
+
+      await PlayerService.createPlayer({ email: 'new@test.com', name: 'New', profilePictureUrl: url }, ADMIN_CALLER);
+
+      expect(mockCheck).toHaveBeenCalledWith(url);
+      expect(mockCheck.mock.invocationCallOrder[0]).toBeLessThan(
+        (mockPrisma.user.create as jest.Mock).mock.invocationCallOrder[0]
+      );
+    });
+
+    it('writes nothing when the upload has expired (400 upload_expired, #1005)', async () => {
+      const url = `https://bball-tracker-avatars-dev.s3.amazonaws.com/avatars/${ADMIN_CALLER.id}/pic.jpg`;
+      (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(null);
+      mockCheck.mockRejectedValueOnce(new UploadExpiredError());
+
+      await expect(
+        PlayerService.createPlayer({ email: 'new@test.com', name: 'New', profilePictureUrl: url }, ADMIN_CALLER)
+      ).rejects.toBeInstanceOf(UploadExpiredError);
+
       expect(mockPrisma.user.create).not.toHaveBeenCalled();
     });
 
@@ -610,6 +663,45 @@ describe('PlayerService', () => {
       await PlayerService.updatePlayer(kid.id, { profilePictureUrl: url }, coach.id);
 
       expect(mockAssertOwnUploadUrl).toHaveBeenCalledWith(url, coach.id);
+      // A new upload leaves the pending state before the write (#1005)
+      expect(mockCheck).toHaveBeenCalledWith(url);
+      expect(mockCheck.mock.invocationCallOrder[0]).toBeLessThan(
+        (mockPrisma.user.update as jest.Mock).mock.invocationCallOrder[0]
+      );
+    });
+
+    it('a re-save of the stored URL skips the check but untags again (#1005)', async () => {
+      const url = 'https://bball-tracker-avatars-dev.s3.amazonaws.com/avatars/p/same.jpg';
+      const player = createPlayer({ profilePictureUrl: url });
+      (mockPrisma.user.findUnique as jest.Mock)
+        .mockResolvedValueOnce(player)
+        .mockResolvedValueOnce(player);
+      mockGuardedWrite(player);
+
+      await PlayerService.updatePlayer(player.id, { profilePictureUrl: url }, player.id);
+
+      // A re-save skips the check but is still untagged after the write (repairs a failed untag)
+      expect(mockCheck).not.toHaveBeenCalled();
+      expect(mockUntag).toHaveBeenCalledWith('avatars/k/v.jpg');
+    });
+
+    it('writes nothing when the new upload has expired (400 upload_expired, #1005)', async () => {
+      const player = createPlayer({ profilePictureUrl: null });
+      (mockPrisma.user.findUnique as jest.Mock)
+        .mockResolvedValueOnce(player)
+        .mockResolvedValueOnce(player);
+      mockCheck.mockRejectedValueOnce(new UploadExpiredError());
+
+      await expect(
+        PlayerService.updatePlayer(
+          player.id,
+          { profilePictureUrl: 'https://bball-tracker-avatars-dev.s3.amazonaws.com/avatars/p/gone.jpg' },
+          player.id
+        )
+      ).rejects.toBeInstanceOf(UploadExpiredError);
+
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
+      expect(mockDeletePreviousAvatar).not.toHaveBeenCalled();
     });
 
     it('writes nothing when the upload gate rejects the URL (#717)', async () => {

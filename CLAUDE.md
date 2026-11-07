@@ -4,7 +4,7 @@ Guidance for Claude Code in this repository. This file holds **commands, hard ru
 
 ## Project Overview
 
-Hooplings (formerly "Basketball Tracker"; the repo, the `bball-tracker` EAS slug and the `com.bballtracker.mobile` bundle id keep the old identifier, the URL scheme is `hooplings://`) is a monorepo with three packages: a React Native/Expo mobile app (`mobile/`), a Node.js/Express backend (`backend/`) and a Next.js web app (`web/`) that hosts the public `hooplings.com/invite/<token>` accept flow. Real-time game tracking uses Socket.io backed by PostgreSQL; statistics are computed when games finish. Production is `api.hooplings.com` (ECS Fargate, single task) and the iOS app ships through TestFlight plus EAS OTA updates.
+Hooplings (formerly "Basketball Tracker"; the repo, the `bball-tracker` EAS slug and the `com.bballtracker.mobile` bundle id keep the old identifier, the URL scheme is `hooplings://`) is a monorepo with three packages: a React Native/Expo mobile app (`mobile/`), a Node.js/Express backend (`backend/`) and a Next.js web app (`web/`, ECS behind the API's ALB) that hosts the public `hooplings.com/invite/<token>` accept flow and the support, privacy and terms pages. Real-time game tracking uses Socket.io backed by PostgreSQL; statistics are computed when games finish. Production is `api.hooplings.com` (ECS Fargate, single task) and the iOS app ships through TestFlight plus EAS OTA updates.
 
 Architecture diagram: `README.md` (iOS app → Express API → PostgreSQL via Prisma, Redis cache).
 
@@ -21,11 +21,12 @@ Architecture diagram: `README.md` (iOS app → Express API → PostgreSQL via Pr
 | Socket.io broadcast, server-derived score, tracker undo | `docs/architecture/live-games.md` |
 | Stats finalization, ties, team lineage | `docs/architecture/stats-and-lineage.md` |
 | Account deletion (as built) | `docs/architecture/account-deletion.md` |
-| Email: SES events, bounces, complaints, audiences | `docs/architecture/email.md` |
+| Email: SES events, bounces, complaints, audiences (invite funnel: `docs/architecture/web-funnel.md`) | `docs/architecture/email.md` |
 | Mobile app: routing, guards, permission gating, errors, pickers, analytics | `docs/architecture/mobile-app.md` |
 | Mobile analytics: Amplitude event catalogue, user properties, screen views, guard test | `docs/architecture/analytics.md` |
 | Mobile builds, runtime versions, OTA drift guard, URL scheme, eas-cli | `docs/deployment/mobile-builds-and-ota.md` |
 | ECS deploys: task definition, circuit breaker, what a deploy carries | `docs/deployment/ecs-deploys.md` |
+| Web app hosting (ECS behind the API's ALB), web deploys, two-apply bring-up | `docs/deployment/web-app.md` |
 | Runbooks index (on-call, email deliverability, data-subject requests, RDS) | `docs/runbooks/README.md` |
 | Testing conventions (API tests, schema tests, real-database suites, migration guard) | `docs/testing/conventions.md` |
 | Maestro E2E flows and their gotchas | `docs/testing/maestro.md` |
@@ -74,7 +75,7 @@ npm run lint && npm run type-check && npm run build   # lint is ESLint --max-war
 ```bash
 eas build --platform ios --profile preview          # TestFlight-style build
 eas build --platform all --profile production       # Store builds
-cd mobile && npm ci && npm run ota:production -- --message "description"   # Production OTA (runs the drift guard first)
+cd mobile && npm ci && npm run ota:production -- --message "description"   # Production OTA (needs SENTRY_AUTH_TOKEN, from the Keychain per command, never ~/.zshrc; drift guard first, Sentry source map upload after)
 ```
 - **An OTA ships JavaScript against the native code frozen in the binary.** Packages with native code and native config in `app.config.js` (hashed by the drift guard) move only with a native build and a new runtime version: bump `version` in `app.config.js` (`runtimeVersion` policy `appVersion`), cut the build from the branch, **verify it on a device**, record it with `BINARY_BUILD=<n> BINARY_COMMIT=<sha> npm run binary-manifest:record`, then merge. Never edit `mobile/binary-manifest.json` by hand; it lists every runtime recorded since the guard was built (1.4.0 onward) and which build it is.
 - `eas update` evaluates `app.config.js` on your machine: always pass `--environment production` and check that the CLI lists `APP_ENV` among the loaded variables, or the update ships `apiUrl: http://127.0.0.1:3000`. An update runs on the **second** launch after download.
@@ -113,16 +114,16 @@ Layered: API routes → services → Prisma. Zod validates every input. Backend 
 - Redis is a best-effort cache; every helper fails open. Keep it that way.
 
 ### Socket.io and replicas
-Rooms and rate-limit counters are in process memory, so the API is **single-replica**: autoscaling `max_capacity` is validated to 1, `MAX_REPLICAS=1` is in the task definition and `utils/replica-guard.ts` exits before listening on anything else. Do not raise capacity as a fix for load; the Redis adapter (#452) comes first. Every broadcast carries the current score so a client that drops events still converges. Event table and handshake recovery rules: `docs/architecture/live-games.md`.
+The API is **single-replica**: autoscaling `max_capacity` is validated to 1, `MAX_REPLICAS=1` is in the task definition and `utils/replica-guard.ts` exits before listening on anything else. HTTP and socket-handshake rate limits are in Redis and fail open to memory (the per-IP socket cap stays per task); the Redis adapter is wired but off until `REDIS_SOCKET_ADAPTER_URL` is set. Do not raise capacity as a fix for load: the two-task load test and the guard flip come first. Every broadcast carries the current score so a client that drops events still converges. Event table and handshake recovery rules: `docs/architecture/live-games.md`.
 
 ### URLs, email and logging
 - `PUBLIC_APP_URL` (web apex) and `API_BASE_URL` (API host) are read **only** via `utils/urls.ts`. The product name in email comes only from `services/mailer/templates/brand.ts#APP_NAME`; the support address is `SUPPORT_EMAIL` there and in mobile `config/env.ts` (a test pins them equal).
 - Every email template ends with the shared footer and is listed in `renders` in `tests/services/mailer.test.ts`. Never format a date in a template with a bare `toLocaleDateString()`; use `utils/format-date.ts` (ECS runs in UTC).
 - Every email flag returned to a client is per send (`emails.player`, `emailSent`); a failed SES send is reported, never thrown and never silent.
 - Nothing in the app blocks a send to a bounced address; SES's suppression list is the gate and the next delivery clears the roster flag. Don't add an app-level skip.
-- **Never log `req.originalUrl`**; use `utils/redact.ts` for any log line or Sentry field that carries a URL. Log `hashRecipient()` of an address, never the address.
+- **Never log `req.originalUrl`**; use `utils/redact.ts` for any log line or Sentry field that carries a URL. Log `hashRecipient()` of an address, never the address. The web server logs only through `web/lib/log.ts` (route patterns, never a request path; `docs/deployment/web-app.md#logs-and-errors`).
 - `LOG_LEVEL` is the log threshold (default `info`, set in `infra/task-definition.json`). A service method that mutates data logs one info-level domain event, ids only; `requestId`/`userId` come from the request context. No `console.*` in `src/`. Detail: `docs/architecture/backend-services.md#logging`.
-- `CORS_ORIGIN` is a comma-separated list of exact origins, always passed as an array.
+- `CORS_ORIGIN` is a comma-separated list of exact origins, always passed as an array. CORS `allowedHeaders` is an explicit list: a new header a browser sends goes there. `X-Request-Id` / `X-Hooplings-Client` contract: `docs/architecture/backend-services.md#logging`.
 
 ### Mobile
 - The API host is decided in one place, `config/env.ts#getApiUrl()`; the sign-in redirect scheme is `APP_URL_SCHEME` passed explicitly (never read the scheme off the OTA manifest).
@@ -150,7 +151,7 @@ Rooms and rate-limit counters are in process memory, so the API is **single-repl
 - **Tests exercise the path production runs.** A new or changed endpoint gets an API integration test in `tests/api/` (validation → route → service) and a schema test in `tests/schemas/`; service tests alone mock away the mismatches that ship.
 - Backend `src/services/` has a CI-only 100% function-coverage threshold: a new method that every suite mocks turns CI red with all tests green.
 - Real-database suites (`backend/tests/integration/*.db.test.ts`) name every row with a run id, use `@example.test` addresses (never `@example.com`, the seed's domain) and clean up with `removeTestRows(prisma, { run })`; never call the `'all'` scope from a test.
-- Mobile screen tests render the **real i18n instance**; never stub `useTranslation` to return the key. `__tests__/i18n/brand-guard.test.ts` fails CI on any retired brand or domain name in mobile source, locale files or Maestro flows, comments included. `__tests__/i18n/locale-parity.test.ts` fails it when `es.json` lacks an `en.json` key or its placeholders.
+- Mobile screen tests render the **real i18n instance**; never stub `useTranslation` to return the key. `__tests__/i18n/brand-guard.test.ts` fails CI on any retired brand or domain name in mobile source, locale files or Maestro flows, comments included. **Every new or changed user-facing string ships translated into every locale in `i18n/locales/` in the same PR**, marked with `npm run i18n:mark -- <code> <key>…`: `hardcoded-copy.test.ts`, `locale-parity.test.ts` (keys, placeholders, copied English, stale translations) and `locale-registry.test.ts` fail CI otherwise. Adding a language: `docs/architecture/mobile-app.md`.
 - Any major new mobile functionality ships with a Maestro flow in `.maestro/`. Flows are manual only, run sequentially with `npx prisma db seed` before **every** flow; a flow that mutates data needs a matching reset in `backend/prisma/seed.ts`. Selector and keyboard gotchas: `docs/testing/maestro.md` (also loaded as a rule when a flow is open).
 - Jest, `expo export` and Maestro cannot see a JavaScript/native mismatch; a new runtime is verified **on a device** before merge.
 
@@ -179,8 +180,8 @@ Rooms and rate-limit counters are in process memory, so the API is **single-repl
 
 ## Deploys and operations
 
-- **A push to `main` that touches `backend/`, `infra/`, `docker/` or `ci.yml` (minus Markdown) builds and deploys to ECS.** It ships everything waiting on `main` since the commit production runs (`curl -s https://api.hooplings.com/health` returns `commit`); read the run's "What this deploy carries" summary before blaming the change that started it. Dependabot's auto-merged backend bumps start no CI and wait; the daily scan's backend PRs deploy unattended.
-- **Every deploy briefly splits live games** (single-replica Socket.io during the rolling overlap). Check for `IN_PROGRESS` games before merging anything that deploys or deploying by hand (`gh workflow run CI --ref main`).
+- **A push to `main` that touches `backend/`, `infra/`, `docker/` or `ci.yml` (minus Markdown) builds and deploys to ECS.** It ships everything waiting on `main` since the commit production runs (`curl -s https://api.hooplings.com/health` returns `commit`); read the run's "What this deploy carries" summary before blaming the change that started it. Dependabot's auto-merged backend bumps start no CI and wait; the daily scan's backend PRs deploy unattended. A push that changes `web/` or `infra/web-task-definition.json` deploys only the web service (`build-and-deploy-web`, `docs/deployment/web-app.md`); `infra/web.tf` and that file never roll the API.
+- **Every deploy splits live games for under a minute** (single-replica Socket.io; the overlap is the target group's `deregistration_delay` plus client reconnect). Check for `IN_PROGRESS` games before merging anything that deploys or deploying by hand (`gh workflow run CI --ref main`).
 - `infra/task-definition.json` is the **only** source of truth for the task definition (env vars, secrets, image). Terraform declares no task definition; a value written into `.tf` or `.tfvars` changes nothing and fails silently.
 - **CI never applies Terraform.** `terraform apply` from `infra/` first, then merge; the merge of a `.tf` file still triggers a full ECS deploy that contains none of the infra change.
 - `SES_CONFIGURATION_SET` must never be deployed ahead of the `terraform apply` that creates the set. Never add SES to the apex SPF or Google Workspace to the `mail.` subdomain.

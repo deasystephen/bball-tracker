@@ -100,6 +100,150 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   `SELECT count(*) FROM "Team" WHERE "lineageId" IS NULL` = 0. Since #493 the migration backfill
   guard runs every new migration against seeded rows on each pull request (see `../testing/migration-backfill-guard.md`); it is the first check, and the snapshot rehearsal is still
   the one that meets production's rows.
+- **Season rollover (#461, `POST /teams/:id/rollover`, `TeamService.rolloverTeam`).** "Start next
+  season" creates a **new `Team` row in the target season with the same `lineageId`** and copies, in
+  one `$transaction`: every `TeamRole` (custom ones too, with their flags, via `createManyAndReturn`),
+  every `TeamStaff` row (re-pointed at the new role ids by name; a role that fails to map aborts the
+  whole rollover rather than drop the coach) and every `TeamMember` (jersey number, `0` included, and
+  position). **Not carried:** pending `TeamInvitation`s (the new row starts with none; the coach
+  re-invites from Add Player, so a carried managed player reads "Not invited" until then),
+  `CalendarFeedToken`s (a subscription stays on the season it was issued for), `Announcement`s, games,
+  stats and competition entries (#492), and deleted accounts (tombstones, #444). Guardians attach to the
+  child, not the team, so they need nothing; a guardian resend is lineage-scoped already
+  (`guardians.md`). The **old row is left untouched and stays listed** (no archive): its games and
+  `PlayerStats` are last season's, and the player career view (`GET /stats/players/:id`,
+  `StatsService.getPlayerOverallStats`) reads them per membership, so a rolled-over player shows one
+  row per team-season. `tests/integration/team-rollover.db.test.ts` proves it against Postgres.
+  - **Body:** exactly one of `seasonId` or `seasonName`; optional `name`, `ageGroup`, `gender` (absent
+    carries last season's value, `null` clears the bracket: a U12 team is U13 next year). Schema
+    `rolloverTeamSchema`.
+  - **Before any lock**, an unlocked existence read (404) and an unlocked `canManageStaff` (403), so a
+    signed-in user who may not manage the team cannot make the server lock its rows. Every decision is
+    then made (again) **inside the transaction, behind the locks**, taken in the order league and season
+    deletes use: **Users → League → Team → TeamLineage**.
+    1. lock every `User` the copy will reference (the caller, the source's staff and players), read
+       unlocked and then locked in id order with `lockUsers` (`FOR NO KEY UPDATE`, which conflicts with
+       account deletion's `FOR UPDATE`). Account deletion locks Users and then Teams, and the copy's FK
+       inserts need a share lock on every carried User, so taking the Users before the team keeps one
+       order and the two never deadlock. **Only users in that locked set and still live (`deletedAt`
+       null) are carried**: anyone added between the unlocked read and the lock is not carried (re-add
+       them on the new team), and anyone deleted meanwhile is dropped.
+    2. lock the team's `League` row (`FOR NO KEY UPDATE`), always (one cheap row): a season may be
+       created below, and taking it before the team keeps the deletes' order.
+    3. lock the source `Team` row (`lockTeamRow`, the lock staff removals and role changes take; a
+       deleted source answers 404), then **WHO** again, read **through the transaction** (`db` parameter
+       on `canManageStaff` / `isSystemAdmin` / `isHeadCoach` / `isLeagueAdmin`, default the shared
+       client): head coach, league admin or system admin; an assistant coach is refused, as for a season
+       move. WHERE is implied: the target season must be in the team's own league, and anyone who passes
+       `canManageStaff` there already passes `canWriteLeague`, so it is not called. Then lock the
+       `TeamLineage` row (rollovers of one team serialize) and re-read the source; a move into another
+       league since the unlocked read answers 400 (the League locked above would be the wrong one).
+    4. resolve the target season in that league. A picked `seasonId` is read under `FOR KEY SHARE`
+       (which also holds it against a delete until commit); gone or in another league answers the
+       **same 404** (`Season not found`), so ids cannot be probed. A `seasonName` is matched with
+       `season-service.ts#findSeasonByName` (see the name rule below), so "spring 2025" finds "Spring
+       2025". The team's own season is 400.
+    5. **idempotency first:** if the lineage already has a row in that season, that row is the answer
+       and nothing is written (even from last season's screen, and even if that season has since been
+       archived): **200 `{ created: false, seasonCreated: false, team }`**, but only to a caller with
+       `canManageRoster` **on that row** (which implies access). Anyone else gets **409
+       `team_season_exists`** with no id (`TeamSeasonExistsError`): naming the row would tell the caller
+       about a team they cannot see, e.g. a coach removed from next season's row.
+    6. an existing target season must be **active** (else **409 `season_archived`**, no ids,
+       `SeasonArchivedError`; a team is never rolled into an archived season) and, **when both it and the
+       source's season have a `startDate`**, must start strictly later (`team-service.ts#isSeasonAfter`;
+       else **400 `season_not_after_source`**, no ids, `SeasonNotAfterSourceError`). Rolling into an
+       older season would make an old team-season the newest row and lock the real current one out of
+       rolling over. When either season has no start date there is nothing to order them by, so it is
+       allowed (a season's creation time says nothing about when it is played).
+    7. **only the lineage's latest team-season may continue it.** `latestTeamSeasonId` is the lineage's
+       **most recently created `Team` row** (`createdAt` desc, then `id` desc). A rollover always
+       creates the newest row, so this is the row the team continues from; season dates are not used,
+       because seasons may have none (personal-league and many named seasons) and mixing one season's
+       `startDate` with another's `createdAt` misordered a dated club season followed by a dateless new
+       one. Any other row answers **409 `not_latest_season`** with no ids (`NotLatestSeasonError`):
+       otherwise a coach removed from this season's row could roll last season's row, where they were
+       still head coach, forward and come back.
+    8. a named season that does not exist yet needs **`isLeagueAdmin`** (through the transaction; the
+       `POST /seasons` rule, so a club coach can roll into a season the club made but never mint one, and
+       a personal-league owner, who holds a `LeagueAdmin` row since #442, can). It is created by
+       `season-service.ts#findOrCreateSeason`, the same helper as `POST /seasons` and the personal-league
+       provisioning: League row lock, the name re-matched behind it (no two creates can mint two case
+       variants), `createMany({ skipDuplicates: true })` (`INSERT … ON CONFLICT DO NOTHING`), a
+       read-back by exact name, and the `Season created` event when it inserted. A season created now is
+       after the source by construction. An archived season of that name that appeared meanwhile is the
+       same 409 `season_archived`.
+  - **The season name rule** (every create path and the rollover): `normalizeSeasonName` (zod's
+    `.trim()`, applied by `createSeasonSchema` and again inside `findOrCreateSeason`) is the stored form,
+    and `findSeasonByName` compares `lower(regexp_replace(name, '^\s+|\s+$', '', 'g'))` with the
+    lower-cased normalized input, raw SQL (never Prisma's `mode: 'insensitive'`, which compiles to an
+    unescaped `ILIKE`). The `regexp_replace` strips all surrounding whitespace on the stored side, not
+    just spaces as SQL `trim()` would, so rows written before names were normalized (a stray tab or
+    newline) still match; there is no migration and existing near-duplicates stay (oldest first). The
+    personal-league provisioning (`resolvePersonalSeasonId`) goes through the same helper, so a coach's
+    renamed " 2026\t" is reused, not doubled, and it still converges with no P2002 retry (the League
+    lock plus `ON CONFLICT DO NOTHING`). Season rename still matches exactly (#1008).
+  - Then a **201 `{ created: true, seasonCreated, team }`** (`seasonCreated`: this request inserted the
+    season). There is no P2002 retry: the transaction runs inside
+    `createOrConflict` naming `Team_lineageId_seasonId_key` (or its columns), so a P2002 on that unique
+    (a concurrent season move into the same season) answers the season move's 400
+    (`SEASON_SIBLING_MESSAGE`) and a P2002 on any other unique propagates.
+  - **Entitlements: not metered.** The tier team cap counts distinct **lineages**
+    (`countDistinctStaffTeams`, a `team.groupBy` on `lineageId`; `usage-service.computeCounts` uses the
+    same rule), so a rollover adds no team to anyone's count, and the route is not behind
+    `requireTeamCreateLimit`. Counting team-season rows would charge a coach for every past season, and a
+    capped coach could never continue their own team; a new team is a new lineage, so `POST /teams`
+    counts exactly as before. After commit the usage cache of the caller and every carried staff member
+    is invalidated (their season count changes).
+  - Domain event `Team rolled over` (`teamId` new row, `fromTeamId`, `lineageId`, `fromSeasonId`,
+    `toSeasonId`, `seasonCreated`, `members`, `staff` counts), logged at info **only for a row actually
+    created**, once the outcome is final. The idempotent no-op (`created: false`) is a debug line
+    (`Team rollover already done`); a refused request (403, 404, 400, 409) logs nothing at info.
+  - `GET /teams/:id` carries `isLatestInLineage` **only for a caller who may manage staff** on the
+    team, the only one who sees the button. That fact comes from the same reads as the caller's
+    permission flags (`permissions.ts#getTeamAccess`: system ADMIN, league admin, or a HEAD_COACH staff
+    row), so nobody pays an extra round trip for it, and only then is `latestTeamSeasonId` queried.
+    Everyone else gets no such key.
+  - **Mobile:** "Start next season" on the team screen for `canManageStaff` callers, only when
+    `isLatestInLineage === true` (absent counts as no) → `app/teams/[id]/next-season.tsx` (its deep-link
+    guard requires the same; when `isLatestInLineage` is absent the guard says "only a head coach…",
+    when it is `false` "only the most recent season…"). The guard stops reacting once the rollover is
+    in flight or done (the mutation lives in the screen, not the form): the success path refetches the
+    source team, which is then no longer the latest, and a late flip must not toast an error or pop the
+    stack while the screen replaces itself. The season is a **picker** over the league's seasons
+    (`GET /seasons?leagueId=`, caller-scoped, sent only once the league is known via
+    `useSeasons(…, { enabled })`) that are **active** and may **follow the team's own**
+    (`utils/season-order.ts#isSeasonAfter`, which mirrors the API) and is sent as `seasonId`. The other
+    seasons are fetched too, only so that a suggested name matching a hidden one (archived, or not
+    after this one) never defaults to "New season" with that name: the form then starts on the first
+    offered season, or on nothing with submit disabled.
+    "New season" with a free-text name (sent as `seasonName`, prefilled by
+    `utils/season-name.ts#suggestNextSeasonName`, which moves every year forward: "2026" → "2027",
+    "2026-27" → "2027-28", "Fall 2026 - Spring 2027" → "Fall 2027 - Spring 2028") is offered only when
+    that list answers `canCreate: true` (`SeasonService.listSeasons` adds it to a `leagueId`-filtered
+    list, in the same `Promise.all`: `isLeagueAdmin`); a `leagueId`-filtered list does not hide
+    personal-league seasons from a system ADMIN. The suggested season is preselected when the league
+    has it (case-insensitive), else "New season" when offered; a club coach whose league has no other
+    season is told to ask a league admin. **Every refusal shows translated copy, never the server's
+    English**: by `utils/api-error-code.ts#apiErrorCode`, `not_latest_season`, `team_season_exists`,
+    `season_not_after_source` and `season_archived` map to `teams.nextSeason.*` strings, a 403 to
+    `teams.nextSeason.forbidden`, anything else to the generic failure line. Back and Cancel use
+    `useGoBack('/teams/<id>')`. `useRolloverTeam` fires `team_rolled_over` (`new_season` from the
+    response's `seasonCreated`, i.e. what the server did) and invalidates the team
+    lists, the **source team's detail** (its `isLatestInLineage` is stale), usage, season lists, every
+    player career view (`statsKeys.playerOveralls()`) and player details, then the form replaces itself
+    with the new team-season.
+  - Tests: `tests/services/team-rollover.test.ts`, `tests/api/teams-rollover.test.ts`,
+    `rolloverTeamSchema` in `tests/schemas/teams.test.ts`, `findSeasonByName` / `findOrCreateSeason` and
+    `canCreate` in `tests/services/season-service.test.ts`, `tests/api/seasons.test.ts`; the real-database
+    suite above (copy, idempotence, concurrent rollovers, tombstones not carried, case-insensitive match,
+    cross-league 404, removed-coach 409 with no id, removed coach rolling last season's row
+    (`not_latest_season`), a dated season followed by a dateless one, an archived season by name,
+    `isLatestInLineage` and its omission for a player, the `POST /seasons` duplicate 400 for a case
+    variant, one lineage counting as one team, a same-name `POST /seasons` race, career view); mobile
+    `__tests__/app/team-next-season.test.tsx` (incl. the Spanish `season_archived` copy),
+    `__tests__/hooks/useRolloverTeam.runtime.test.tsx`, `__tests__/hooks/useSeasons.runtime.test.tsx`,
+    `__tests__/utils/season-name.test.ts`; Maestro `.maestro/team-rollover.yaml`.
 - Competitions (organizer-owned `Competition`, join code, `Game.competitionId`) are **designed in the
   plan and not built** (#492, gated on an organizer persona; the opponent-linkage half was
   **decided** on 2026-09-07 in `docs/plans/game-opponent-linkage.md`: two `Game` rows under a

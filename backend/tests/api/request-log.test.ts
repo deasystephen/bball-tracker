@@ -76,10 +76,11 @@ describe('request log', () => {
     expect(lines.map((l) => l.statusCode)).toEqual([401, 404]);
   });
 
-  it('echoes a client x-request-id and never logs /health', async () => {
-    await request(app).get('/api/v1/teams').set('Authorization', 'Bearer token').set('x-request-id', 'trace-7');
+  it('uses a client x-request-id that is a UUID and never logs /health', async () => {
+    const clientId = 'c0ffee00-1234-4abc-8def-0123456789ab';
+    await request(app).get('/api/v1/teams').set('Authorization', 'Bearer token').set('x-request-id', clientId);
     const [line] = requestLines(infoSpy);
-    expect(line.requestId).toBe('trace-7');
+    expect(line.requestId).toBe(clientId);
 
     infoSpy.mockClear();
     await request(app).get('/health');

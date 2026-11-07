@@ -43,7 +43,7 @@ import { spacing } from '../../../../../theme';
 import { getHorizontalPadding } from '../../../../../utils/responsive';
 import { useAuthUser } from '../../../../../store/auth-store';
 import { getApiErrorMessage } from '../../../../../services/api-client';
-import { relationshipLabel } from '../../../../../utils/guardian';
+import { relationshipLabel, relationshipNoun } from '../../../../../utils/guardian';
 import { RelationshipChips } from '../../../../../components/RelationshipChips';
 import type { GuardianRelationship } from '../../../../../../shared/types';
 import { useGoBack } from '../../../../../hooks/useGoBack';
@@ -87,7 +87,7 @@ export default function PlayerGuardiansScreen() {
 
   const canManage = hasTeamPermission(team, user?.id, 'canManageRoster', user?.role, user?.leagueAdminOf);
   const member = team?.members?.find((m) => m.playerId === playerId);
-  const playerName = displayName(member?.player) || 'Player';
+  const playerName = displayName(member?.player) || t('guardians.playerFallback');
 
   const handleInvite = async () => {
     const trimmed = email.trim();
@@ -147,22 +147,29 @@ export default function PlayerGuardiansScreen() {
 
   const handleRemove = (row: GuardianRow, isSelf: boolean) => {
     Alert.alert(
-      isSelf ? 'Leave' : 'Remove guardian',
+      isSelf ? t('guardians.leave') : t('guardians.removeTitle'),
       isSelf
-        ? `Stop being ${playerName}'s ${relationshipLabel(row.relationship).toLowerCase()}?`
-        : `Remove ${displayName(row)} as ${playerName}'s ${relationshipLabel(row.relationship).toLowerCase()}?`,
+        ? t('guardians.leaveBody', {
+            player: playerName,
+            relationship: relationshipNoun(row.relationship),
+          })
+        : t('guardians.removeBody', {
+            name: displayName(row),
+            player: playerName,
+            relationship: relationshipNoun(row.relationship),
+          }),
       [
         { text: t('common.cancel'), style: 'cancel' },
         {
-          text: isSelf ? 'Leave' : 'Remove',
+          text: isSelf ? t('guardians.leave') : t('guardians.remove'),
           style: 'destructive',
           onPress: async () => {
             try {
               await removeGuardian.mutateAsync({ teamId: id, playerId, guardianUserId: row.userId });
-              toast.showToast(isSelf ? 'You are no longer a guardian' : 'Guardian removed', 'success');
+              toast.showToast(isSelf ? t('guardians.leftToast') : t('guardians.removedToast'), 'success');
               if (isSelf) router.replace('/(tabs)/profile');
             } catch (err) {
-              toast.showToast(getApiErrorMessage(err, 'Failed to remove guardian'), 'error');
+              toast.showToast(getApiErrorMessage(err, t('guardians.removeFailed')), 'error');
             }
           },
         },
@@ -178,7 +185,7 @@ export default function PlayerGuardiansScreen() {
   if (error || !team || !guardianList) {
     return (
       <ErrorState
-        message={error instanceof Error ? error.message : 'Player not found'}
+        message={error instanceof Error ? error.message : t('guardians.playerNotFound')}
         onRetry={() => {
           refetchTeam();
           refetchGuardians();
@@ -204,7 +211,7 @@ export default function PlayerGuardiansScreen() {
       >
         <BackButton onPress={() => router.back()} style={styles.backButton} />
         <View style={styles.headerContent}>
-          <ThemedText variant="h2" heading>Parents &amp; guardians</ThemedText>
+          <ThemedText variant="h2" heading>{t('guardians.title')}</ThemedText>
           <ThemedText variant="caption" color="textSecondary">
             {playerName} · {team.name}
           </ThemedText>
@@ -220,11 +227,11 @@ export default function PlayerGuardiansScreen() {
             {showForm ? (
               <>
                 <ThemedText variant="h4" heading style={styles.formTitle}>
-                  Invite a parent
+                  {t('guardians.inviteParent')}
                 </ThemedText>
                 <Input
-                  label="Parent email"
-                  placeholder="parent@example.com"
+                  label={t('guardians.emailLabel')}
+                  placeholder={t('guardians.emailPlaceholder')}
                   value={email}
                   onChangeText={(text) => {
                     setEmail(text);
@@ -237,7 +244,7 @@ export default function PlayerGuardiansScreen() {
                   testID="guardian-email-input"
                 />
                 <ThemedText variant="captionBold" style={styles.relationshipLabel}>
-                  Relationship
+                  {t('guardians.relationshipLabel')}
                 </ThemedText>
                 <RelationshipChips value={relationship} onChange={setRelationship} />
                 <View style={styles.actionButtons}>
@@ -252,7 +259,7 @@ export default function PlayerGuardiansScreen() {
                     style={styles.actionButton}
                   />
                   <Button
-                    title="Send invite"
+                    title={t('guardians.sendInvite')}
                     onPress={handleInvite}
                     loading={inviting}
                     disabled={inviting}
@@ -262,13 +269,13 @@ export default function PlayerGuardiansScreen() {
                 </View>
               </>
             ) : (
-              <Button title="Invite a parent" onPress={() => setShowForm(true)} />
+              <Button title={t('guardians.inviteParent')} onPress={() => setShowForm(true)} />
             )}
           </Card>
         )}
 
         <View style={styles.sectionHeader}>
-          <ThemedText variant="h3" heading>Guardians</ThemedText>
+          <ThemedText variant="h3" heading>{t('guardians.listTitle')}</ThemedText>
           <ThemedText variant="caption" color="textSecondary">
             {guardians.length}
           </ThemedText>
@@ -277,15 +284,17 @@ export default function PlayerGuardiansScreen() {
         {guardians.length === 0 ? (
           <EmptyState
             icon="people-outline"
-            title="No guardians yet"
-            message={canManage ? 'Invite a parent so they can see the schedule and RSVP.' : undefined}
+            title={t('guardians.emptyTitle')}
+            message={canManage ? t('guardians.emptyMessage') : undefined}
           />
         ) : (
           guardians.map((row) => {
             const isSelf = row.userId === user?.id;
             const showRemove = canManage || isSelf;
             const subtitle = [
-              relationshipLabel(row.relationship) + (row.isPrimary ? ' · Primary' : ''),
+              row.isPrimary
+                ? t('guardians.primaryRelationship', { relationship: relationshipLabel(row.relationship) })
+                : relationshipLabel(row.relationship),
               row.email,
             ]
               .filter(Boolean)
@@ -302,7 +311,9 @@ export default function PlayerGuardiansScreen() {
                       onPress={() => handleRemove(row, isSelf)}
                       style={styles.rowButton}
                       accessibilityRole="button"
-                      accessibilityLabel={isSelf ? 'Leave' : `Remove guardian: ${displayName(row)}`}
+                      accessibilityLabel={
+                        isSelf ? t('guardians.leave') : t('guardians.removeA11y', { name: displayName(row) })
+                      }
                     >
                       <Ionicons
                         name={isSelf ? 'exit-outline' : 'person-remove-outline'}
@@ -320,7 +331,7 @@ export default function PlayerGuardiansScreen() {
         {pendingInvitations.length > 0 && (
           <>
             <View style={[styles.sectionHeader, styles.pendingHeader]}>
-              <ThemedText variant="h3" heading>Pending invites</ThemedText>
+              <ThemedText variant="h3" heading>{t('guardians.pendingTitle')}</ThemedText>
               <ThemedText variant="caption" color="textSecondary">
                 {pendingInvitations.length}
               </ThemedText>
@@ -331,7 +342,7 @@ export default function PlayerGuardiansScreen() {
                 <ListItem
                   key={invite.id}
                   title={invite.invitedEmail}
-                  subtitle={`${relationshipLabel(invite.relationship)} · Pending`}
+                  subtitle={t('guardians.pendingRelationship', { relationship: relationshipLabel(invite.relationship) })}
                   leftElement={<Ionicons name="mail-outline" size={20} color={colors.textTertiary} />}
                   rightElement={
                     // `canResend` is server-derived (#420): this club's rows

@@ -29,10 +29,12 @@ import { canCreateLeagues } from '../../../utils/team-permissions';
 import { spacing } from '../../../theme';
 import { getHorizontalPadding } from '../../../utils/responsive';
 import { BackButton } from '../../../components/BackButton';
+import { useTranslation } from '../../../i18n';
 
 export default function CreateLeagueScreen() {
   const router = useRouter();
   const { colors } = useTheme();
+  const { t } = useTranslation();
   const padding = getHorizontalPadding();
   const insets = useSafeAreaInsets();
 
@@ -48,7 +50,7 @@ export default function CreateLeagueScreen() {
   const allowed = useAccessGuard(
     !!user,
     canCreateLeagues(user),
-    'Only system admins can create leagues',
+    t('leagues.createNotAllowed'),
     { fallback: '/admin' }
   );
 
@@ -56,7 +58,7 @@ export default function CreateLeagueScreen() {
     const newErrors: { name?: string } = {};
 
     if (!name.trim()) {
-      newErrors.name = 'League name is required';
+      newErrors.name = t('leagues.nameRequired');
     }
 
     setErrors(newErrors);
@@ -71,18 +73,18 @@ export default function CreateLeagueScreen() {
         name: name.trim(),
       });
 
-      toast.showToast('League created successfully', 'success');
+      toast.showToast(t('leagues.createSuccess'), 'success');
       router.replace(`/admin/leagues/${league.id}`);
     } catch (error) {
       Alert.alert(
-        'Error',
-        error instanceof Error ? error.message : 'Failed to create league'
+        t('common.error'),
+        error instanceof Error ? error.message : t('leagues.createFailed')
       );
     }
   };
 
   if (!allowed) {
-    return <LoadingSpinner message="Loading..." fullScreen />;
+    return <LoadingSpinner message={t('common.loading')} fullScreen />;
   }
 
   return (
@@ -101,7 +103,7 @@ export default function CreateLeagueScreen() {
       >
         <BackButton onPress={() => router.back()} style={styles.backButton} />
         <View style={styles.headerContent}>
-          <ThemedText variant="h2" heading>Create League</ThemedText>
+          <ThemedText variant="h2" heading>{t('leagues.create')}</ThemedText>
         </View>
       </View>
 
@@ -117,13 +119,13 @@ export default function CreateLeagueScreen() {
           keyboardShouldPersistTaps="handled"
         >
           <ThemedText variant="body" color="textSecondary" style={styles.description}>
-            Create a league to organize your basketball seasons and teams.
+            {t('leagues.createDescription')}
           </ThemedText>
 
           <Input
-            label="League Name"
+            label={t('leagues.name')}
             testID="league-name-input"
-            placeholder="e.g., Downtown Youth Basketball"
+            placeholder={t('leagues.namePlaceholder')}
             value={name}
             onChangeText={setName}
             error={errors.name}
@@ -133,7 +135,7 @@ export default function CreateLeagueScreen() {
 
           <View style={styles.buttonContainer}>
             <Button
-              title="Create League"
+              title={t('leagues.create')}
               testID="league-create-submit"
               onPress={handleSubmit}
               loading={createLeague.isPending}
@@ -141,7 +143,7 @@ export default function CreateLeagueScreen() {
               fullWidth
             />
             <Button
-              title="Cancel"
+              title={t('common.cancel')}
               variant="outline"
               onPress={() => router.back()}
               style={styles.cancelButton}

@@ -36,17 +36,18 @@ import { canManageAnyTeam } from '../../utils/game-permissions';
 import { spacing, borderRadius } from '../../theme';
 import { getHorizontalPadding } from '../../utils/responsive';
 import { MIN_TOUCH_TARGET } from '../../utils/touch-target';
-import { getGameResult, getResultColor } from '../../utils/game-result';
+import { getGameResult, getResultColor, resultLetter } from '../../utils/game-result';
 import type { Game, GameStatus } from '../../types/game';
 import { formatMonthShort, formatNumericDate } from '../../utils/format-date';
 
 type FilterTab = 'ALL' | GameStatus;
 
-const FILTER_TABS: { key: FilterTab; label: string }[] = [
-  { key: 'ALL', label: 'All' },
-  { key: 'IN_PROGRESS', label: 'Live' },
-  { key: 'SCHEDULED', label: 'Upcoming' },
-  { key: 'FINISHED', label: 'Completed' },
+/** Filter pills; `labelKey` and `emptyKey` (the filtered empty state) are i18n keys. */
+const FILTER_TABS: { key: FilterTab; labelKey: string; emptyKey: string }[] = [
+  { key: 'ALL', labelKey: 'games.filter.all', emptyKey: '' },
+  { key: 'IN_PROGRESS', labelKey: 'games.filter.live', emptyKey: 'games.emptyFiltered.live' },
+  { key: 'SCHEDULED', labelKey: 'games.filter.upcoming', emptyKey: 'games.emptyFiltered.upcoming' },
+  { key: 'FINISHED', labelKey: 'games.filter.completed', emptyKey: 'games.emptyFiltered.completed' },
 ];
 
 const keyExtractor = (item: Game): string => item.id;
@@ -81,7 +82,7 @@ export default function Games() {
   // list (#888, hooks/useQueryErrorState.ts).
   const errorState = useQueryErrorState(
     { error, data: data?.games, refetch, onRefreshError: (m) => toast.showToast(m, 'error') },
-    'Failed to load games'
+    t('games.loadFailed')
   );
 
   // Creating a game needs `canManageTeam` on the chosen team (backend
@@ -134,7 +135,7 @@ export default function Games() {
               >
                 <View style={styles.livePulse} />
                 <ThemedText variant="footnote" style={styles.liveBadgeText}>
-                  LIVE
+                  {t('games.liveBadge')}
                 </ThemedText>
               </View>
             </View>
@@ -145,7 +146,7 @@ export default function Games() {
                   style={styles.liveTeamName}
                   numberOfLines={1}
                 >
-                  {item.team?.name || 'Home'}
+                  {item.team?.name || t('games.homeFallback')}
                 </ThemedText>
                 <ThemedText variant="h1" heading={false} /* score, a value */ style={styles.liveScoreNum}>
                   {item.homeScore}
@@ -201,10 +202,10 @@ export default function Games() {
                 </View>
                 <View style={styles.upcomingInfo}>
                   <ThemedText variant="bodyBold" numberOfLines={1}>
-                    vs {item.opponent}
+                    {t('games.vsOpponent', { opponent: item.opponent })}
                   </ThemedText>
                   <ThemedText variant="caption" color="textSecondary">
-                    {item.team?.name || 'TBD'}
+                    {item.team?.name || t('games.tbd')}
                   </ThemedText>
                 </View>
                 <Ionicons
@@ -237,7 +238,7 @@ export default function Games() {
                 />
                 <View style={styles.completedInfo}>
                   <ThemedText variant="caption" color="textSecondary">
-                    vs {item.opponent}
+                    {t('games.vsOpponent', { opponent: item.opponent })}
                   </ThemedText>
                   <View style={styles.completedScoreRow}>
                     <ThemedText variant="h3">
@@ -247,7 +248,7 @@ export default function Games() {
                       variant="captionBold"
                       style={{ color: resultColor, marginLeft: spacing.sm }}
                     >
-                      {result}
+                      {resultLetter(t, result)}
                     </ThemedText>
                   </View>
                   <ThemedText variant="footnote" color="textTertiary">
@@ -262,11 +263,11 @@ export default function Games() {
 
       return <GameCard game={item} onPress={() => handleGamePress(item)} />;
     },
-    [handleGamePress, colors]
+    [handleGamePress, colors, t]
   );
 
   if (isLoading || errorState.retrying) {
-    return <LoadingSpinner message="Loading games..." fullScreen />;
+    return <LoadingSpinner message={t('games.loading')} fullScreen />;
   }
 
   if (errorState.failed) {
@@ -281,7 +282,7 @@ export default function Games() {
           { paddingHorizontal: padding, paddingTop: insets.top + spacing.md },
         ]}
       >
-        <ThemedText variant="h1" heading>Games</ThemedText>
+        <ThemedText variant="h1" heading>{t('games.title')}</ThemedText>
       </View>
 
       {/* Filter Tabs */}
@@ -315,7 +316,7 @@ export default function Games() {
                     color: isActive ? '#FFFFFF' : colors.textSecondary,
                   }}
                 >
-                  {tab.label}
+                  {t(tab.labelKey)}
                 </ThemedText>
               </TouchableOpacity>
             );
@@ -340,7 +341,7 @@ export default function Games() {
           onEndReachedThreshold={0.5}
           ListFooterComponent={
             isFetchingNextPage ? (
-              <LoadingSpinner message="Loading more..." />
+              <LoadingSpinner message={t('common.loadingMore')} />
             ) : isFetchNextPageError ? (
               <Button
                 title={t('common.loadMoreFailed')}
@@ -360,13 +361,13 @@ export default function Games() {
       ) : (
         <EmptyState
           icon="basketball-outline"
-          title="No Games"
+          title={t('games.emptyTitle')}
           message={
             activeFilter !== 'ALL'
-              ? `No ${FILTER_TABS.find((t) => t.key === activeFilter)?.label.toLowerCase()} games.`
+              ? t(FILTER_TABS.find((tab) => tab.key === activeFilter)?.emptyKey ?? 'games.emptyTitle')
               : canCreate
-                ? 'Create your first game to start tracking stats and scores.'
-                : 'Games scheduled by your coaches will show up here.'
+                ? t('games.emptyCanCreate')
+                : t('games.emptyReadOnly')
           }
         />
       )}
@@ -378,7 +379,7 @@ export default function Games() {
           onPress={handleCreateGame}
           activeOpacity={0.8}
           accessibilityRole="button"
-          accessibilityLabel="Create new game"
+          accessibilityLabel={t('games.createNewA11y')}
         >
           <Ionicons name="add" size={28} color="#FFFFFF" />
         </TouchableOpacity>

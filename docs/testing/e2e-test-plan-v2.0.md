@@ -1,7 +1,7 @@
 # E2E Test Plan — v2.0
 
 **Created:** 2026-05-25
-**Target build:** Mobile — latest TestFlight build on OTA runtime 1.6.0 (v1.6.0, Expo SDK 57; the build recorded under 1.6.0 in `mobile/binary-manifest.json` or newer, #716 / #780), with the latest production OTA applied — #33 (runtime 1.5.0, cut 2026-09-29 from `b408645` / #576) and older are binaries that OTAs no longer reach (`docs/deployment/mobile-builds-and-ota.md`), Backend — the ECS revision CI auto-deployed for that same `main` commit (check `GET /health` → `{"status":"ok","db":"ok"}` and the task-def image tag), SES `mail.hooplings.com`, Web — not deployed
+**Target build:** Mobile — latest TestFlight build on OTA runtime 1.7.0 (v1.7.0, Expo SDK 57; the build recorded under 1.7.0 in `mobile/binary-manifest.json` or newer, #644 / #671), with the latest production OTA applied — #34 (runtime 1.6.0, cut 2026-10-18 from `eca342a`, #716 / #780) and older are binaries that OTAs no longer reach once 1.7.0 merges (`docs/deployment/mobile-builds-and-ota.md`), Backend — the ECS revision CI auto-deployed for that same `main` commit (check `GET /health` → `{"status":"ok","db":"ok"}` and the task-def image tag), SES `mail.hooplings.com`, Web — not deployed
 **Checkboxes:** count all with `grep -c '^- \[[ x]\]' docs/testing/e2e-test-plan-v2.0.md` and the passed ones with `grep -c '^- \[x\]'`; a ticked box keeps the `Pass / Fail / Skipped` selector and records the date, who ran it, the device and the OTA or build on its Notes line. This line states no total on purpose, so a PR that adds a section does not need to touch it.
 **Companion:** [`workos-test-accounts.md`](./workos-test-accounts.md) — personas, how each role is obtained (self-select COACH, guardian invite → PARENT, "Add staff"), PKCE sign-in, dev-login limits, seeded users.
 **Owner:** sdeasy
@@ -191,12 +191,30 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
 - **Expected:** Theme flips immediately across all screens. Persists across cold start.
 - **Notes:** ___________
 
-### B.4 — Language picker (i18n)
+### B.4 — Spanish device (i18n, #671)
 - [ ] Pass / Fail / Skipped
-- **Role:** any logged-in user
-- **Steps:** Profile → language picker → select non-English option (if available).
-- **Expected:** UI strings update. Persists across cold start.
-- **Notes:** Verify which languages are bundled (`mobile/i18n/`).
+- **Role:** coach (dev-login), then a player
+- **Steps:** Settings → General → Language & Region → Español; relaunch the app. Walk Home, Teams (list,
+  create, detail, trash icon, edit, Roster → Add Player and a row's options menu, Parents & guardians,
+  Announcements), Track (list, Create Game, date picker, tracker: shots, stats, undo, End), Stats (tab,
+  team, player, box score), Profile (usage rows, a row menu, Leagues & Seasons → league → Add Season),
+  Invitations, and a team while offline. Repeat the tracker and a back button with VoiceOver on.
+- **Expected:** One language throughout: Spanish everywhere, VoiceOver labels included; only "Hooplings",
+  team/player names and server error text stay as they are. There is no in-app language picker; the app
+  follows the device language. Back to English: every screen and label English again.
+- **Per-app language (runtime 1.7.0 on, `CFBundleLocalizations` + `es.lproj`):** add Español to the
+  device's Preferred Languages (Settings → General → Language & Region) with English first; iOS shows
+  the per-app Language row only when the device has more than one preferred language. Then
+  Settings → Apps → Hooplings shows a Language row offering English and Español; choosing Español
+  relaunches the app in Spanish with the rest of the device still English. With the app in Spanish,
+  the camera and photo-library permission prompts read in Spanish (`es.lproj/InfoPlist.strings`).
+  A 1.6.0 build has no such row.
+- **Notes:** Spanish copy is an agent draft until a native speaker reviews `es.json`. Maestro:
+  `.maestro/spanish-locale.yaml` covers the coach slice without changing the device language (it
+  launches the app with `-AppleLanguages (es) -AppleLocale es_ES`): sign-in, the tab bar labels, Home,
+  Teams → Lakers → team stats, Track → a scheduled game → Start → one shot → leave, Stats and Profile,
+  asserting `es.json` strings and the absence of their English. Added 2026-10-24 and not yet run. The
+  device walk-through above (VoiceOver, offline, the player role, back to English) stays manual.
 
 ### B.5 — About screen (version / OTA diagnostics)
 - [ ] Pass / Fail / Skipped
@@ -277,7 +295,7 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
 - **Steps:**
   1. Profile → "Leagues & Seasons" → tap the league from C.1 → "Add Season"
   2. Name `Spring 2026`, optionally pick start/end dates
-- **Expected:** Season appears under the league with "0 teams". Maestro: `.maestro/admin-season-manage.yaml`.
+- **Expected:** Season appears under the league with "0 teams". Adding ` spring 2026 ` (another case, extra spaces) is refused (400) with "A season with this name already exists in this league" (#461). Maestro: `.maestro/admin-season-manage.yaml`.
 - **Notes:** ___________
 
 ### C.2b — Season detail and edit (#614)
@@ -349,6 +367,9 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
   2. **Name only:** enter `Test Player 1`, jersey `99` → "Add Player"
   3. **With email:** repeat with name + a verified sandbox email
   4. **With parent email:** repeat with a parent email + relationship chip
+  5. **Under 13 (#982):** open the form, answer **No** to "Is this player 13 or
+     older?", enter a name and a parent email → "Add Player". Repeat on a team
+     whose age group is `U10` and check No is preselected.
 - **Expected:**
   - Every added player appears on the roster **immediately** (2) with a
     "Not invited" chip; (3) shows "Invited"; the invite email uses the
@@ -358,6 +379,11 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
     appears in the separate "Invited" section (not the roster) until accept.
   - (4) parent gets a guardian invitation in the same step (rostered cases
     only; for an existing-account player the toast explains the deferral).
+  - The player-email field appears only after **Yes**; the form will not submit
+    until the age question is answered. (5) **No** hides and clears the player
+    email, requires a valid parent email and shows the "Players under 13 don't
+    get their own login" hint; the player is rostered "Not invited" and only the
+    parent is emailed. The answer is not sent to the API.
   - Maestro: `.maestro/roster-management.yaml`, `.maestro/roster-invite-status.yaml`.
 - **Notes:** Per `POST /api/v1/teams/:teamId/players` (unified endpoint; the
   old managed-players route and the create-and-invite arm were removed in #418).
@@ -471,6 +497,13 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
 
 ---
 
+### D.10 — Head coach starts the next season (#461)
+- [ ] Pass / Fail / Skipped
+- **Pre:** Seed fresh. Signed in as Frank Vogel (head coach of Lakers, Spring 2024; not a league admin). The seed holds an empty "Spring 2025" season in the same league.
+- **Steps:** Lakers → **Start next season** → the form shows "… stay with Spring 2024" and lists the league's seasons with **Spring 2025** preselected and no "New season" option (Frank cannot create seasons); keep the team name and age group → **Start season**.
+- **Expected:** The screen is replaced by the new Lakers team-season in Spring 2025 with the same roster (jersey numbers kept) and staff; no games, announcements or pending invitations. The Teams list shows both Lakers rows. A player's stats screen lists both the Spring 2024 row (with last season's stats) and the Spring 2025 row. Repeating the action answers with the same team ("This team already has Spring 2025"), never a duplicate. An assistant coach does not see the button, and neither does anyone on last season's Lakers row (only the latest team-season continues a team). The season list shows only active seasons that may follow the team's own (never the team's own season, or one with an earlier start date when both are dated). Every refusal reads in the device language (check once in Spanish). Naming an archived season (another case is enough) is refused with "That season is archived. Pick an active season or name a new one." A coach in their own personal league sees "New season" preselected with next year's name ("2027"), and the season is created; typing a different case of an existing season's name reuses that season. A deep-linked form's back arrow and Cancel return to the team.
+- **Maestro:** `.maestro/team-rollover.yaml` (passed 2026-11-07 on iPhone 17 / iOS 26.5, PR #1001; the player stats screen lists the per-team rows below the averages and totals, so the flow scrolls to each season).
+
 ## E. Invitations & accept flow (NEW v2.0) 📧
 
 The marquee feature shipped this month. Includes the email path (#131) + web/mobile invite-accept screens (#130) + Universal Links (#138).
@@ -535,6 +568,21 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 - **Expected:** App cold-starts and lands directly on the invite screen (not on home tab).
 - **Notes:** Per `mobile/app/invite/[token].tsx` + Expo deep-link config.
 
+### E.7a — Invite link from the web page, signed out (#972, #973)
+- [ ] Pass / Fail / Skipped
+- **Role:** signed out, then a coach (dev-login)
+- **Steps:** Signed out, open `hooplings://invite/<token>?src=web` (the link hooplings.com's "Open in
+  App" button opens) for a PENDING invitation. Tap **Log In to Accept**, sign in, then open
+  `hooplings://invite/<unknown token>?src=web`.
+- **Expected:** The invite screen shows that invitation (team, inviter, jersey): the `?src=web` query
+  never becomes part of the token. Log In to Accept goes to sign-in, and after it the app comes back to
+  the same invitation with **Accept Invitation**, not to Home. An unknown token shows "Invitation Not
+  Found", and Go Home lands on Home. Amplitude records `invite_link_viewed` with `source: web`.
+- **Notes:** Maestro: `.maestro/invite-deep-link.yaml` (seeded Iris Invited invitation; seed with
+  `SEED_MAESTRO_INVITE_TOKEN=true npx prisma db seed`, which writes its fixed token only into a local,
+  non-production database; read-only, the accept is cancelled at the alert). Added 2026-10-24 and not
+  yet run.
+
 ### E.8 — Expired invitation token
 - [ ] Pass / Fail / Skipped
 - **Steps:**
@@ -547,7 +595,7 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 - [ ] Pass / Fail / Skipped
 - **Steps:** Open `hooplings://invite/totally-fake-token-12345`.
 - **Expected:** "Invitation Not Found" or 404-style screen. Does NOT crash.
-- **Notes:** ___________
+- **Notes:** Maestro: the last step of `.maestro/invite-deep-link.yaml` (signed in, with `?src=web`). ___________
 
 ### E.10 — Already-accepted invitation
 - [ ] Pass / Fail / Skipped
@@ -681,6 +729,13 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 - **Role:** COACH with `canManageTeam`
 - **Steps:** Game detail → trash icon ("Delete game") → confirm (use a *throwaway* scheduled game, then repeat with a throwaway FINISHED game that has tracked stats). Rendered only with `canManage` (`canManageTeam`), on SCHEDULED and FINISHED games — never while IN_PROGRESS.
 - **Expected:** Removed from list. For the finished game the confirm warns that recorded stats are removed from player and team season totals; after delete the Stats tab reflects the removal without a manual refresh.
+- **Notes:** ___________
+
+### F.6 — Game detail header controls
+- [ ] Pass / Fail / Skipped
+- **Role:** COACH with `canManageTeam`, then a PLAYER on the same team
+- **Steps:** Open a SCHEDULED, an IN_PROGRESS and a FINISHED game as each role; with VoiceOver on, swipe through the dark header. Then open a game from a push notification (no screen behind it) and tap the back arrow.
+- **Expected:** The header holds only the back arrow ("Go back") and, for the coach on SCHEDULED and FINISHED games, the trash icon ("Delete game"); there is no share icon and VoiceOver announces no "Share game" button (#731). Both icons are drawn the same size. With nothing to pop, the back arrow lands on the Games tab. Jest: `__tests__/app/game-detail-gating.test.tsx`. Maestro asserts no "Share game" for the coach on a scheduled, in-progress and finished game (`.maestro/game-lifecycle.yaml`, which also checks the trash icon is there when scheduled or finished and gone in progress) and for a player (`.maestro/player-no-tracking.yaml`); the VoiceOver swipe and the push-notification back arrow stay manual.
 - **Notes:** ___________
 
 ---
@@ -1111,8 +1166,12 @@ Cross-cuts E, I, J — but worth aggregating here.
 
 ### P.5 — Mobile Sentry crash captures
 - [ ] Pass / Fail / Skipped
-- **Steps:** (Synthetic) In dev/preview, trigger an intentional mobile crash. Or wait for a real one.
-- **Expected:** Event appears in Sentry-mobile. Release matches.
+- **Steps:** (Synthetic) On a TestFlight build, trigger a caught error, for example a profile photo
+  upload with the network off. Repeat once the device runs a production OTA. Or wait for a real one.
+- **Expected:** Event appears in `bball-tracker-mobile` with release `com.bballtracker.mobile@<version>+<build>`
+  and dist `<build>` (the build on the device), and its frames resolve to `mobile/` source files, not
+  `app:///main.jsbundle:<line>:<col>`, for the embedded bundle and for the OTA bundle (runtime 1.7.0 on,
+  #644). The release lists the build's commits.
 - **Notes:** ___________
 
 ### P.6 — Rate limit on auth endpoints
@@ -1346,13 +1405,16 @@ After testing, optionally tear down:
 - Maestro flows: `.maestro/` (reference for what's automated — run locally with `maestro test .maestro/` against a simulator dev client + seeded local backend; **not** run in CI). All flows dev-login and skip the intro carousel:
   - `login.yaml`, `logout.yaml`, `navigation.yaml`, `profile.yaml` — session + tab smoke (Frank Vogel)
   - `auth-callback.yaml` — `hooplings://auth/callback?error=…` deep link renders "Sign In Failed" (A.2)
+  - `invite-deep-link.yaml` — `hooplings://invite/<token>?src=web` signed out → Log In to Accept → back on the same invitation; unknown token → "Invitation Not Found" (E.7a, E.9; Frank Vogel)
+  - `spanish-locale.yaml` — the coach walk in Spanish via launch arguments (B.4, Frank Vogel)
   - `onboarding-role.yaml` — account-type self-select + "Change account type" (A.1b, Steph Curry)
+  - `team-rollover.yaml` — D.10 (season rollover, #461; mutates: the seed's Frank reset removes the new Lakers row)
   - `create-team.yaml`, `team-detail.yaml`, `roster-management.yaml` — D.1 / D.2 / D.3 (`team-detail.yaml` also asserts the roster sort pills: both pills visible, Name pill selected after tap)
   - `team-staff.yaml` — staff screen + "Add staff" form for the head coach, read-only (D.8)
   - `game-lifecycle.yaml`, `game-tracking.yaml`, `live-spectator.yaml`, `stats-viewing.yaml` — F.1–F.3, G.1/G.2, H.1, K
   - `player-no-tracking.yaml` — PLAYER sees RSVP but no lifecycle/tracking controls (G.8, Steph Curry)
   - `guardian-rsvp.yaml` — "My kids" + "Responding for" RSVP as a pure guardian (I.5, Sonya Curry)
-  - Not covered: invite accept (E), announcements (J), exports (M), push (N), any WorkOS sign-in
+  - Not covered: completing an invite accept (E.5; the deep-link flow stops at the confirmation alert), exports (M), push (N), any WorkOS sign-in
 
 ### C. Sandbox SES recipient management
 To verify additional sandbox recipients for broader testing:
@@ -1377,3 +1439,5 @@ After B3-prod-access lands and production access is granted, this step is no lon
 - 2026-10-05: audit batch #775 #776. P.10 (VoiceOver Headings rotor reaches screen titles and section headings) and P.11 (largest accessibility text size on the tracker, tab bar, box score and toasts): device-only checks.
 - 2026-10-05: audit batch #655 #772 #773. P.12 (VoiceOver roles, labels and selected state), P.13 (44pt touch targets) and G.3c (opponent score buttons): device-only checks.
 - 2026-10-05: first ticked boxes. K.3a and P.10–P.13 recorded as passed on a device by the owner after OTA f08483ab-0387-4b03-8148-5d949d7970fa (main at `78eebfb`); the record for each is on its Notes line, and the matching issues (#655 #772 #773 #775 #776 #778) carry the same note. G.3c (#773, opponent score buttons) is not yet recorded.
+- 2026-10-24: Maestro for the day's mobile work. New E.7a (the web page's `?src=web` invite link, signed out, return path kept; #972, #973) with `.maestro/invite-deep-link.yaml`, which also covers E.9; B.4 gained `.maestro/spanish-locale.yaml` (#671), F.6 the "Share game" absence checks (#731). The flow list in appendix B lists both new flows, and announcements came off its "Not covered" line (`announcement-reply.yaml`). None of the new flows has been run yet. Nothing marked passed.
+- 2026-10-24: runtime 1.7.0 binary branch (#644, #671). Target build moved to 1.7.0. B.4 gained the per-app Language check (`CFBundleLocalizations`), P.5 now expects symbolicated frames for the embedded and the OTA bundle under the native release name. Nothing marked passed.

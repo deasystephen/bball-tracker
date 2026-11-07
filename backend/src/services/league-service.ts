@@ -6,7 +6,7 @@ import { Prisma } from '@prisma/client';
 import prisma from '../models';
 import { CreateLeagueInput, UpdateLeagueInput, LeagueQueryParams } from '../api/leagues/schemas';
 import { NotFoundError, BadRequestError, ForbiddenError } from '../utils/errors';
-import { createOrConflict } from '../utils/prisma-errors';
+import { findOrCreateSeason, SEASON_NAME_TAKEN_MESSAGE } from './season-service';
 import { isSystemAdmin, isLeagueAdmin, getReadableLeagueIds, canReadLeague } from '../utils/permissions';
 import { logger } from '../utils/logger';
 import { USER_SUMMARY_SELECT, USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
@@ -515,39 +515,17 @@ export class LeagueService {
       throw new ForbiddenError('You do not have permission to create seasons for this league');
     }
 
-    // Check if season with same name already exists
-    const existing = await prisma.season.findUnique({
-      where: {
-        leagueId_name: {
-          leagueId,
-          name: data.name,
-        },
-      },
-    });
-
-    if (existing) {
-      throw new BadRequestError('A season with this name already exists in this league');
+    // One rule for every create path (`findOrCreateSeason`): a name that
+    // matches an existing season ignoring case and surrounding spaces is
+    // taken, 400 (the duplicate status since #727). It logs `Season created`.
+    const { id, created } = await prisma.$transaction((tx) =>
+      findOrCreateSeason(tx, { leagueId, name: data.name, startDate: data.startDate, endDate: data.endDate }, userId)
+    );
+    if (!created) {
+      throw new BadRequestError(SEASON_NAME_TAKEN_MESSAGE);
     }
 
-    // Create season; a lost race on @@unique([leagueId, name]) answers the
-    // pre-check's 400 (#727).
-    const season = await createOrConflict(
-      () =>
-        prisma.season.create({
-          data: {
-            leagueId,
-            name: data.name,
-            startDate: data.startDate,
-            endDate: data.endDate,
-            isActive: true,
-          },
-          include: SEASON_INCLUDE,
-        }),
-      'A season with this name already exists in this league',
-      'Season_leagueId_name_key'
-    );
-
-    logger.info('Season created', { seasonId: season.id, leagueId, userId });
+    const season = await prisma.season.findUniqueOrThrow({ where: { id }, include: SEASON_INCLUDE });
 
     return season;
   }

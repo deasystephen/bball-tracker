@@ -9,10 +9,11 @@
  */
 
 import type { ShotMetadata } from '../types/game';
+import { i18n } from '../i18n';
 
-/** "FT" for free throws (points === 1), otherwise "2pt" / "3pt". */
+/** "FT" for free throws (points === 1), otherwise "2pt" / "3pt" (Spanish: TL, T2, T3). */
 export function getShotPointsLabel(points: number): string {
-  return points === 1 ? 'FT' : `${points}pt`;
+  return points === 1 ? i18n.t('tracker.shot.freeThrowLabel') : i18n.t('tracker.shot.pointsLabel', { points });
 }
 
 /**
@@ -22,5 +23,6 @@ export function getShotPointsLabel(points: number): string {
 export function formatShotDescription(metadata: ShotMetadata | null | undefined): string {
   const points = metadata?.points || 2;
   const made = metadata?.made ?? false;
-  return `${getShotPointsLabel(points)} ${made ? 'made' : 'miss'}`;
+  const label = getShotPointsLabel(points);
+  return made ? i18n.t('tracker.shot.describeMade', { label }) : i18n.t('tracker.shot.describeMiss', { label });
 }

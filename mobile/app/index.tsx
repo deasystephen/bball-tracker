@@ -5,6 +5,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuthStore } from '../store/auth-store';
 import { postLoginRoute } from '../utils/role-onboarding';
 import { log } from '../services/log';
+import { useTranslation } from '../i18n';
 
 const ONBOARDED_KEY = 'hasOnboarded';
 
@@ -14,6 +15,7 @@ const ONBOARDED_KEY = 'hasOnboarded';
  */
 export default function Index() {
   const router = useRouter();
+  const { t } = useTranslation();
   const { isAuthenticated, isLoading, user } = useAuthStore();
   const hasNavigated = useRef(false);
   const [onboardingChecked, setOnboardingChecked] = useState(false);
@@ -66,7 +68,7 @@ export default function Index() {
   return (
     <View style={styles.container}>
       <ActivityIndicator size="large" color="#007AFF" />
-      <Text style={styles.text}>Loading...</Text>
+      <Text style={styles.text}>{t('common.loading')}</Text>
     </View>
   );
 }

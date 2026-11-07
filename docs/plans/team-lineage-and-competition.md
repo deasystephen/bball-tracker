@@ -30,7 +30,7 @@ free text and the league contributes exactly one label (`stats-service.ts:1115`)
 |---|----------|-----|
 | D2 | Keep `Team` as the team-season row; add `TeamLineage` instead of splitting | The split re-points nine FK tables and breaks `/teams` for the five binaries in the field (#25 to #30) for no capability. Lineage is additive and backfills with one `UPDATE` + one `INSERT … SELECT`. |
 | 1 | `TeamLineage` carries **no** club. Club derives from `Team.seasonId → Season.leagueId` | One access path (`permissions.ts:96`). Adoption (#459) becomes "new team-season in the club's season, same lineage", never an edit to history. |
-| 2 | Lineage is a pure identity (`id`, timestamps). `ageGroup`/`gender` live on `Team` | Age group and name change season to season (U12 becomes U13). Rollover and adoption copy the per-season tables (members, staff, roles, calendar tokens, announcements); that is #461/#459 scope, exactly as it was before this plan. |
+| 2 | Lineage is a pure identity (`id`, timestamps). `ageGroup`/`gender` live on `Team` | Age group and name change season to season (U12 becomes U13). Rollover and adoption copy the per-season tables; that is #461/#459 scope, exactly as it was before this plan. (As built, #461 copies members, staff and roles, not calendar tokens or announcements: `docs/architecture/stats-and-lineage.md`.) |
 | 3 | `Competition` belongs to an organizer `League`'s `Season`; competition admin = `isLeagueAdmin(organizer)` | Reuses two entities and one predicate. No new admin table, no fourth branch in list scoping. |
 | 4 | New `competitionAccessWhere`; entries expose team `{ id, name }` only; `getTeamPermissions` unchanged | Entering a competition must not hand the organizer the roster or emails (#442 failure by another door). |
 | 5 | Entry by **join code** (typeable, plus a link that pre-fills it), entered by the team's head coach | Since #443 an organizer cannot list other clubs' teams. Invite-by-email is #459's design; build it once, later. |
@@ -358,9 +358,10 @@ the rollout COMPLETED and `/health` reports `db: ok` before publishing the OTA.
   issue; it is trigger 1 for the competition build.
 - **Organizer-initiated invites (invite-by-email to a team).** Same machinery #459 adoption
   needs; design once there.
-- **Season rollover (#461)** and **adoption (#459)**: consume the lineage; not built here. Both
-  copy the per-season tables (members, staff, roles, calendar tokens, announcements), as they
-  would have without this plan.
+- **Season rollover (#461)** and **adoption (#459)**: consume the lineage; not built here.
+  Rollover has since been built (merged to `main` with #461; as built in
+  `docs/architecture/stats-and-lineage.md`): it copies members, staff and roles only, and
+  deliberately does **not** carry calendar tokens, announcements or pending invitations.
 - **CI seeded-migration guard**: own issue; protects every future backfill migration.
 - **Orphan-lineage sweep** for season/league cascades: harmless rows; file only if they matter.
 - **Age-group normalisation** ("U14" = "14U"): free text by decision 10.

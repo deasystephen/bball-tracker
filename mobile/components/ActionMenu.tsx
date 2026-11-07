@@ -20,6 +20,7 @@ import { ThemedText } from './ThemedText';
 import { useTheme } from '../hooks/useTheme';
 import { spacing, borderRadius } from '../theme';
 import { MIN_TOUCH_TARGET } from '../utils/touch-target';
+import { useTranslation } from '../i18n';
 
 export interface ActionMenuItem {
   label: string;
@@ -40,6 +41,7 @@ export interface ActionMenuProps {
 }
 
 export function ActionMenu({ visible, title, items, onClose }: ActionMenuProps) {
+  const { t } = useTranslation();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
 
@@ -106,7 +108,7 @@ export function ActionMenu({ visible, title, items, onClose }: ActionMenuProps) 
           style={styles.backdrop}
           onPress={dismiss}
           accessibilityRole="button"
-          accessibilityLabel="Close menu"
+          accessibilityLabel={t('common.closeMenu')}
         />
         <Pressable
           style={[
@@ -145,10 +147,10 @@ export function ActionMenu({ visible, title, items, onClose }: ActionMenuProps) 
           <TouchableOpacity
             onPress={dismiss}
             accessibilityRole="button"
-            accessibilityLabel="Close"
+            accessibilityLabel={t('common.close')}
             style={[styles.item, styles.closeItem, { borderTopColor: colors.border }]}
           >
-            <ThemedText variant="bodyBold">Close</ThemedText>
+            <ThemedText variant="bodyBold">{t('common.close')}</ThemedText>
           </TouchableOpacity>
         </Pressable>
       </View>

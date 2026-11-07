@@ -21,6 +21,8 @@
  * clears it server-side, and so does a later successful delivery.
  */
 
+import { i18n } from '../i18n';
+
 export type EmailDeliveryIssue = 'bounced' | 'complaint';
 
 export interface EmailDeliveryFields {
@@ -41,9 +43,9 @@ export function getEmailDeliveryIssue(player: EmailDeliveryFields): EmailDeliver
 export function emailDeliveryIssueLabel(issue: EmailDeliveryIssue): string {
   switch (issue) {
     case 'bounced':
-      return 'Email bounced';
+      return i18n.t('roster.emailIssue.bounced');
     case 'complaint':
-      return 'Email blocked';
+      return i18n.t('roster.emailIssue.complaint');
   }
 }
 
@@ -51,8 +53,8 @@ export function emailDeliveryIssueLabel(issue: EmailDeliveryIssue): string {
 export function emailDeliveryIssueExplanation(issue: EmailDeliveryIssue): string {
   switch (issue) {
     case 'bounced':
-      return 'Mail to this address bounced, so invitations are not reaching it. Check it for typos.';
+      return i18n.t('roster.emailIssue.bouncedExplanation');
     case 'complaint':
-      return 'The owner of this address reported our mail as spam, so nothing more is delivered to it. Check that it belongs to this player.';
+      return i18n.t('roster.emailIssue.complaintExplanation');
   }
 }

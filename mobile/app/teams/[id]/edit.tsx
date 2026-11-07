@@ -56,7 +56,7 @@ export default function EditTeamScreen() {
   if (error || !team) {
     return (
       <ErrorState
-        message={error instanceof Error ? error.message : 'Team not found'}
+        message={error instanceof Error ? error.message : t('teams.notFound')}
         onRetry={refetch}
         onBack={goBack}
       />
@@ -130,11 +130,11 @@ function EditTeamForm({ team, leagues }: EditTeamFormProps) {
     const newErrors: { name?: string; seasonId?: string } = {};
 
     if (!name.trim()) {
-      newErrors.name = 'Team name is required';
+      newErrors.name = t('teams.nameRequired');
     }
 
     if (!seasonId) {
-      newErrors.seasonId = 'Season is required';
+      newErrors.seasonId = t('teams.seasonRequired');
     }
 
     setErrors(newErrors);
@@ -156,12 +156,12 @@ function EditTeamForm({ team, leagues }: EditTeamFormProps) {
         },
       });
 
-      toast.showToast('Team updated successfully', 'success');
+      toast.showToast(t('teams.updateSuccess'), 'success');
       router.back();
     } catch (error) {
       Alert.alert(
         t('common.error'),
-        error instanceof Error ? error.message : 'Failed to update team'
+        error instanceof Error ? error.message : t('teams.updateFailed')
       );
     }
   };
@@ -183,7 +183,7 @@ function EditTeamForm({ team, leagues }: EditTeamFormProps) {
         <BackButton onPress={() => router.back()} style={styles.backButton} />
         <View style={styles.headerContent}>
           <ThemedText variant="h2" heading style={styles.headerTitle}>
-            Edit Team
+            {t('teams.edit')}
           </ThemedText>
         </View>
       </View>
@@ -202,7 +202,7 @@ function EditTeamForm({ team, leagues }: EditTeamFormProps) {
 
           <Input
             label={t('teams.name')}
-            placeholder="Enter team name"
+            placeholder={t('teams.namePlaceholder')}
             value={name}
             onChangeText={setName}
             error={errors.name}
@@ -210,7 +210,7 @@ function EditTeamForm({ team, leagues }: EditTeamFormProps) {
           />
 
           <Input
-            label="Team Chat Link"
+            label={t('teams.chatLink')}
             placeholder="https://chat.whatsapp.com/..."
             value={chatLink}
             onChangeText={setChatLink}
@@ -256,8 +256,8 @@ function EditTeamForm({ team, leagues }: EditTeamFormProps) {
                       title={league.name}
                       subtitle={
                         league._count?.seasons
-                          ? `${league._count.seasons} season${league._count.seasons === 1 ? '' : 's'}`
-                          : 'No seasons'
+                          ? t('leagues.seasonCount', { count: league._count.seasons })
+                          : t('teams.noSeasons')
                       }
                       onPress={() => handleLeagueSelect(league.id)}
                       accessibilityRole="radio"
@@ -293,11 +293,11 @@ function EditTeamForm({ team, leagues }: EditTeamFormProps) {
           {showLeaguePicker && leagueId && (
             <View style={styles.selectionSection}>
               <ThemedText variant="captionBold" color="textSecondary" style={styles.label}>
-                Season
+                {t('leagues.season')}
               </ThemedText>
               {seasonsLoading ? (
                 <View style={styles.loadingContainer}>
-                  <LoadingSpinner message="Loading seasons..." />
+                  <LoadingSpinner message={t('teams.loadingSeasons')} />
                 </View>
               ) : seasons.length > 0 ? (
                 <View style={[styles.selectionList, { borderColor: colors.border }]}>
@@ -310,8 +310,8 @@ function EditTeamForm({ team, leagues }: EditTeamFormProps) {
                         title={season.name}
                         subtitle={
                           season._count?.teams
-                            ? `${season._count.teams} team${season._count.teams === 1 ? '' : 's'}`
-                            : 'No teams yet'
+                            ? t('seasons.teamCount', { count: season._count.teams })
+                            : t('seasons.noTeams')
                         }
                         onPress={() => setSeasonId(season.id)}
                         accessibilityRole="radio"
@@ -344,7 +344,7 @@ function EditTeamForm({ team, leagues }: EditTeamFormProps) {
                 <View style={[styles.noSeasonsContainer, { backgroundColor: colors.backgroundSecondary }]}>
                   <Ionicons name="calendar-outline" size={32} color={colors.textTertiary} />
                   <ThemedText variant="body" color="textTertiary" style={styles.noSeasonsText}>
-                    No active seasons in {selectedLeague?.name}
+                    {t('teams.noActiveSeasons', { league: selectedLeague?.name ?? '' })}
                   </ThemedText>
                 </View>
               )}

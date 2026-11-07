@@ -31,12 +31,14 @@ import { getHorizontalPadding, isWeb } from '../../../utils/responsive';
 import { useGoBack } from '../../../hooks/useGoBack';
 import { displayName } from '../../../utils/display-name';
 import { BackButton } from '../../../components/BackButton';
+import { useTranslation } from '../../../i18n';
 
 export default function PlayerStatsScreen() {
   const router = useRouter();
   const goBack = useGoBack('/(tabs)/home');
   const { id } = useLocalSearchParams<{ id: string }>();
   const { colors } = useTheme();
+  const { t } = useTranslation();
   const padding = getHorizontalPadding();
   const insets = useSafeAreaInsets();
 
@@ -45,7 +47,7 @@ export default function PlayerStatsScreen() {
   const { data, isLoading, error, refetch } = usePlayerOverallStats(id);
 
   if (isLoading) {
-    return <LoadingSpinner message="Loading player stats..." fullScreen />;
+    return <LoadingSpinner message={t('stats.loadingPlayerStats')} fullScreen />;
   }
 
   // The backend 404s when the player has no team memberships yet. For the
@@ -56,13 +58,9 @@ export default function PlayerStatsScreen() {
       <ThemedView variant="background" style={styles.container}>
         <EmptyState
           icon="stats-chart-outline"
-          title={isSelf ? 'No stats yet' : 'No stats for this player'}
-          message={
-            isSelf
-              ? 'Join a team and play some games to see your stats here.'
-              : 'This player is not on any team yet.'
-          }
-          actionLabel={isSelf ? 'View Teams' : 'Go back'}
+          title={isSelf ? t('stats.noStatsSelfTitle') : t('stats.noStatsPlayerTitle')}
+          message={isSelf ? t('stats.noStatsSelfMessage') : t('stats.noStatsPlayerMessage')}
+          actionLabel={isSelf ? t('stats.viewTeams') : t('common.goBack')}
           onAction={() => (isSelf ? router.push('/teams') : goBack())}
         />
       </ThemedView>
@@ -72,7 +70,7 @@ export default function PlayerStatsScreen() {
   if (error || !data) {
     return (
       <ErrorState
-        message={error instanceof Error ? error.message : 'Failed to load stats'}
+        message={error instanceof Error ? error.message : t('stats.loadFailed')}
         onRetry={refetch}
         // The error replaces the whole screen, header included (#589).
         onBack={goBack}
@@ -100,10 +98,10 @@ export default function PlayerStatsScreen() {
         <BackButton onPress={() => router.back()} style={styles.backButton} />
         <View style={styles.headerContent}>
           <ThemedText variant="h2" heading numberOfLines={1}>
-            Player Stats
+            {t('stats.playerStatsTitle')}
           </ThemedText>
         </View>
-        {isWeb && <PrintButton title="Print" />}
+        {isWeb && <PrintButton />}
       </View>
 
       <ScrollView
@@ -129,13 +127,13 @@ export default function PlayerStatsScreen() {
             <View style={styles.heroChip}>
               <Ionicons name="people-outline" size={12} color="rgba(255,255,255,0.9)" />
               <ThemedText variant="caption" style={styles.heroChipText}>
-                {teams.length} team{teams.length !== 1 ? 's' : ''}
+                {t('seasons.teamCount', { count: teams.length })}
               </ThemedText>
             </View>
             <View style={styles.heroChip}>
               <Ionicons name="basketball-outline" size={12} color="rgba(255,255,255,0.9)" />
               <ThemedText variant="caption" style={styles.heroChipText}>
-                {careerTotals.gamesPlayed} games
+                {t('stats.gameCount', { count: careerTotals.gamesPlayed })}
               </ThemedText>
             </View>
           </View>
@@ -145,42 +143,42 @@ export default function PlayerStatsScreen() {
         {careerTotals.gamesPlayed > 0 && (
           <View style={styles.section}>
             <ThemedText variant="h3" heading style={styles.sectionTitle}>
-              Career Averages
+              {t('stats.careerAverages')}
             </ThemedText>
             <SeasonAverages stats={careerTotals} />
 
             {/* Career Totals Card */}
             <Card variant="default" style={styles.careerCard}>
               <ThemedText variant="bodyBold" style={styles.cardTitle}>
-                Career Totals
+                {t('stats.careerTotals')}
               </ThemedText>
               <View style={styles.totalsRow}>
                 <View style={styles.totalItem}>
                   <ThemedText variant="h3">{careerTotals.points}</ThemedText>
-                  <ThemedText variant="caption" color="textSecondary">Points</ThemedText>
+                  <ThemedText variant="caption" color="textSecondary">{t('stats.points')}</ThemedText>
                 </View>
                 <View style={styles.totalItem}>
                   <ThemedText variant="h3">{careerTotals.rebounds}</ThemedText>
-                  <ThemedText variant="caption" color="textSecondary">Rebounds</ThemedText>
+                  <ThemedText variant="caption" color="textSecondary">{t('stats.rebounds')}</ThemedText>
                 </View>
                 <View style={styles.totalItem}>
                   <ThemedText variant="h3">{careerTotals.assists}</ThemedText>
-                  <ThemedText variant="caption" color="textSecondary">Assists</ThemedText>
+                  <ThemedText variant="caption" color="textSecondary">{t('stats.assists')}</ThemedText>
                 </View>
               </View>
               <View style={[styles.divider, { backgroundColor: colors.border }]} />
               <View style={styles.totalsRow}>
                 <View style={styles.totalItem}>
                   <ThemedText variant="body">{careerTotals.steals}</ThemedText>
-                  <ThemedText variant="caption" color="textSecondary">Steals</ThemedText>
+                  <ThemedText variant="caption" color="textSecondary">{t('stats.steals')}</ThemedText>
                 </View>
                 <View style={styles.totalItem}>
                   <ThemedText variant="body">{careerTotals.blocks}</ThemedText>
-                  <ThemedText variant="caption" color="textSecondary">Blocks</ThemedText>
+                  <ThemedText variant="caption" color="textSecondary">{t('stats.blocks')}</ThemedText>
                 </View>
                 <View style={styles.totalItem}>
                   <ThemedText variant="body">{careerTotals.efficiency.toFixed(1)}</ThemedText>
-                  <ThemedText variant="caption" color="textSecondary">Efficiency</ThemedText>
+                  <ThemedText variant="caption" color="textSecondary">{t('stats.efficiency')}</ThemedText>
                 </View>
               </View>
             </Card>
@@ -188,7 +186,7 @@ export default function PlayerStatsScreen() {
             {/* Shooting Stats */}
             <Card variant="default" style={styles.shootingCard}>
               <ThemedText variant="bodyBold" style={styles.cardTitle}>
-                Shooting
+                {t('stats.shooting')}
               </ThemedText>
               <View style={styles.shootingRow}>
                 <View style={styles.shootingItem}>
@@ -196,7 +194,7 @@ export default function PlayerStatsScreen() {
                     {careerTotals.fieldGoalPercentage.toFixed(1)}%
                   </ThemedText>
                   <ThemedText variant="caption" color="textSecondary">
-                    FG ({careerTotals.fieldGoalsMade}/{careerTotals.fieldGoalsAttempted})
+                    {t('stats.shootingMadeAttempted', { label: t('stats.abbr.fg'), made: careerTotals.fieldGoalsMade, attempted: careerTotals.fieldGoalsAttempted })}
                   </ThemedText>
                 </View>
                 <View style={styles.shootingItem}>
@@ -204,7 +202,7 @@ export default function PlayerStatsScreen() {
                     {careerTotals.threePointPercentage.toFixed(1)}%
                   </ThemedText>
                   <ThemedText variant="caption" color="textSecondary">
-                    3P ({careerTotals.threePointersMade}/{careerTotals.threePointersAttempted})
+                    {t('stats.shootingMadeAttempted', { label: t('stats.abbr.threes'), made: careerTotals.threePointersMade, attempted: careerTotals.threePointersAttempted })}
                   </ThemedText>
                 </View>
                 <View style={styles.shootingItem}>
@@ -212,7 +210,7 @@ export default function PlayerStatsScreen() {
                     {careerTotals.freeThrowPercentage.toFixed(1)}%
                   </ThemedText>
                   <ThemedText variant="caption" color="textSecondary">
-                    FT ({careerTotals.freeThrowsMade}/{careerTotals.freeThrowsAttempted})
+                    {t('stats.shootingMadeAttempted', { label: t('stats.abbr.ft'), made: careerTotals.freeThrowsMade, attempted: careerTotals.freeThrowsAttempted })}
                   </ThemedText>
                 </View>
               </View>
@@ -224,7 +222,7 @@ export default function PlayerStatsScreen() {
         {teams.length > 0 && (
           <View style={styles.section}>
             <ThemedText variant="h3" heading style={styles.sectionTitle}>
-              Stats by Team
+              {t('stats.statsByTeam')}
             </ThemedText>
             {teams.map((teamData) => (
               <View key={teamData.teamId} style={styles.teamSection}>
@@ -260,7 +258,7 @@ export default function PlayerStatsScreen() {
           <Card variant="default" style={styles.emptyCard}>
             <Ionicons name="stats-chart-outline" size={48} color={colors.textTertiary} />
             <ThemedText variant="body" color="textSecondary" style={styles.emptyText}>
-              No statistics available yet. Stats will appear here once games are played.
+              {t('stats.noStatsAvailable')}
             </ThemedText>
           </Card>
         )}

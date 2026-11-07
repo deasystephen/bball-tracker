@@ -1,5 +1,7 @@
 # Email: SES events, bounces and complaints
 
+What happens after an invitation email is opened (web views, accepts by link or in the app) is measured in `web-funnel.md` (#964).
+
 As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had grown to 170K characters; `CLAUDE.md` now keeps only the rules and a pointer here. Keep this file current in the same PR as the code it describes.
 
 ## Email bounces & complaints (#449)

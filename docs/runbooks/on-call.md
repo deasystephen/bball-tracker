@@ -17,7 +17,7 @@ their procedures are in the [email deliverability runbook](email-deliverability.
 | API | `https://api.hooplings.com` — health endpoint `/health` (pings Postgres; 503 when the DB is unreachable) |
 | ECS | cluster `bball-tracker-production-cluster`, service `bball-tracker-production-api`, **one task by design** |
 | RDS | `bball-tracker-production-postgres` |
-| Logs | Datadog, **US5** site (`us5.datadoghq.com`), query `service:bball-tracker-api` |
+| Logs | Datadog, **US5** site (`us5.datadoghq.com`), query `service:bball-tracker-api` (the API) or `service:bball-tracker-web` (hooplings.com, #966); every line carries `@commit` and the tag `env:production` |
 | Errors | Sentry org `satsun-ventures`, projects `bball-tracker-backend` and `bball-tracker-mobile` |
 | Error emails | Two Sentry alert rules, see [Sentry alert rules](#sentry-alert-rules). They go to the members of the Sentry organization, a separate list from the SNS subscriber above. The owner's account delivers them to `alerts@hooplings.com` too (since 2026-09-29, #555). |
 
@@ -42,6 +42,7 @@ variables in `infra/alerting.tf`; tune them in `terraform.tfvars`, never by edit
 | `rds-free-storage-low` | Free storage < 2 GiB for 15 min | fine | [Database](#database) |
 | `rds-connections-high` | > 60 open connections for 10 min (about 75% of the `db.t3.micro` limit) | fine | [Database](#database) |
 | `rds-cpu-high` | RDS CPU > 80% average for 15 min | fine | [Database](#database) |
+| `web-uptime` | Route 53 cannot get a 2xx/3xx from `https://hooplings.com/health` for 2 min (exists once `local.web_enabled` in `infra/web.tf` is `true`) | failing | [Web site is down](#web-site-is-down) |
 | `ses-bounce-rate` | SES account bounce rate > 3% (AWS reviews the account at 5%) | unchanged | [Email deliverability](email-deliverability.md#bounce-or-complaint-rate-alarm) |
 | `ses-complaint-rate` | SES account complaint rate > 0.1% | unchanged | [Email deliverability](email-deliverability.md#bounce-or-complaint-rate-alarm) |
 | `ses-events-queue-stalled` | The oldest SES event has waited > 15 min: the API is not reading the queue | fine | [Email deliverability](email-deliverability.md#events-are-not-being-processed) |
@@ -96,6 +97,37 @@ Expect several emails for one incident. A crashed task trips `ecs-no-running-tas
 To restart a task that is running but wedged:
 `aws ecs update-service --cluster bball-tracker-production-cluster --service bball-tracker-production-api --force-new-deployment`.
 
+## Web site is down
+
+`https://hooplings.com` serves invitation links, the support page and the privacy and terms pages.
+Its `/health` does not call the API, so this alarm is about the web service alone (`infra/web.tf`,
+`docs/deployment/web-app.md`).
+
+1. `curl -s https://hooplings.com/health`. A 503 from the ALB means no healthy web task.
+2. `aws ecs describe-services --cluster bball-tracker-production-cluster --services bball-tracker-production-web --query 'services[0].{running:runningCount,events:events[0:5].message}'`.
+3. A deploy that never became healthy rolls itself back (circuit breaker); read the `build-and-deploy-web`
+   run. Task logs: CloudWatch group `/ecs/bball-tracker-production-web`.
+4. A healthy but broken deploy: point the service at the previous revision (`aws ecs update-service …
+   --task-definition bball-tracker-production-web:<previous revision>`, `docs/deployment/web-app.md`
+   "Rolling back"), then revert the commit. A run by hand rebuilds `main`, the broken commit, and
+   deploys the API too.
+
+## Web site errors
+
+The Datadog monitor `[hooplings.com] Web server errors` (#966; created by hand from the JSON in
+`docs/deployment/web-app.md`, "Web error monitor"): the site is up but logged a server error.
+
+1. Datadog Logs: `service:bball-tracker-web status:error`, grouped by `@routePath` and
+   `@errorName`. `@commit` says which deploy; compare with `curl -s https://hooplings.com/health`.
+2. The stack is not in Datadog (it can quote a URL with a token). Find Next.js's own output for the
+   same `@digest` in CloudWatch: `aws logs filter-log-events --log-group-name
+   /ecs/bball-tracker-production-web --filter-pattern '"<digest>"' --start-time <epoch ms>`.
+3. On `/invite/[token]`, check the API next (`service:bball-tracker-api
+   @path:"/api/v1/invitations/by-token/[redacted]"`): the page renders a fallback card for a failed
+   lookup and logs `Invitation lookup unavailable` at warn, so an error line there is a rendering
+   bug, not an API outage.
+4. A bad deploy: roll back as in [Web site is down](#web-site-is-down), step 4.
+
 ## API is returning errors
 
 `alb-elb-5xx`, `alb-target-5xx`
@@ -138,6 +170,19 @@ as a remedy: Socket.io runs on an in-memory adapter and is single-replica only (
 ## Database
 
 `rds-free-storage-low`, `rds-connections-high`, `rds-cpu-high`
+
+0. **Read the server's own log first** when `/health` says `"db":"down"` or the API logs Prisma
+   `P1010` / connection errors. PostgreSQL names the cause in one line: `no pg_hba.conf entry …
+   no encryption` (a client connecting without TLS, the 2026-06-21 outage), `password
+   authentication failed`, `canceling statement due to lock timeout`, `too many connections`.
+   The log is in CloudWatch for 30 days (#757); no one-off ECS task is needed to read it.
+   ```bash
+   aws logs tail /aws/rds/instance/bball-tracker-production-postgres/postgresql --since 1h
+   aws logs tail /aws/rds/instance/bball-tracker-production-postgres/postgresql --since 1d \
+     --filter-pattern '"no encryption"'
+   ```
+   Lines are terse by design (no DETAIL, no statement values; see
+   [RDS backup & restore](rds-backup-restore.md#parameter-group-and-server-log)).
 
 1. **Check the instance state and storage.** Storage autoscaling grows the volume (20 → 100 GiB
    maximum) when free space drops below 10%; this alarm staying in `ALARM` means it has not —
@@ -278,9 +323,12 @@ send email; both cover `bball-tracker-backend` and `bball-tracker-mobile`.
 The rules live in Sentry, not in this repository. They were created through Sentry's API; to
 change one, edit it in Sentry (Alerts) and update the table above in the same change.
 
-## Datadog has logs, and no monitors
+## Datadog has logs, and one monitor
 
-Datadog receives the API's logs (`infra/datadog.tf`) and alerts on nothing. Its seven default
+Datadog receives the API's logs and the web site's JSON lines (`infra/datadog.tf`). Its one
+monitor is `[hooplings.com] Web server errors` ([Web site errors](#web-site-errors)), created by
+hand from the JSON in `docs/deployment/web-app.md` once the site is live (#966); until the owner
+creates it, Datadog alerts on nothing. Its seven default
 monitors were deleted on 2026-09-29 (#448): they queried `system.*` host metrics, which Fargate
 never emits, so all seven sat in "No Data", and each notified the literal placeholder
 `@your-team-handle`. Alerting is CloudWatch and Sentry.
@@ -292,4 +340,6 @@ outside this repository.
 ## Not covered
 
 Not covered by any alarm today: a failed automated RDS backup, and Redis memory or
-evictions (the cache is best-effort and fails open).
+evictions (the cache and the shared rate-limit counters are best-effort and fail open: while Redis
+is down each task counts rate limits in its own memory and logs `Rate limit store: Redis
+unavailable, counting in memory` once, #452).

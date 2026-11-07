@@ -8,7 +8,8 @@
 
 import React from 'react';
 import { AxiosError, AxiosHeaders } from 'axios';
-import { render, fireEvent } from '@testing-library/react-native';
+import { act, render, fireEvent } from '@testing-library/react-native';
+import { i18n } from '../../i18n';
 
 import PlayerStatsScreen from '../../app/players/[id]/stats';
 import { useAuthStore } from '../../store/auth-store';
@@ -92,5 +93,26 @@ describe('PlayerStatsScreen — when the stats cannot be loaded', () => {
 
     fireEvent.press(view.getByText('Go back'));
     expect(mockRouter.back).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads Spanish on a Spanish device: empty state and error (#671)', async () => {
+    mockQuery.error = httpError(404, 'Player not found or has no team memberships');
+    await i18n.changeLanguage('es');
+    try {
+      const view = render(<PlayerStatsScreen />);
+
+      expect(view.getByText('Este jugador no tiene estadísticas')).toBeTruthy();
+      expect(view.getByText('Volver')).toBeTruthy();
+      view.unmount();
+
+      mockQuery.error = null;
+      const failed = render(<PlayerStatsScreen />);
+      expect(failed.getByText('No se pudieron cargar las estadísticas')).toBeTruthy();
+      expect(failed.getByText('Reintentar')).toBeTruthy();
+    } finally {
+      await act(async () => {
+        await i18n.changeLanguage('en');
+      });
+    }
   });
 });

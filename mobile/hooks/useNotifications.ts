@@ -10,6 +10,8 @@ import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
 import { apiClient } from '../services/api-client';
 import { trackEvent, AnalyticsEvents } from '../services/analytics';
+import { requestPattern } from '../services/request-pattern';
+import { log } from '../services/log';
 import { useIsAuthenticated } from '../store/auth-store';
 
 // Configure notification behavior
@@ -49,10 +51,39 @@ export async function unregisterPushToken(timeoutMs?: number): Promise<void> {
   registeredPushToken = null;
 }
 
+/** Which step of push registration failed (#963): the OS permission, the Expo push token, or our API. */
+export type PushRegistrationStep = 'permission' | 'token' | 'register';
+
 /**
- * Register for push notifications and return the token
+ * The `log.warn` data for a failed push registration (#963): the step and,
+ * for our own API, the route pattern, HTTP status (`network` when there was
+ * no response) and axios code. For the permission and token steps the Error
+ * itself (name and message: the OS or Expo push service saying why). Never
+ * the push token.
  */
-async function registerForPushNotificationsAsync(): Promise<string | null> {
+export function pushRegistrationFailure(step: PushRegistrationStep, error: unknown): Record<string, unknown> {
+  if (step !== 'register') return { step, error };
+  const failed = error as {
+    code?: unknown;
+    response?: { status?: unknown };
+    config?: { baseURL?: string; url?: string };
+  } | null;
+  const status = failed?.response?.status;
+  return {
+    step,
+    endpoint_pattern: requestPattern(failed?.config),
+    status: typeof status === 'number' ? status : 'network',
+    ...(typeof failed?.code === 'string' ? { code: failed.code } : {}),
+  };
+}
+
+/**
+ * Register for push notifications and return the token. `onStep` hears when
+ * the token step starts, so a failure can say which step it came from.
+ */
+async function registerForPushNotificationsAsync(
+  onStep: (step: PushRegistrationStep) => void = () => undefined
+): Promise<string | null> {
   if (!Device.isDevice) {
     return null; // Push notifications only work on physical devices
   }
@@ -79,6 +110,7 @@ async function registerForPushNotificationsAsync(): Promise<string | null> {
     return null;
   }
 
+  onStep('token');
   const projectId = Constants.expoConfig?.extra?.eas?.projectId;
   const tokenData = await Notifications.getExpoPushTokenAsync({ projectId });
   return tokenData.data;
@@ -101,18 +133,25 @@ export function useNotificationSetup() {
 
     // Register push token. Every step can reject (permission API, Expo push
     // service, backend) — none of it is critical, but an unhandled rejection
-    // here surfaces as a red box / Sentry noise.
-    registerForPushNotificationsAsync()
+    // here surfaces as a red box / Sentry noise. A failure is logged with the
+    // step it came from (#963): if the Expo token fetch fails, the API never
+    // sees a request at all.
+    let step: PushRegistrationStep = 'permission';
+    registerForPushNotificationsAsync((next) => {
+      step = next;
+    })
       .then(async (token) => {
         if (!token) return;
+        step = 'register';
         await apiClient.post('/auth/push-token', {
           token,
           platform: Platform.OS,
         });
         registeredPushToken = token;
       })
-      .catch(() => {
-        // Silently fail - token registration is not critical
+      .catch((error: unknown) => {
+        // Not critical to the user, so no alert; but never silent.
+        log.warn('Push token registration failed', pushRegistrationFailure(step, error));
       });
 
     // Handle notification taps (deep-link to relevant screen)

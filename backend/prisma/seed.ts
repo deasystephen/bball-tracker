@@ -12,8 +12,10 @@ import { FLOW_CREATED_OPPONENTS, FLOW_CREATED_ANNOUNCEMENT_TITLES } from '../tes
 import {
   BRYCE_JAMES_ID,
   LAKERS_MANAGED_IDS,
+  MAESTRO_INVITE_TOKEN,
   SEED_IDS,
   invitationFixtureRow,
+  invitationFixtureToken,
   inviteStateFixtures,
   lakersVsSunsEvents,
   seededGames,
@@ -134,7 +136,9 @@ async function main() {
   // the leftovers accumulate, one more identically named team per run. (While
   // FREE was capped at 3 teams they also turned the flow's create step into a
   // 402 after two runs — found live while diagnosing #464; no tier is capped
-  // since #445.) Same idempotence rule as Dana's block below: everything but
+  // since #445.) `.maestro/team-rollover.yaml` adds a second Lakers row (the
+  // Spring 2025 team-season, #461) with Frank as its head coach; it goes the
+  // same way. Same idempotence rule as Dana's block below: everything but
   // his seeded Lakers goes. Team deletes cascade to members/staff/roles.
   const staleFrankTeams = await prisma.team.findMany({
     where: {
@@ -441,6 +445,25 @@ async function main() {
     },
   });
   console.log(`  Created season: ${season.name}`);
+
+  // The season `.maestro/team-rollover.yaml` rolls Frank's Lakers into (#461).
+  // Frank is a head coach, not a league admin, so he may roll into a season
+  // the league already has but may not create one; this is that season. It
+  // stays team-less between runs: the rolled-over Lakers row is one of
+  // "Frank's teams other than the seeded Lakers", which the reset above
+  // deletes on every seed.
+  const nextSeason = await prisma.season.upsert({
+    where: { leagueId_name: { leagueId: league.id, name: 'Spring 2025' } },
+    update: {},
+    create: {
+      leagueId: league.id,
+      name: 'Spring 2025',
+      startDate: new Date('2025-03-01'),
+      endDate: new Date('2025-06-30'),
+      isActive: true,
+    },
+  });
+  console.log(`  Created season: ${nextSeason.name}`);
 
   // Reset the fixture: `.maestro/admin-season-manage.yaml` creates an
   // "E2E Season…" in this league and deletes it at the end, so only an
@@ -755,8 +778,12 @@ async function main() {
       },
     });
 
-    // Random token per run — the fixtures are asserted by name/chip, never by
-    // token, and a committed bearer secret must not exist (security review).
+    // Random token per run: the roster flows assert these fixtures by name and
+    // chip, and a committed bearer secret must never be live (security review).
+    // The one exception is Iris's PENDING row, which .maestro/invite-deep-link.yaml
+    // opens by its fixed MAESTRO_INVITE_TOKEN; invitationFixtureToken writes that
+    // token only for a run with SEED_MAESTRO_INVITE_TOKEN=true, not production,
+    // against a local DATABASE_URL host.
     // Delete-then-create keeps re-seeds deterministic after QA interaction: a
     // manual Resend (supersede) leaves EXPIRED + PENDING rows, and updating an
     // arbitrary findFirst row could re-PENDING the old one alongside the live
@@ -764,16 +791,20 @@ async function main() {
     await prisma.teamInvitation.deleteMany({
       where: { teamId: lakers.id, playerId: fixturePlayer.id },
     });
+    const token = invitationFixtureToken(fixture, process.env, () => randomBytes(32).toString('base64url'));
     await prisma.teamInvitation.create({
       data: {
         teamId: lakers.id,
         playerId: fixturePlayer.id,
         invitedById: coachFrank.id,
-        token: randomBytes(32).toString('base64url'),
+        token,
         ...invitationFixtureRow(fixture),
       },
     });
     console.log(`    Added invite-state fixture: ${fixture.name} (${fixture.status}) to Lakers`);
+    if (token === MAESTRO_INVITE_TOKEN) {
+      console.log('      with the fixed Maestro token (invite-deep-link.yaml)');
+    }
   }
 
   // =========================================================================

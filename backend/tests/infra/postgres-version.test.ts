@@ -6,7 +6,10 @@
  * (local dev) and `.github/workflows/ci.yml` (the Postgres the whole backend
  * suite — including the real-database `league-access.db.test.ts` — runs on).
  * If they drift, CI validates migrations against an engine production does not
- * run. This suite fails on any disagreement, and every extraction must succeed
+ * run. `infra/rds.tf` also names the major in its parameter group (`family =
+ * "postgresNN"` and the `-postgresNN` group name, #757): a group whose family
+ * lags the engine cannot be attached, so a major upgrade that bumps only
+ * `engine_version` would fail at apply. This suite fails on any disagreement, and every extraction must succeed
  * (a file that changed shape fails loudly rather than passing vacuously).
  *
  * It also carries a DELIBERATE dated assertion: RDS ends standard support for
@@ -21,6 +24,7 @@
  */
 import { readFileSync } from 'fs';
 import path from 'path';
+import { resourceBlock } from './terraform';
 
 const ROOT = path.resolve(__dirname, '../../..');
 const RDS_TF = path.join(ROOT, 'infra/rds.tf');
@@ -42,6 +46,8 @@ export const END_OF_STANDARD_SUPPORT: Readonly<Record<string, string>> = {
 export const WARNING_MONTHS = 6;
 
 export const RDS_PATTERN = /^\s*engine_version\s*=\s*"(\d+)"\s*$/m;
+export const PARAMETER_FAMILY_PATTERN = /^\s*family\s*=\s*"postgres(\d+)"\s*$/m;
+export const PARAMETER_GROUP_NAME_PATTERN = /^\s*name\s*=\s*"\$\{local\.name_prefix\}-postgres(\d+)"\s*$/m;
 export const COMPOSE_PATTERN = /^\s*image:\s*postgres:(\d+)-alpine\s*$/m;
 export const CI_PATTERN = /^\s*image:\s*postgres:(\d+)\s*$/m;
 
@@ -63,9 +69,13 @@ export function addMonths(date: Date, months: number): Date {
   return result;
 }
 
-function readMajors(): { rds: string; compose: string; ci: string } {
+function readMajors(): { rds: string; family: string; groupName: string; compose: string; ci: string } {
+  const parameterGroup = resourceBlock(RDS_TF, 'aws_db_parameter_group', 'postgres');
+  const groupLabel = 'infra/rds.tf aws_db_parameter_group.postgres';
   return {
     rds: extractMajor(readFileSync(RDS_TF, 'utf8'), RDS_PATTERN, 'infra/rds.tf'),
+    family: extractMajor(parameterGroup, PARAMETER_FAMILY_PATTERN, groupLabel),
+    groupName: extractMajor(parameterGroup, PARAMETER_GROUP_NAME_PATTERN, groupLabel),
     compose: extractMajor(readFileSync(COMPOSE, 'utf8'), COMPOSE_PATTERN, 'docker-compose.yml'),
     ci: extractMajor(readFileSync(CI_WORKFLOW, 'utf8'), CI_PATTERN, '.github/workflows/ci.yml'),
   };
@@ -77,6 +87,11 @@ describe('PostgreSQL major version — rds.tf / docker-compose / CI parity', () 
   it('pins the same major in production, local dev and CI', () => {
     expect(majors.compose).toBe(majors.rds);
     expect(majors.ci).toBe(majors.rds);
+  });
+
+  it('declares the RDS parameter group for the same major as the engine (family and name)', () => {
+    expect(majors.family).toBe(majors.rds);
+    expect(majors.groupName).toBe(majors.rds);
   });
 
   it('pins a major that RDS still supports, with at least six months of standard support left', () => {
@@ -106,6 +121,17 @@ describe('PostgreSQL major version — extraction self-test', () => {
     expect(extractMajor('  engine_version             = "18"\n', RDS_PATTERN, 'rds')).toBe('18');
     expect(extractMajor('    image: postgres:18-alpine\n', COMPOSE_PATTERN, 'compose')).toBe('18');
     expect(extractMajor('        image: postgres:18\n', CI_PATTERN, 'ci')).toBe('18');
+    expect(extractMajor('  family      = "postgres18"\n', PARAMETER_FAMILY_PATTERN, 'family')).toBe('18');
+    expect(
+      extractMajor('  name        = "${local.name_prefix}-postgres18"\n', PARAMETER_GROUP_NAME_PATTERN, 'name'),
+    ).toBe('18');
+  });
+
+  it('refuses parameter-group shapes that do not name a bare major', () => {
+    expect(() => extractMajor('family = "aurora-postgresql18"', PARAMETER_FAMILY_PATTERN, 'f')).toThrow(/could not find/);
+    expect(() => extractMajor('family = "postgres18.6"', PARAMETER_FAMILY_PATTERN, 'f')).toThrow(/could not find/);
+    expect(() => extractMajor('name = "default.postgres18"', PARAMETER_GROUP_NAME_PATTERN, 'n')).toThrow(/could not find/);
+    expect(() => extractMajor('# family = "postgres18"', PARAMETER_FAMILY_PATTERN, 'f')).toThrow(/could not find/);
   });
 
   it('refuses shapes that are not a bare major', () => {

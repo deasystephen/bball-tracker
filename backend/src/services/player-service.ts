@@ -15,7 +15,14 @@ import {
   ForbiddenError,
   ConflictError,
 } from '../utils/errors';
-import { assertOwnUploadUrl, deletePreviousAvatar } from './upload-service';
+import {
+  assertOwnUploadUrl,
+  avatarUploadKey,
+  checkAvatarUpload,
+  deletePreviousAvatar,
+  withCheckedAvatar,
+  withPromotedAvatar,
+} from './upload-service';
 import {
   getGuardianChildIds,
   getPlayerTeamAccess,
@@ -179,23 +186,27 @@ export class PlayerService {
       throw new BadRequestError('A user with this email already exists');
     }
 
-    try {
-      // Create the player (as a User with role PLAYER)
-      const player = await prisma.user.create({
-        data: {
-          email: data.email,
-          name: data.name,
-          role: 'PLAYER',
-          profilePictureUrl: data.profilePictureUrl || null,
-          emailVerified: false, // Will be verified through WorkOS when they sign up
-        },
-        select: PLAYER_SELECT,
-      });
-      logger.info('Player created', { playerId: player.id, userId: caller.id });
-      return player;
-    } catch (error) {
-      throw PlayerService.mapWriteError(error);
-    }
+    // Checked before it is stored (#1005): 400 `upload_expired` when the
+    // upload is gone, and nothing is written; untagged only after the create.
+    const player = await withPromotedAvatar(data.profilePictureUrl, async () => {
+      try {
+        // Create the player (as a User with role PLAYER)
+        return await prisma.user.create({
+          data: {
+            email: data.email,
+            name: data.name,
+            role: 'PLAYER',
+            profilePictureUrl: data.profilePictureUrl || null,
+            emailVerified: false, // Will be verified through WorkOS when they sign up
+          },
+          select: PLAYER_SELECT,
+        });
+      } catch (error) {
+        throw PlayerService.mapWriteError(error);
+      }
+    });
+    logger.info('Player created', { playerId: player.id, userId: caller.id });
+    return player;
   }
 
   /** True when the user is staff with `canManageRoster` on any team, or a league admin. */
@@ -458,26 +469,35 @@ export class PlayerService {
       }
     }
 
+    // A new upload is checked before it is stored (#1005): an expired one is
+    // a 400 `upload_expired` with nothing written; it is untagged only after
+    // the update. Re-sending the stored URL skips the check but is untagged
+    // again, which repairs a failed earlier untag.
+    const resave = Boolean(data.profilePictureUrl) && data.profilePictureUrl === player.profilePictureUrl;
+    const uploadKey = resave
+      ? avatarUploadKey(data.profilePictureUrl)
+      : await checkAvatarUpload(data.profilePictureUrl);
     // Guarded on `deletedAt IS NULL` (#643): the read above is unlocked, so a
     // deletion that commits in between matches no row (P2025, a 404) instead
     // of rewriting the tombstone. One statement: write and returned row agree.
-    let updatedPlayer: Player;
-    try {
-      updatedPlayer = await prisma.user.update({
-        where: { id: playerId, deletedAt: null },
-        data: {
-          ...(data.name && { name: data.name }),
-          // A corrected address starts clean: the bounce belonged to the old one (#449).
-          ...(data.email && emailChanged && { email: data.email, ...EMAIL_SUPPRESSION_CLEARED }),
-          ...(data.profilePictureUrl !== undefined && {
-            profilePictureUrl: data.profilePictureUrl || null,
-          }),
-        },
-        select: PLAYER_SELECT,
-      });
-    } catch (error) {
-      throw PlayerService.mapWriteError(error);
-    }
+    const updatedPlayer: Player = await withCheckedAvatar(uploadKey, async () => {
+      try {
+        return await prisma.user.update({
+          where: { id: playerId, deletedAt: null },
+          data: {
+            ...(data.name && { name: data.name }),
+            // A corrected address starts clean: the bounce belonged to the old one (#449).
+            ...(data.email && emailChanged && { email: data.email, ...EMAIL_SUPPRESSION_CLEARED }),
+            ...(data.profilePictureUrl !== undefined && {
+              profilePictureUrl: data.profilePictureUrl || null,
+            }),
+          },
+          select: PLAYER_SELECT,
+        });
+      } catch (error) {
+        throw PlayerService.mapWriteError(error);
+      }
+    });
 
     if (data.profilePictureUrl !== undefined) {
       await deletePreviousAvatar(player.profilePictureUrl, updatedPlayer.profilePictureUrl);

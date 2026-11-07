@@ -18,6 +18,7 @@ import { spacing } from '../../theme';
 import { displayName } from '../../utils/display-name';
 import { MIN_TOUCH_TARGET } from '../../utils/touch-target';
 import type { GameRosterMember } from '../../types/game';
+import { useTranslation } from '../../i18n';
 
 type Player = GameRosterMember;
 
@@ -54,6 +55,7 @@ const PlayerChip: React.FC<PlayerChipProps> = ({
   colors,
   onPress,
 }) => {
+  const { t } = useTranslation();
   const selectionProgress = useDerivedValue(() => {
     return withTiming(isSelected ? 1 : 0, { duration: 200 });
   }, [isSelected]);
@@ -82,7 +84,11 @@ const PlayerChip: React.FC<PlayerChipProps> = ({
       onPress={handlePress}
       style={[styles.playerChip, animatedChipStyle]}
       accessibilityRole="button"
-      accessibilityLabel={`${displayName(member.player)}${member.jerseyNumber != null ? `, number ${member.jerseyNumber}` : ''}`}
+      accessibilityLabel={
+        member.jerseyNumber != null
+          ? t('tracker.playerWithNumber', { name: displayName(member.player), number: member.jerseyNumber })
+          : displayName(member.player)
+      }
       accessibilityState={{ selected: isSelected }}
     >
       <View
@@ -135,6 +141,7 @@ export const PlayerRoster: React.FC<PlayerRosterProps> = React.memo(function Pla
   hotPlayers = {},
 }) {
   const { colors } = useTheme();
+  const { t } = useTranslation();
 
   if (players.length === 0) {
     return (
@@ -145,7 +152,7 @@ export const PlayerRoster: React.FC<PlayerRosterProps> = React.memo(function Pla
         ]}
       >
         <ThemedText variant="caption" color="textTertiary">
-          No players on roster
+          {t('tracker.noPlayers')}
         </ThemedText>
       </View>
     );
@@ -158,7 +165,7 @@ export const PlayerRoster: React.FC<PlayerRosterProps> = React.memo(function Pla
         color="textSecondary"
         style={styles.label}
       >
-        Select Player
+        {t('tracker.selectPlayer')}
       </ThemedText>
       <View style={styles.grid}>
         {players.map((member) => {

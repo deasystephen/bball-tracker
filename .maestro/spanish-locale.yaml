@@ -1,0 +1,178 @@
+appId: com.bballtracker.mobile
+---
+# Spanish walk-through (#671; E2E plan B.4, the automated slice).
+#
+# Runs the app in Spanish WITHOUT changing the simulator's language. Maestro
+# 2.11 passes `launchApp.arguments` to `xcrun simctl launch` as `-<key> <value>`
+# (it adds the leading dash), so the app starts with
+#   -AppleLanguages (es) -AppleLocale es_ES
+# Those land in Foundation's argument domain, which outranks the user's
+# settings for this process only: `Locale.preferredLanguages` starts with "es",
+# expo-localization's getLocales()[0].languageCode is "es", and
+# mobile/i18n/config.ts picks Spanish. The system UI (the keyboard, iOS
+# alerts the app does not draw) stays in the simulator's language.
+#
+# If a Maestro or iOS upgrade stops honouring the arguments, the first
+# assertion ("Omitir") fails. Fallback: set the simulator itself to Spanish
+# and remove the `arguments` block:
+#   xcrun simctl spawn booted defaults write -g AppleLanguages -array es
+#   xcrun simctl spawn booted defaults write -g AppleLocale -string es_ES
+#   xcrun simctl shutdown booted && xcrun simctl boot <udid>
+# and set it back to en / en_US afterwards (docs/testing/maestro.md).
+#
+# Every Spanish string below is copied verbatim from mobile/i18n/locales/es.json
+# (key in the comment); a change there is a change to this flow.
+#
+# Mutates the seeded "Lakers vs Warriors" game: Frank starts it and records one
+# shot. The seed restores every seeded game's status and deletes its events
+# (#788), so run `cd backend && npx prisma db seed` before every flow as usual.
+- launchApp:
+    clearState: true
+    arguments:
+      AppleLanguages: "(es)"
+      AppleLocale: "es_ES"
+
+# Onboarding and sign-in
+- assertVisible: "Omitir"                     # onboarding.skip
+- assertNotVisible: "Skip"
+- tapOn: "Omitir"
+- assertVisible: "Inicia sesión para continuar"  # login.subtitle
+- assertNotVisible: "Sign in to continue"
+- tapOn: "Inicio de sesión de desarrollo con usuarios de prueba"  # login.devLoginA11y
+- assertVisible: "Elige un usuario de prueba"  # login.selectTestUser
+- tapOn: "Frank Vogel.*"
+
+# Home
+- assertVisible: "Tus equipos"                 # home.yourTeams
+- assertNotVisible: "Your Teams"
+- scrollUntilVisible:
+    element:
+      text: "Actividad reciente"               # home.recentActivity
+    direction: DOWN
+    timeout: 10000
+    visibilityPercentage: 60
+# Tab bar labels: tabs.tabA11y "Pestaña {{label}}" and tabs.trackA11y
+- assertVisible: "Pestaña Inicio"
+- assertVisible: "Pestaña Equipos"
+- assertVisible: "Pestaña Registrar partido"
+- assertVisible: "Pestaña Estadísticas"
+- assertVisible: "Pestaña Perfil"
+- assertNotVisible: "Home tab"
+- assertNotVisible: "Teams tab"
+- assertNotVisible: "Track game tab"
+
+# Teams list → Lakers
+- tapOn: "Pestaña Equipos"
+- assertVisible: "Equipos"                     # teams.title
+- assertNotVisible: "Teams"
+- extendedWaitUntil:
+    visible: "Lakers"
+    timeout: 10000
+- tapOn: "Lakers"
+
+# Team detail
+- assertVisible: "Ver estadísticas del equipo"  # teams.viewStats
+- assertVisible: "Anuncios"                    # announcements.listTitle
+- assertNotVisible: "View Team Stats"
+- assertNotVisible: "Announcements"
+- scrollUntilVisible:
+    element:
+      text: "Jugadores"                        # teams.players
+    direction: DOWN
+    timeout: 10000
+    visibilityPercentage: 60
+- assertNotVisible: "Players"
+- scrollUntilVisible:
+    element:
+      text: "Ver estadísticas del equipo"
+    direction: UP
+    timeout: 10000
+- tapOn: "Ver estadísticas del equipo"
+- assertVisible: "Estadísticas de Lakers"      # stats.teamStatsTitle
+- assertNotVisible: "Lakers Stats"
+# Back to the Teams list: common.goBack on the stats screen, then on the team.
+- tapOn: "Volver"                              # common.goBack
+- assertVisible: "Ver estadísticas del equipo"
+# The team screen comes back at its old scroll offset; the hero's back arrow
+# may sit above it.
+- scrollUntilVisible:
+    element:
+      text: "Volver"
+    direction: UP
+    timeout: 10000
+- tapOn: "Volver"
+- assertVisible: "Equipos"
+
+# Track (the Games tab) → the seeded scheduled Lakers game
+- tapOn: "Pestaña Registrar partido"
+- assertVisible: "Partidos"                    # games.title
+- assertNotVisible: "Games"
+- assertVisible: "Crear nuevo partido"         # games.createNewA11y
+# The upcoming row joins its texts; games.vsOpponent is "vs. {{opponent}}".
+- tapOn: '.*vs\. Warriors.*'
+
+# Game detail (SCHEDULED, head coach)
+- assertVisible: "Programado"                  # games.scheduled
+- assertVisible: "Fecha"                       # games.date
+- assertVisible: "Hora"                        # games.time
+- assertVisible: "Iniciar partido"             # games.start
+- assertVisible: "Eliminar partido"            # games.deleteA11y
+- assertVisible: "Volver"
+- assertNotVisible: "Scheduled"
+- assertNotVisible: "Start Game"
+
+# Tracker
+- tapOn: "Iniciar partido"
+- assertVisible: "Terminar partido"            # games.endGameA11y
+- assertNotVisible: "End game"
+- tapOn: "LeBron James.*"
+- tapOn: "tiro de 2 puntos anotado"            # tracker.shot.fieldGoalMadeA11y
+# games.scoreA11y "Marcador: {{home}} {{homeScore}}, {{away}} {{awayScore}}"
+- assertVisible: "Marcador: Lakers 2, Warriors 0"
+- assertNotVisible: "Score: Lakers 2, Warriors 0"
+- tapOn: "Volver"
+# The leave alert is drawn by the app, so it is Spanish too
+# (games.leaveTrackingTitle, games.leave).
+- assertVisible: "Salir del registro"
+- tapOn: "Salir"
+
+# Game detail (IN_PROGRESS)
+- assertVisible: "Seguir registrando"          # games.continueTracking
+- assertVisible: "En curso"                    # games.inProgress
+- assertNotVisible: "Continue Tracking"
+- tapOn: "Volver"
+- assertVisible: "Partidos"
+
+# Stats
+- tapOn: "Pestaña Estadísticas"
+- assertVisible: "Estadísticas"                # stats.title
+- assertNotVisible: "Statistics"
+
+# Profile
+- tapOn: "Pestaña Perfil"
+- assertVisible: "Cuenta"                      # profile.accountSection
+- assertNotVisible: "Account"
+- scrollUntilVisible:
+    element:
+      text: "Ajustes"                          # profile.settings
+    direction: DOWN
+    timeout: 10000
+    visibilityPercentage: 60
+- assertNotVisible: "Settings"
+# The logout button is the last row: no centerElement (docs/testing/maestro.md).
+- scrollUntilVisible:
+    element:
+      text: "Cerrar sesión"                    # profile.logout
+    direction: DOWN
+    timeout: 10000
+    visibilityPercentage: 60
+- assertNotVisible: "Logout"
+
+# And Home again. Frank's game is live now, so its card sits above the teams.
+- tapOn: "Pestaña Inicio"
+- scrollUntilVisible:
+    element:
+      text: "Tus equipos"
+    direction: DOWN
+    timeout: 10000
+    visibilityPercentage: 60

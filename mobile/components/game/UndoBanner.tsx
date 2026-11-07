@@ -16,6 +16,7 @@ import { spacing } from '../../theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { announce } from '../../utils/announce';
 import { MIN_TOUCH_TARGET } from '../../utils/touch-target';
+import { useTranslation } from '../../i18n';
 
 interface UndoBannerProps {
   visible: boolean;
@@ -41,6 +42,7 @@ export const UndoBanner: React.FC<UndoBannerProps> = ({
   pending = false,
 }) => {
   const { colors } = useTheme();
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const [countdown, setCountdown] = useState(duration);
   const [wasVisible, setWasVisible] = useState(visible);
@@ -96,8 +98,8 @@ export const UndoBanner: React.FC<UndoBannerProps> = ({
     }
     if (pending || announced.current) return;
     announced.current = true;
-    announce(`${message}. Undo available for ${duration} seconds`);
-  }, [visible, pending, message, duration]);
+    announce(t('tracker.undoAnnouncement', { message, seconds: duration }));
+  }, [visible, pending, message, duration, t]);
 
   const containerAnimatedStyle = useAnimatedStyle(() => ({
     opacity: opacity.value,
@@ -147,7 +149,7 @@ export const UndoBanner: React.FC<UndoBannerProps> = ({
           accessibilityRole="button"
           // "Saving" until the event is confirmed, then a stable "Undo": the
           // per-second countdown never changes the focused element's name.
-          accessibilityLabel={pending ? 'Saving' : 'Undo'}
+          accessibilityLabel={pending ? t('tracker.savingA11y') : t('tracker.undoA11y')}
           accessibilityState={{ disabled: pending }}
           style={[
             styles.undoButton,
@@ -156,7 +158,7 @@ export const UndoBanner: React.FC<UndoBannerProps> = ({
           ]}
         >
           <ThemedText variant="captionBold" style={styles.undoText}>
-            {pending ? 'SAVING…' : `UNDO (${countdown}s)`}
+            {pending ? t('tracker.saving') : t('tracker.undoCountdown', { seconds: countdown })}
           </ThemedText>
         </TouchableOpacity>
         {/* Countdown progress bar */}

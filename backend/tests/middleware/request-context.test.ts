@@ -12,6 +12,8 @@ import { spyOnInfo } from '../support/domain-events';
 import { getLogContext, setLogContextUser } from '../../src/utils/log-context';
 import { parseLogLines } from '../support/log-lines';
 
+const CLIENT_ID = 'c0ffee00-1234-4abc-8def-0123456789ab';
+
 describe('requestContext middleware', () => {
   let infoSpy: jest.SpyInstance;
   let consoleSpy: jest.SpyInstance;
@@ -44,10 +46,26 @@ describe('requestContext middleware', () => {
     expect(res.body.context).toEqual({ requestId: res.body.requestId, userId: 'user-9' });
   });
 
-  it('honours an incoming x-request-id header', async () => {
+  it('honours an incoming x-request-id header that is a UUID, and echoes it (#963)', async () => {
+    const res = await request(buildApp()).get('/thing').set('x-request-id', CLIENT_ID);
+    expect(res.body.requestId).toBe(CLIENT_ID);
+    expect(res.body.context.requestId).toBe(CLIENT_ID);
+    expect(res.headers['x-request-id']).toBe(CLIENT_ID);
+  });
+
+  it('replaces an x-request-id that is not a UUID with a generated one (#963)', async () => {
     const res = await request(buildApp()).get('/thing').set('x-request-id', 'client-abc');
-    expect(res.body.requestId).toBe('client-abc');
-    expect(res.body.context.requestId).toBe('client-abc');
+    expect(res.body.requestId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(res.body.requestId).not.toBe('client-abc');
+    expect(res.headers['x-request-id']).toBe(res.body.requestId);
+  });
+
+  it('adds a valid X-Hooplings-Client to the context and drops an invalid one (#963)', async () => {
+    const valid = await request(buildApp()).get('/thing').set('x-hooplings-client', 'ios/1.6.0+embedded');
+    expect(valid.body.context).toEqual({ requestId: valid.body.requestId, userId: 'user-9', client: 'ios/1.6.0+embedded' });
+
+    const invalid = await request(buildApp()).get('/thing').set('x-hooplings-client', 'curl/8.0');
+    expect(invalid.body.context).toEqual({ requestId: invalid.body.requestId, userId: 'user-9' });
   });
 
   it('a logger call inside the handler carries the request id with no explicit context', async () => {
@@ -61,9 +79,9 @@ describe('requestContext middleware', () => {
       res.json({ ok: true });
     });
 
-    await request(app).get('/log').set('x-request-id', 'req-42');
+    await request(app).get('/log').set('x-request-id', CLIENT_ID);
 
     const line = parseLogLines(logSpy).find((e) => e.message === 'Domain event');
-    expect(line).toEqual(expect.objectContaining({ requestId: 'req-42', teamId: 't1' }));
+    expect(line).toEqual(expect.objectContaining({ requestId: CLIENT_ID, teamId: 't1' }));
   });
 });

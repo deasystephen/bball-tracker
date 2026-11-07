@@ -124,8 +124,8 @@ export const AvatarPicker: React.FC<AvatarPickerProps> = ({
 
     if (!permissionResult.granted) {
       Alert.alert(
-        'Permission Required',
-        `Please allow access to your ${source === 'camera' ? 'camera' : 'photo library'} in Settings.`
+        t('avatar.permissionTitle'),
+        source === 'camera' ? t('avatar.permissionCamera') : t('avatar.permissionLibrary')
       );
       return;
     }
@@ -152,10 +152,10 @@ export const AvatarPicker: React.FC<AvatarPickerProps> = ({
   // The camera and the library are native screens: ActionMenu opens them
   // only once its sheet has finished closing (waitForClose), which iOS needs.
   const menuItems: ActionMenuItem[] = [
-    { label: 'Take Photo', waitForClose: true, onPress: () => void pickImage('camera') },
-    { label: 'Choose from Library', waitForClose: true, onPress: () => void pickImage('library') },
+    { label: t('avatar.takePhoto'), waitForClose: true, onPress: () => void pickImage('camera') },
+    { label: t('avatar.chooseFromLibrary'), waitForClose: true, onPress: () => void pickImage('library') },
     ...(uri
-      ? [{ label: 'Remove Photo', destructive: true, onPress: () => onImageSelected(null) }]
+      ? [{ label: t('avatar.removePhoto'), destructive: true, onPress: () => onImageSelected(null) }]
       : []),
   ];
 

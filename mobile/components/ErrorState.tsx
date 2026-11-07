@@ -13,6 +13,7 @@ import { borderRadius } from '../theme/border-radius';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../hooks/useTheme';
 import { getResponsiveValue } from '../utils/responsive';
+import { useTranslation } from '../i18n';
 
 interface ErrorStateProps {
   title?: string;
@@ -30,14 +31,18 @@ interface ErrorStateProps {
 }
 
 export const ErrorState: React.FC<ErrorStateProps> = ({
-  title = 'Something went wrong',
+  title: titleProp,
   message,
   onRetry,
-  retryLabel = 'Try Again',
+  retryLabel: retryLabelProp,
   onBack,
-  backLabel = 'Go back',
+  backLabel: backLabelProp,
 }) => {
   const { colors } = useTheme();
+  const { t } = useTranslation();
+  const title = titleProp ?? t('common.somethingWentWrong');
+  const retryLabel = retryLabelProp ?? t('common.tryAgain');
+  const backLabel = backLabelProp ?? t('common.goBack');
   const iconSize = getResponsiveValue(48, 64);
 
   return (
@@ -45,7 +50,7 @@ export const ErrorState: React.FC<ErrorStateProps> = ({
       variant="background"
       style={styles.container}
       accessibilityRole="alert"
-      accessibilityLabel={`Error: ${title}. ${message}`}
+      accessibilityLabel={t('common.errorA11y', { title, message })}
     >
       <View style={[styles.iconContainer, { backgroundColor: colors.liveBackground, ...shadows.sm }]}>
         <Ionicons name="alert-circle-outline" size={iconSize} color={colors.error} />

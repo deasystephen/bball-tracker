@@ -25,6 +25,8 @@
  * invitation id to resend; use a fresh supersede invite instead.
  */
 
+import { i18n } from '../i18n';
+
 import { isInvitationExpired } from './invitation-expiry';
 
 export type RosterStatus = 'deleted' | 'active' | 'invited' | 'invite_expired' | 'not_invited';
@@ -82,15 +84,15 @@ export function getRosterStatus(
 export function rosterStatusLabel(status: RosterStatus): string {
   switch (status) {
     case 'deleted':
-      return 'Deleted';
+      return i18n.t('roster.status.deleted');
     case 'active':
-      return 'Active';
+      return i18n.t('roster.status.active');
     case 'invited':
-      return 'Invited';
+      return i18n.t('roster.status.invited');
     case 'invite_expired':
-      return 'Invite expired';
+      return i18n.t('roster.status.inviteExpired');
     case 'not_invited':
-      return 'Not invited';
+      return i18n.t('roster.status.notInvited');
   }
 }
 

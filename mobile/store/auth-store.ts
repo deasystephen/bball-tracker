@@ -14,6 +14,7 @@ import {
   type AnalyticsUserProperties,
 } from '../services/analytics';
 import { log } from '../services/log';
+import { getRunningBuild } from '../services/app-build';
 import { getSessionHooks } from './session-hooks';
 
 export type LogoutReason = AnalyticsEventProps['user_logged_out']['reason'];
@@ -31,6 +32,7 @@ export function userPropertiesFrom(user: User): Partial<AnalyticsUserProperties>
     is_parent: user.role === 'PARENT' || (user.guardianOf?.length ?? 0) > 0,
     is_player: user.role === 'PLAYER',
     app_version: appVersion(),
+    update_id: getRunningBuild().updateId ?? 'embedded',
   };
 }
 

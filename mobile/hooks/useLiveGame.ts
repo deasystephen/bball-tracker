@@ -19,6 +19,7 @@ import { useEffect, useReducer, useRef } from 'react';
 import type { Socket } from 'socket.io-client';
 import { getSocket, isSocketRecovering } from '../services/socket';
 import type { GameEvent, GameStatus } from '../types/game';
+import { i18n } from '../i18n';
 
 export type ConnectionState = 'connecting' | 'live' | 'reconnecting' | 'error';
 
@@ -185,7 +186,7 @@ export function useLiveGame(gameId: string | undefined): UseLiveGameResult {
         if (!ack?.success) {
           dispatch({
             type: 'error',
-            message: ack?.error ?? 'Failed to join game',
+            message: ack?.error ?? i18n.t('games.joinFailed'),
           });
         }
       });

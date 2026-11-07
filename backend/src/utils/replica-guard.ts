@@ -3,12 +3,15 @@ import { logger } from './logger';
 /**
  * Single-replica startup guard (#446).
  *
- * The API is single-replica by construction: Socket.io uses the in-memory
- * adapter (rooms are local to one process) and every rate limiter keeps its
- * counters in process memory (`websocket/rate-limit.ts`, the default
- * `express-rate-limit` MemoryStore). With a second task a live game splits
- * silently — the coach tracks on task A, the parents watch on task B, nobody
- * sees an error — and every rate limit becomes N times its budget.
+ * The API was single-replica by construction: Socket.io used the in-memory
+ * adapter (rooms are local to one process) and every rate limiter kept its
+ * counters in process memory. With a second task a live game splits silently
+ * — the coach tracks on task A, the parents watch on task B, nobody sees an
+ * error — and every rate limit becomes N times its budget. #452 moved the
+ * HTTP and socket-handshake rate limits to Redis and added the Redis adapter
+ * (`websocket/redis-adapter.ts`, enabled by `REDIS_SOCKET_ADAPTER_URL`); the
+ * per-IP socket cap is still per task. The guard stays closed until the
+ * cross-task cap and a load test on two tasks flip `MULTI_REPLICA_SUPPORTED`.
  *
  * A process cannot observe the autoscaling target, so the replica ceiling is
  * explicit configuration: `MAX_REPLICAS` in `infra/task-definition.json`, pinned
@@ -17,13 +20,12 @@ import { logger } from './logger';
  * deploy briefly runs two tasks (`deployment_maximum_percent = 200`) and must
  * not trip it.
  *
- * `REDIS_SOCKET_ADAPTER_URL` is deliberately NOT accepted as proof of safety
- * today. `@socket.io/redis-adapter` is not installed and nothing reads that
- * URL, so treating it as an escape hatch would be false assurance: setting one
- * env var would silence the guard while rooms still split. The change that
- * installs and wires the adapter and a shared rate-limit store (#452) flips
- * `MULTI_REPLICA_SUPPORTED`; from then on a ceiling above 1 is allowed only
- * when the URL is set.
+ * `REDIS_SOCKET_ADAPTER_URL` is NOT yet accepted as proof of safety: the
+ * adapter is wired, but cross-task delivery has only been proven in Jest
+ * (`tests/redis/socket-redis-adapter.redis.test.ts`), not on two ECS
+ * tasks. The follow-up to #452 sets the URL in the task definition, runs that
+ * load test and flips `MULTI_REPLICA_SUPPORTED`; from then on a ceiling above
+ * 1 is allowed only when the URL is set.
  */
 
 export const MAX_REPLICAS_ENV_VAR = 'MAX_REPLICAS';
@@ -33,9 +35,9 @@ export const SOCKET_ADAPTER_URL_ENV_VAR = 'REDIS_SOCKET_ADAPTER_URL';
 export const REDIS_ADAPTER_ISSUE = '#452';
 
 /**
- * Whether this build can run more than one replica at all. False until #452
- * installs `@socket.io/redis-adapter`, wires it to `REDIS_SOCKET_ADAPTER_URL`
- * and moves the rate-limit counters to a shared store.
+ * Whether this build can run more than one replica at all. The adapter and the
+ * shared rate-limit store are in (#452); this stays false until the cross-task
+ * socket cap and the two-task load test that follow it.
  */
 export const MULTI_REPLICA_SUPPORTED = false;
 
@@ -73,8 +75,10 @@ export interface ReplicaGuardDeps {
 const POSITIVE_INTEGER = /^[1-9]\d*$/;
 
 const SINGLE_REPLICA_WHY =
-  'Socket.io uses the in-memory adapter and rate-limit counters live in process memory, ' +
-  'so a second replica silently splits live-game rooms and multiplies every rate limit.';
+  'The HTTP and socket-handshake rate limits are shared through Redis and the Socket.io Redis adapter ' +
+  `exists (${SOCKET_ADAPTER_URL_ENV_VAR}), but the per-IP socket cap is still per task and cross-task ` +
+  'delivery has not been load-tested on two tasks, so MULTI_REPLICA_SUPPORTED is still false and a ' +
+  'second replica is not yet trusted with live games.';
 
 /**
  * Parses a replica ceiling. Returns `undefined` for unset/blank, `null` for
@@ -97,7 +101,7 @@ export function parseMaxReplicas(raw: string | undefined): number | null | undef
  * | production | unset / blank     | warn  (boots; pre-guard behaviour)         |
  * | production | not a positive int| exit                                       |
  * | production | 1                 | start (info)                               |
- * | production | > 1               | exit  (until #452; then needs adapter URL) |
+ * | production | > 1               | exit  (until the #452 load test; then needs adapter URL) |
  *
  * Unset is a warning rather than a failure so the deploy that introduces the
  * guard — or a rollback to a task definition that predates it — cannot
@@ -124,7 +128,7 @@ export function evaluateReplicaGuard(
       message:
         `${MAX_REPLICAS_ENV_VAR} is not set, so the single-replica guard cannot verify the replica ceiling. ` +
         `${SINGLE_REPLICA_WHY} Set ${MAX_REPLICAS_ENV_VAR}=1 in infra/task-definition.json and keep the ` +
-        `autoscaling max_capacity at 1 until the Redis adapter lands (${REDIS_ADAPTER_ISSUE}).`,
+        `autoscaling max_capacity at 1 until the two-task load test (${REDIS_ADAPTER_ISSUE}) flips MULTI_REPLICA_SUPPORTED.`,
     };
   }
 
@@ -146,8 +150,8 @@ export function evaluateReplicaGuard(
       reason: 'single-replica',
       maxReplicas,
       message:
-        `Replica ceiling is 1 (${MAX_REPLICAS_ENV_VAR}); Socket.io runs on the in-memory adapter. ` +
-        `Scaling out requires the Redis adapter (${REDIS_ADAPTER_ISSUE}).`,
+        `Replica ceiling is 1 (${MAX_REPLICAS_ENV_VAR}). Scaling out waits for the two-task load test ` +
+        `of the Socket.io Redis adapter (${REDIS_ADAPTER_ISSUE}).`,
     };
   }
 
@@ -158,9 +162,9 @@ export function evaluateReplicaGuard(
       maxReplicas,
       message:
         `Refusing to start: ${MAX_REPLICAS_ENV_VAR}=${maxReplicas} but this build is single-replica only. ` +
-        `${SINGLE_REPLICA_WHY} @socket.io/redis-adapter is not wired up, so ` +
-        `${SOCKET_ADAPTER_URL_ENV_VAR} has no effect and does not make this safe. ` +
-        `Set ${MAX_REPLICAS_ENV_VAR}=1 and max_capacity=1 until ${REDIS_ADAPTER_ISSUE} lands.`,
+        `${SINGLE_REPLICA_WHY} Until then ${SOCKET_ADAPTER_URL_ENV_VAR} has no effect on this check ` +
+        `and does not make this safe. Set ${MAX_REPLICAS_ENV_VAR}=1 and max_capacity=1 until the load ` +
+        `test for ${REDIS_ADAPTER_ISSUE} flips MULTI_REPLICA_SUPPORTED.`,
     };
   }
 

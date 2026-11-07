@@ -14,6 +14,7 @@ import { ThemedText } from './ThemedText';
 import { useTheme } from '../hooks/useTheme';
 import { spacing, borderRadius } from '../theme';
 import type { UsageMetric } from '../hooks/useUsage';
+import { useTranslation } from '../i18n';
 
 interface UsageMeterProps {
   /** Feature label, e.g. "Teams". */
@@ -25,6 +26,7 @@ interface UsageMeterProps {
 
 export function UsageMeter({ label, metric, upgradeHint }: UsageMeterProps): React.JSX.Element {
   const { colors } = useTheme();
+  const { t } = useTranslation();
 
   const limit = metric.limit;
   const unlimited = limit === null;
@@ -36,7 +38,9 @@ export function UsageMeter({ label, metric, upgradeHint }: UsageMeterProps): Rea
       <View style={styles.labelRow}>
         <ThemedText variant="body">{label}</ThemedText>
         <ThemedText variant="bodyBold" color={metric.limitReached ? 'error' : 'text'}>
-          {unlimited ? `${metric.count} · Unlimited` : `${metric.count} of ${metric.limit}`}
+          {unlimited
+            ? t('usage.unlimited', { used: metric.count })
+            : t('usage.ofLimit', { used: metric.count, limit: metric.limit })}
         </ThemedText>
       </View>
 

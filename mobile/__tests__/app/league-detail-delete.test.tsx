@@ -5,7 +5,9 @@
  */
 
 import React from 'react';
-import { render, fireEvent, waitFor } from '@testing-library/react-native';
+import { act, render, fireEvent, waitFor } from '@testing-library/react-native';
+
+import { i18n } from '../../i18n';
 
 import LeagueDetailScreen, { leagueHasTeams } from '../../app/admin/leagues/[id]';
 import type { Season } from '../../hooks/useSeasons';
@@ -131,5 +133,24 @@ describe('leagueHasTeams', () => {
     expect(leagueHasTeams([season('a', 0), season('b', 1)])).toBe(true);
     expect(leagueHasTeams([{ teams: [{ id: 't', name: 'T' }] }])).toBe(true);
     expect(leagueHasTeams([{}])).toBe(false);
+  });
+
+  it('reads Spanish on a Spanish device, season row placeholders included (#671)', async () => {
+    mockSeasons = [{ ...season('se-1', 2), endDate: '2027-06-30T12:00:00.000Z' }];
+    await i18n.changeLanguage('es');
+    try {
+      const view = render(<LeagueDetailScreen />);
+
+      expect(view.getByText('Temporadas')).toBeTruthy();
+      expect(view.getByText('Agregar temporada')).toBeTruthy();
+      expect(view.getByText('Activa')).toBeTruthy();
+      expect(view.getByText('2 equipos')).toBeTruthy();
+      expect(view.getByText(/^Sin inicio - /)).toBeTruthy();
+      expect(view.queryByText(/No start|Add Season|teams$/)).toBeNull();
+    } finally {
+      await act(async () => {
+        await i18n.changeLanguage('en');
+      });
+    }
   });
 });

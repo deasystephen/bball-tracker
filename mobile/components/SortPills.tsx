@@ -1,7 +1,10 @@
 /**
- * Horizontal sort-option pill row, shared by the team overview roster and the
- * team stats screen. Tinted-primary active style; each pill is labelled
- * "Sort by <label>" with `accessibilityState.selected` (Maestro asserts both).
+ * Horizontal single-choice pill row, used for sort options (team overview
+ * roster, team stats) and simple form choices (team gender, the Add Player
+ * "Is this player 13 or older?" question). Tinted-primary active style; each
+ * pill carries `accessibilityState.selected`. Sort rows are labelled
+ * "Sort by <label>" by default; form rows pass `labelPrefix` (for example
+ * "Gender: ") and are labelled "<prefix><label>". Maestro asserts both.
  * Pills are full 44pt touch targets.
  */
 
@@ -11,6 +14,7 @@ import { ThemedText } from './ThemedText';
 import { useTheme } from '../hooks/useTheme';
 import { spacing, borderRadius } from '../theme';
 import { MIN_TOUCH_TARGET } from '../utils/touch-target';
+import { useTranslation } from '../i18n';
 
 export interface SortPillOption<K extends string> {
   key: K;
@@ -24,8 +28,8 @@ interface SortPillsProps<K extends string> {
   onSelect: (key: K) => void;
   style?: StyleProp<ViewStyle>;
   /**
-   * Accessibility-label prefix. Defaults to the sort wording Maestro asserts
-   * ("Sort by <label>"); other single-choice rows (team gender) pass their own.
+   * Accessibility-label prefix. Defaults to `common.sortBy` ("Sort by <label>",
+   * the wording Maestro asserts); other single-choice rows (team gender) pass their own.
    */
   labelPrefix?: string;
 }
@@ -35,9 +39,10 @@ export function SortPills<K extends string>({
   selected,
   onSelect,
   style,
-  labelPrefix = 'Sort by ',
+  labelPrefix,
 }: SortPillsProps<K>) {
   const { colors } = useTheme();
+  const { t } = useTranslation();
 
   return (
     <View style={[styles.row, style]}>
@@ -55,7 +60,11 @@ export function SortPills<K extends string>({
               },
             ]}
             accessibilityRole="button"
-            accessibilityLabel={`${labelPrefix}${option.label}`}
+            accessibilityLabel={
+              labelPrefix === undefined
+                ? t('common.sortBy', { label: option.label })
+                : `${labelPrefix}${option.label}`
+            }
             accessibilityState={{ selected: isSelected }}
           >
             <ThemedText variant="caption" color={isSelected ? 'primary' : 'textSecondary'}>

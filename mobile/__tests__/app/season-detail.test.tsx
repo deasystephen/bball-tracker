@@ -9,7 +9,8 @@
 import React from 'react';
 import { render, fireEvent, waitFor } from '@testing-library/react-native';
 
-import SeasonDetailScreen, { formatSeasonRange } from '../../app/admin/seasons/[id]';
+import SeasonDetailScreen from '../../app/admin/seasons/[id]';
+import { formatSeasonRange } from '../../utils/format-date';
 import type { Season } from '../../hooks/useSeasons';
 import { useAuthStore } from '../../store/auth-store';
 
