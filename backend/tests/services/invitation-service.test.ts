@@ -20,7 +20,8 @@ const mockedMailerSend = (jest.requireMock('../../src/services/mailer') as unkno
 jest.mock('../../src/services/upload-service', () => ({
   discardOwnAvatar: jest.fn().mockResolvedValue(undefined),
   assertOwnUploadUrl: jest.fn(),
-  promoteAvatarUpload: jest.fn().mockResolvedValue(true),
+  // Like the real one: nothing to promote for an empty value
+  promoteAvatarUpload: jest.fn(async (url: unknown) => Boolean(url)),
   revertAvatarToPending: jest.fn().mockResolvedValue(undefined),
   // The real wrapper's contract over the mocked promote/revert (#1005):
   // promote, write, and revert to pending when the write throws.
@@ -2010,6 +2011,55 @@ describe('InvitationService', () => {
       expect(mockDiscardOwnAvatar).not.toHaveBeenCalled();
     });
 
+    it('middle case — the same URL added on a second team (row already stores it, photoApplied false) stays untagged (#1005)', async () => {
+      const { coach, team } = setupCoachTeam();
+      const unclaimed = {
+        ...createPlayer({ email: 'jane@example.com' }),
+        workosUserId: null,
+        managedById: null,
+        profilePictureUrl: AVATAR_URL,
+      };
+      // Flags update applies; the guarded photo write matches no row (it already has one)
+      const txUserUpdate = jest.fn().mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 0 });
+      setupReuseTx(team, coach, unclaimed, txUserUpdate);
+
+      const result = await InvitationService.addRosterPlayer(
+        team.id,
+        { name: 'Jane', playerEmail: 'jane@example.com', profilePictureUrl: AVATAR_URL },
+        coach.id
+      );
+
+      expect(result.rostered).toBe(true);
+      expect(mockPromote).not.toHaveBeenCalledWith(AVATAR_URL);
+      expect(mockRevert).not.toHaveBeenCalled();
+      expect(mockDiscardOwnAvatar).not.toHaveBeenCalled();
+    });
+
+    it('case 2 — a retry after a commit (the reused row already stores this URL) neither promotes nor reverts (#1005)', async () => {
+      const { coach, team } = setupCoachTeam();
+      const committed = {
+        ...createPlayer({ email: 'jane@example.com' }),
+        workosUserId: null,
+        managedById: coach.id,
+        profilePictureUrl: AVATAR_URL,
+      };
+      (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(committed);
+      (mockPrisma.$transaction as jest.Mock).mockRejectedValue(new Error('connection reset'));
+
+      await expect(
+        InvitationService.addRosterPlayer(
+          team.id,
+          { name: 'Jane', playerEmail: 'jane@example.com', profilePictureUrl: AVATAR_URL },
+          coach.id
+        )
+      ).rejects.toThrow();
+
+      // The object stays untagged: it is the saved photo of the committed row
+      expect(mockPromote).not.toHaveBeenCalledWith(AVATAR_URL);
+      expect(mockRevert).not.toHaveBeenCalled();
+      expect(mockDiscardOwnAvatar).not.toHaveBeenCalled();
+    });
+
     it('case 2 — a failure reverts the promoted upload to pending and rethrows (#1005)', async () => {
       const { coach, team } = setupCoachTeam();
       (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(null);
@@ -3087,9 +3137,10 @@ describe('InvitationService', () => {
       expect(result.invited).toBe(true);
       expect(result.guardianInvited).toBe(false);
       expect(result.guardianReason).toMatch(/after the player accepts/i);
-      // The fallback lands in createCase3Invitation too, so the uploaded
-      // avatar is discarded on this path as well (#419)
-      expect(mockDiscardOwnAvatar).toHaveBeenCalledWith(AVATAR_URL, coach.id);
+      // The failed case-2 write reverted the promoted upload to pending, and the
+      // fallback leaves it for the lifecycle rule: no promote-then-delete (#1005)
+      expect(mockRevert).toHaveBeenCalledWith(AVATAR_URL);
+      expect(mockDiscardOwnAvatar).not.toHaveBeenCalled();
     });
 
     it('addRosterPlayer rethrows the P2002 when the refetch finds nobody', async () => {
@@ -3179,8 +3230,10 @@ describe('InvitationService', () => {
       expect(mockedMailerSend).toHaveBeenCalledWith(
         expect.objectContaining({ variables: expect.objectContaining({ variant: 'invited' }) })
       );
-      // RT4 fallback also discards the uploaded avatar (#419)
-      expect(mockDiscardOwnAvatar).toHaveBeenCalledWith(AVATAR_URL, coach.id);
+      // RT4: the failed write reverted the upload to pending; the fallback leaves
+      // it for the lifecycle rule instead of deleting it (#1005)
+      expect(mockRevert).toHaveBeenCalledWith(AVATAR_URL);
+      expect(mockDiscardOwnAvatar).not.toHaveBeenCalled();
       expect(reRead).toHaveBeenCalledWith({ where: { id: unclaimed.id }, select: { deletedAt: true } });
     });
 

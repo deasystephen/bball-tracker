@@ -36,7 +36,6 @@ import {
   assertAvatarStorageConfig,
   assertOwnUploadUrl,
   generateAvatarUploadUrl,
-  deleteAvatar,
   deleteAvatarObject,
   deletePreviousAvatar,
   discardOwnAvatar,
@@ -44,11 +43,14 @@ import {
   isOwnUploadUrl,
   MAX_AVATAR_BYTES,
   PENDING_TAGGING_XML,
+  pendingTagEnabled,
   promoteAvatarUpload,
+  referencedAvatarKeys,
   revertAvatarToPending,
   withPromotedAvatar,
 } from '../../src/services/upload-service';
 import { UploadExpiredError } from '../../src/utils/errors';
+import { mockPrisma } from '../setup';
 import * as sentry from '../../src/utils/sentry';
 import { BadRequestError } from '../../src/utils/errors';
 
@@ -80,8 +82,31 @@ describe('Upload Service', () => {
       expect(result.imageUrl).toMatch(/\.png$/);
     });
 
-    it('caps the object size, pins the content type and sends the pending tag as a field (#1005)', async () => {
+    it('caps the object size and pins the content type; no pending tag while the flag is off (#1005)', async () => {
       await generateAvatarUploadUrl(userId, 'image/png');
+
+      expect(mockCreatePresignedPost).toHaveBeenCalledWith(
+        expect.any(Object),
+        expect.objectContaining({
+          Bucket: 'bball-tracker-avatars-dev',
+          Key: expect.stringMatching(new RegExp(`^avatars/${userId}/[0-9a-f-]+\\.png$`)),
+          Conditions: [
+            ['content-length-range', 1, MAX_AVATAR_BYTES],
+            ['eq', '$Content-Type', 'image/png'],
+          ],
+          Fields: { 'Content-Type': 'image/png' },
+          Expires: 300,
+        })
+      );
+    });
+
+    it('sends the pending tag as a field once AVATAR_PENDING_TAG_ENABLED is true (#1005)', async () => {
+      process.env.AVATAR_PENDING_TAG_ENABLED = 'true';
+      try {
+        await generateAvatarUploadUrl(userId, 'image/png');
+      } finally {
+        delete process.env.AVATAR_PENDING_TAG_ENABLED;
+      }
 
       expect(mockCreatePresignedPost).toHaveBeenCalledWith(
         expect.any(Object),
@@ -96,6 +121,15 @@ describe('Upload Service', () => {
           Expires: 300,
         })
       );
+    });
+
+    it('reads the flag strictly: only "true" (any case, trimmed) turns it on', () => {
+      expect(pendingTagEnabled({})).toBe(false);
+      expect(pendingTagEnabled({ AVATAR_PENDING_TAG_ENABLED: '1' })).toBe(false);
+      expect(pendingTagEnabled({ AVATAR_PENDING_TAG_ENABLED: 'false' })).toBe(false);
+      expect(pendingTagEnabled({ AVATAR_PENDING_TAG_ENABLED: ' TRUE ' })).toBe(true);
+      delete process.env.AVATAR_PENDING_TAG_ENABLED;
+      expect(pendingTagEnabled()).toBe(false);
     });
 
     it('the pending tag set is exactly pending=true', () => {
@@ -132,28 +166,6 @@ describe('Upload Service', () => {
       const a = await generateAvatarUploadUrl(userId, 'image/jpeg');
       const b = await generateAvatarUploadUrl(userId, 'image/jpeg');
       expect(a.imageUrl).not.toBe(b.imageUrl);
-    });
-  });
-
-  describe('deleteAvatar', () => {
-    it('deletes the object addressed by the image URL', async () => {
-      await deleteAvatar(`${BUCKET_BASE}user-1/pic.jpg`);
-
-      expect(deleteObjectCalls).toHaveLength(1);
-      expect(deleteObjectCalls[0]).toEqual({
-        Bucket: 'bball-tracker-avatars-dev',
-        Key: 'avatars/user-1/pic.jpg',
-      });
-      expect(mockSend).toHaveBeenCalled();
-    });
-
-    it('propagates S3 errors', async () => {
-      mockSend.mockRejectedValueOnce(new Error('AccessDenied'));
-      await expect(deleteAvatar(`${BUCKET_BASE}user-1/pic.jpg`)).rejects.toThrow('AccessDenied');
-    });
-
-    it('throws on an invalid URL', async () => {
-      await expect(deleteAvatar('not a url')).rejects.toThrow();
     });
   });
 
@@ -449,6 +461,21 @@ describe('Upload Service', () => {
     });
   });
 
+  describe('referencedAvatarKeys (#1005)', () => {
+    it('ignores the host, keeps raw and decoded keys, and takes every avatars/ occurrence', () => {
+      expect(referencedAvatarKeys(`${BUCKET_BASE}u/a.jpg`)).toEqual(['avatars/u/a.jpg']);
+      expect(referencedAvatarKeys('https://s3.amazonaws.com/team-avatars/avatars/u/a.jpg')).toEqual(
+        expect.arrayContaining(['avatars/u/a.jpg'])
+      );
+      expect(referencedAvatarKeys(`${BUCKET_BASE}u/a%20b.jpg`)).toEqual(
+        expect.arrayContaining(['avatars/u/a%20b.jpg', 'avatars/u/a b.jpg'])
+      );
+      expect(referencedAvatarKeys(`${BUCKET_BASE}u/a%E0.jpg`)).toEqual(['avatars/u/a%E0.jpg']);
+      expect(referencedAvatarKeys('not a url avatars/u/a.jpg?x=1')).toEqual(['avatars/u/a.jpg']);
+      expect(referencedAvatarKeys('https://workos.example/p.jpg')).toEqual([]);
+    });
+  });
+
   describe('revertAvatarToPending (#1005)', () => {
     const OWN = `${BUCKET_BASE}u1/pic.jpg`;
     let errorSpy: jest.SpyInstance;
@@ -467,8 +494,18 @@ describe('Upload Service', () => {
       captureSpy.mockRestore();
     });
 
-    it('puts the pending=true tag back on the object', async () => {
+    beforeEach(() => {
+      (mockPrisma.user.findMany as jest.Mock).mockReset();
+      (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([]);
+    });
+
+    it('puts the pending=true tag back on the object when no row stores it', async () => {
       await revertAvatarToPending(OWN);
+      // Narrowed by the key's file segment, tombstones included
+      expect(mockPrisma.user.findMany).toHaveBeenCalledWith({
+        where: { profilePictureUrl: { contains: 'pic.jpg' } },
+        select: { profilePictureUrl: true },
+      });
       expect(mockSend.mock.calls[0][0]).toEqual({
         kind: 'PutObjectTagging',
         input: {
@@ -478,6 +515,54 @@ describe('Upload Service', () => {
         },
       });
       expect(deleteObjectCalls).toHaveLength(0);
+    });
+
+    it.each([
+      ['the same URL', `${BUCKET_BASE}u1/pic.jpg`],
+      ['a regional-host URL to the same key', 'https://bball-tracker-avatars-dev.s3.us-east-1.amazonaws.com/avatars/u1/pic.jpg'],
+      ['a percent-encoded URL to the same key', `https://bball-tracker-avatars-dev.s3.amazonaws.com/%61vatars/u1/pic.jpg`],
+    ])('never reverts while any row stores it (%s): logs at info with the key only', async (_label, stored) => {
+      const infoSpy = jest.spyOn(logger, 'info').mockImplementation(() => undefined);
+      (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([{ profilePictureUrl: stored }]);
+
+      await revertAvatarToPending(OWN);
+
+      expect(mockSend).not.toHaveBeenCalled();
+      expect(infoSpy).toHaveBeenCalledWith('Avatar upload still referenced; not reverted to pending', {
+        key: 'avatars/u1/pic.jpg',
+      });
+      infoSpy.mockRestore();
+    });
+
+    it('reverts when the rows found by the file segment name a different key', async () => {
+      (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([
+        { profilePictureUrl: `${BUCKET_BASE}someone-else/pic.jpg` },
+        { profilePictureUrl: null },
+      ]);
+      await revertAvatarToPending(OWN);
+      expect(mockSend).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not revert when the reference check fails (unknown counts as referenced)', async () => {
+      (mockPrisma.user.findMany as jest.Mock).mockRejectedValue(new Error('db down'));
+      await revertAvatarToPending(OWN);
+      expect(mockSend).not.toHaveBeenCalled();
+      expect(errorSpy).toHaveBeenCalledWith(
+        'Could not check avatar references; not reverting to pending',
+        expect.objectContaining({ key: 'avatars/u1/pic.jpg', error: 'db down' })
+      );
+    });
+
+    it('stringifies a non-Error reference-check failure', async () => {
+      (mockPrisma.user.findMany as jest.Mock).mockRejectedValue('db gone');
+      await revertAvatarToPending(OWN);
+      expect(errorSpy).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ error: 'db gone' }));
+    });
+
+    it('does not revert a key whose file segment LIKE would misread', async () => {
+      await revertAvatarToPending(`${BUCKET_BASE}u1/a_b.jpg`);
+      expect(mockPrisma.user.findMany).not.toHaveBeenCalled();
+      expect(mockSend).not.toHaveBeenCalled();
     });
 
     it('does nothing for an external, empty or misshaped URL', async () => {
@@ -519,6 +604,8 @@ describe('Upload Service', () => {
       mockSend.mockReset();
       mockSend.mockResolvedValue({});
       deleteObjectCalls.length = 0;
+      (mockPrisma.user.findMany as jest.Mock).mockReset();
+      (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([]);
     });
 
     it('promotes, then writes, and returns the write result', async () => {

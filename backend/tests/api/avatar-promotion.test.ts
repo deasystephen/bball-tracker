@@ -81,6 +81,9 @@ const playerRow = (profilePictureUrl: string | null): Record<string, unknown> =>
 beforeEach(() => {
   mockS3Send.mockReset();
   mockS3Send.mockResolvedValue({});
+  // The revert's reference check: no row stores the upload unless a test says so
+  (mockPrisma.user.findMany as jest.Mock).mockReset();
+  (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([]);
 });
 
 afterAll((done) => {
@@ -129,6 +132,22 @@ describe('POST /api/v1/players', () => {
     expect(res.status).toBe(409);
     expect(taggedKeys()).toEqual([KEY]);
     expect(revertedKeys()).toEqual([KEY]);
+    expect(deletedKeys()).toHaveLength(0);
+  });
+
+  it('leaves a shared upload untagged when the create fails: another row (player A) stores it', async () => {
+    (mockPrisma.user.create as jest.Mock).mockRejectedValue(prismaError('P2002'));
+    (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([{ profilePictureUrl: UPLOAD_URL }]);
+
+    const res = await request(app)
+      .post('/api/v1/players')
+      .set(AUTH)
+      .send({ name: 'Kid B', email: 'kid-b@example.test', profilePictureUrl: UPLOAD_URL });
+
+    expect(res.status).toBe(409);
+    expect(taggedKeys()).toEqual([KEY]);
+    // A's photo is in use: never put back to pending, never deleted
+    expect(revertedKeys()).toHaveLength(0);
     expect(deletedKeys()).toHaveLength(0);
   });
 
@@ -286,6 +305,28 @@ describe('POST /api/v1/teams/:teamId/players (Add Player)', () => {
     expect(mockPrisma.$transaction).not.toHaveBeenCalled();
     expect(deletedKeys()).toHaveLength(0);
     expect(revertedKeys()).toHaveLength(0);
+  });
+
+  it('case 2: a retry after a commit (the reused row already stores this URL) leaves the object untagged on failure', async () => {
+    (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue({
+      id: PLAYER_ID,
+      email: 'kid@example.test',
+      workosUserId: null,
+      managedById: ADMIN_ID,
+      profilePictureUrl: UPLOAD_URL,
+      deletedAt: null,
+    });
+    (mockPrisma.$transaction as jest.Mock).mockRejectedValueOnce(new Error('connection reset'));
+
+    const res = await request(app)
+      .post(`/api/v1/teams/${TEAM_ID}/players`)
+      .set(AUTH)
+      .send({ name: 'Kid', playerEmail: 'kid@example.test', profilePictureUrl: UPLOAD_URL });
+
+    expect(res.status).toBe(500);
+    expect(taggedKeys()).toHaveLength(0);
+    expect(revertedKeys()).toHaveLength(0);
+    expect(deletedKeys()).toHaveLength(0);
   });
 
   it('skips promotion for an external URL', async () => {

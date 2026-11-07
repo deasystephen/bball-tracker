@@ -159,6 +159,7 @@ describe('PATCH /api/v1/auth/me', () => {
 
     it('reverts the promoted upload to pending, deleting nothing, when the account was deleted underneath the request (401)', async () => {
       (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+      (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([]);
 
       const res = await request(app).patch('/api/v1/auth/me').set(AUTH).send({ profilePictureUrl: OWN_NEW });
 

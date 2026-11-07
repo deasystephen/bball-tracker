@@ -1,6 +1,7 @@
 import { S3Client, DeleteObjectCommand, DeleteObjectTaggingCommand, PutObjectTaggingCommand } from '@aws-sdk/client-s3';
 import { createPresignedPost } from '@aws-sdk/s3-presigned-post';
 import { randomUUID } from 'crypto';
+import prisma from '../models';
 import { BadRequestError, UploadExpiredError } from '../utils/errors';
 import { logger } from '../utils/logger';
 import { captureException } from '../utils/sentry';
@@ -50,6 +51,17 @@ export interface AvatarUploadTarget {
  * object size was unbounded. A POST policy carries a `content-length-range`
  * condition that S3 enforces server-side, plus an exact `Content-Type` match.
  */
+/**
+ * Whether new uploads are born `pending=true` (#1005). Off unless
+ * `AVATAR_PENDING_TAG_ENABLED=true`. Promotion and revert run regardless, and
+ * untagging an untagged object is harmless, so the rollout is: apply the IAM
+ * and lifecycle rule, deploy the code (saves untag, nothing is tagged yet),
+ * then set the flag. Rolling the flag back lands on code that still untags.
+ */
+export function pendingTagEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.AVATAR_PENDING_TAG_ENABLED?.trim().toLowerCase() === 'true';
+}
+
 export async function generateAvatarUploadUrl(
   userId: string,
   contentType: string,
@@ -68,7 +80,8 @@ export async function generateAvatarUploadUrl(
   const { url, fields } = await createPresignedPost(s3Client, {
     Bucket: BUCKET_NAME,
     Key: key,
-    // `tagging` carries the pending tag set (#1005). The SDK pins every entry
+    // `tagging` carries the pending tag set (#1005), once AVATAR_PENDING_TAG_ENABLED
+    // is on (`pendingTagEnabled`). The SDK pins every entry
     // of `Fields` in the signed policy as an exact match ({ tagging: … }), so a
     // client cannot drop or change the tag and keep an unsaved upload forever
     // (avatar-upload-policy.test.ts decodes the real policy to prove it).
@@ -77,7 +90,10 @@ export async function generateAvatarUploadUrl(
       ['content-length-range', 1, MAX_AVATAR_BYTES],
       ['eq', '$Content-Type', contentType],
     ],
-    Fields: { 'Content-Type': contentType, tagging: PENDING_TAGGING_XML },
+    Fields: {
+      'Content-Type': contentType,
+      ...(pendingTagEnabled() && { tagging: PENDING_TAGGING_XML }),
+    },
     Expires: UPLOAD_EXPIRES_SECONDS,
   });
 
@@ -146,12 +162,6 @@ export function assertOwnUploadUrl(imageUrl: string | null | undefined, callerId
   if (!isOwnUploadUrl(imageUrl, callerId)) {
     throw new BadRequestError('profilePictureUrl must be an upload issued to the caller');
   }
-}
-
-export async function deleteAvatar(imageUrl: string): Promise<void> {
-  const url = new URL(imageUrl);
-  const key = url.pathname.startsWith('/') ? url.pathname.slice(1) : url.pathname;
-  await deleteObjectByKey(key);
 }
 
 /** Delete one object of the avatars bucket by key. Throws on an S3 error. */
@@ -339,19 +349,75 @@ export async function promoteAvatarUpload(imageUrl: string | null | undefined): 
 }
 
 /**
+ * Every object key a stored `profilePictureUrl` could name. Over-inclusive on
+ * purpose, because a miss would let a revert expire a photo in use: the host
+ * is ignored (a regional or path-style URL to our bucket still counts), both
+ * the raw and the percent-decoded path count, and a key is taken from every
+ * `avatars/` occurrence in the path.
+ */
+export function referencedAvatarKeys(storedUrl: string): string[] {
+  const pathname = parsedPath(storedUrl) ?? storedUrl.split(/[?#]/)[0];
+  const paths = new Set<string>([pathname]);
+  try {
+    paths.add(decodeURIComponent(pathname));
+  } catch {
+    // Malformed escape: the raw form is already in the set.
+  }
+  const keys = new Set<string>();
+  for (const path of paths) {
+    for (let at = path.indexOf('avatars/'); at !== -1; at = path.indexOf('avatars/', at + 1)) {
+      keys.add(path.slice(at));
+    }
+  }
+  return [...keys];
+}
+
+/** A key's file segment is safe as a LIKE fragment (no `%`, `_` or `\`). */
+const LIKE_SAFE = /^[^%_\\]+$/;
+
+/**
+ * True when any `User.profilePictureUrl` (tombstones included) names `key`.
+ * Narrowed by the key's file segment (`<uuid>.<ext>`, unique per upload and
+ * never percent-encoded), then matched with `referencedAvatarKeys`. When the
+ * answer is unknown (a database error, or a segment LIKE would misread) it
+ * says "referenced", the safe direction for a caller about to re-tag.
+ */
+async function isAvatarKeyReferenced(key: string): Promise<boolean> {
+  const file = key.slice(key.lastIndexOf('/') + 1);
+  if (!LIKE_SAFE.test(file)) {
+    return true;
+  }
+  try {
+    const rows = await prisma.user.findMany({
+      where: { profilePictureUrl: { contains: file } },
+      select: { profilePictureUrl: true },
+    });
+    return rows.some((r) => r.profilePictureUrl !== null && referencedAvatarKeys(r.profilePictureUrl).includes(key));
+  } catch (err) {
+    logger.error('Could not check avatar references; not reverting to pending', {
+      key,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return true;
+  }
+}
+
+/**
  * Put an upload back in the pending state (`pending=true`), so the lifecycle
  * rule expires it in 3 days unless a later save promotes it again (#1005).
  * Used when a promoted upload ends up stored nowhere: the write failed, or
- * Add Player kept the row's own photo. Reverting instead of deleting carries
- * no deletion hazard: if the URL is in fact stored somewhere (a write that
- * committed and then threw, another row naming the same upload) it stays
- * readable until a save promotes it again, and a client retry still works.
- * Never throws: a failure is logged at error and captured, and nothing is
- * deleted.
+ * Add Player kept the row's own photo. Never while ANY row stores the URL (a
+ * retry after a commit, the same upload on a second player or team): that
+ * photo is in use, so it stays untagged, logged at info with the key only.
+ * Never deletes, never throws: a failure is logged at error and captured.
  */
 export async function revertAvatarToPending(imageUrl: string | null | undefined): Promise<void> {
   const issued = issuedAvatarKey(imageUrl);
   if ('reason' in issued) {
+    return;
+  }
+  if (await isAvatarKeyReferenced(issued.key)) {
+    logger.info('Avatar upload still referenced; not reverted to pending', { key: issued.key });
     return;
   }
   try {

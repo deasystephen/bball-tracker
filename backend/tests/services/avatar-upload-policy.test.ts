@@ -14,6 +14,8 @@
 const SAVED_ENV = { ...process.env };
 process.env.AWS_ACCESS_KEY_ID = 'AKIATESTTESTTESTTEST';
 process.env.AWS_SECRET_ACCESS_KEY = 'test-secret-test-secret-test-secret-test';
+// Pending tagging is behind a flag until rollout step (c) (#1005).
+process.env.AVATAR_PENDING_TAG_ENABLED = 'true';
 delete process.env.AWS_PROFILE;
 delete process.env.AWS_SESSION_TOKEN;
 afterAll(() => {
@@ -30,6 +32,18 @@ interface Policy {
 }
 
 describe('avatar upload POST policy (real SDK, #1005)', () => {
+  it('carries no tagging field while AVATAR_PENDING_TAG_ENABLED is off', async () => {
+    delete process.env.AVATAR_PENDING_TAG_ENABLED;
+    try {
+      const { fields } = await generateAvatarUploadUrl(USER_ID, 'image/png');
+      expect(fields.tagging).toBeUndefined();
+      const policy = JSON.parse(Buffer.from(fields.Policy, 'base64').toString('utf8')) as Policy;
+      expect(JSON.stringify(policy.conditions)).not.toContain('tagging');
+    } finally {
+      process.env.AVATAR_PENDING_TAG_ENABLED = 'true';
+    }
+  });
+
   it('posts the pending tag set as a form field, and the SDK pins it exactly in the signed policy', async () => {
     const { fields, uploadUrl, imageUrl } = await generateAvatarUploadUrl(USER_ID, 'image/jpeg');
 

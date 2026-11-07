@@ -5,7 +5,8 @@
 jest.mock('../../src/services/upload-service', () => ({
   deletePreviousAvatar: jest.fn().mockResolvedValue(undefined),
   assertOwnUploadUrl: jest.fn(),
-  promoteAvatarUpload: jest.fn().mockResolvedValue(true),
+  // Like the real one: nothing to promote for an empty value
+  promoteAvatarUpload: jest.fn(async (url: unknown) => Boolean(url)),
   revertAvatarToPending: jest.fn().mockResolvedValue(undefined),
   // The real wrapper's contract over the mocked promote/revert (#1005):
   // promote, write, and revert to pending when the write throws.

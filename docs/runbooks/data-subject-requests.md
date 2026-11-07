@@ -74,11 +74,12 @@ on `deletedAt IS NULL`, so a request that raced the deletion cannot re-identify 
   deletion date.
 - Game events, box scores and season statistics recorded for the person's teams are retained,
   attributed to "Deleted user".
-- **Profile photos.** A photo that is uploaded but never saved to a profile (a cancelled edit,
-  an abandoned Add Player) is deleted automatically **3 days after upload**, whether or not the
-  person keeps their account (S3 counts from upload and rounds up to the next midnight UTC, so
-  up to 4 days). Until then it is readable by anyone who has its URL (the bucket is public-read;
-  URLs are unguessable). On account deletion the current photo is deleted. A photo someone
+- **Profile photos.** Once pending-upload expiry is enabled (`AVATAR_PENDING_TAG_ENABLED`), a
+  photo that is uploaded but never saved to a profile (a cancelled edit, an abandoned Add Player)
+  is deleted automatically **3 days after upload**, whether or not the person keeps their account
+  (S3 counts from upload and rounds up to the next midnight UTC, so up to 4 days). While it is not
+  enabled, such a photo is not deleted. Either way, until it is deleted it is readable by anyone
+  who has its URL (the bucket is public-read; URLs are unguessable). On account deletion the current photo is deleted. A photo someone
   uploaded for a child or player they manage stays while that profile shows it. Mechanism:
   `docs/architecture/backend-services.md#avatar-uploads-servicesupload-servicets-apiuploads`.
 - RDS automated backups retain the pre-deletion data for up to **7 days**
