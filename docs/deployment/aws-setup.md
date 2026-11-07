@@ -209,6 +209,7 @@ was last checked against it on 2026-10-03):
   Both are read only through `backend/src/utils/urls.ts`; unset they fall back to `http://localhost:3000` (fail-loud) and the server logs a warning at boot in production.
 - `DEFAULT_TIMEZONE` (`America/Los_Angeles`): time zone for dates in outbound email
 - `AWS_REGION`, `S3_AVATARS_BUCKET`: avatar uploads via presigned S3 POST (bucket from `infra/s3.tf`)
+- `AVATAR_PENDING_TAG_ENABLED` (`true` to enable; unset by default): new avatar uploads are born `pending=true`, so the `expire-pending-avatars` lifecycle rule deletes the ones never saved after 3 days (#1005). Set it only after the IAM and lifecycle `terraform apply` and the deploy of the untag-on-save code (`docs/architecture/backend-services.md`, "Unsaved uploads expire"). Turning it off again has a runbook step (`docs/runbooks/data-subject-requests.md`, "Turning pending-upload expiry off").
 - `AWS_SES_REGION`, `SES_FROM_ADDRESS` (`noreply@mail.hooplings.com`): SES mailer
 - `SES_CONFIGURATION_SET` (`bball-tracker-production-transactional`), `SES_EVENTS_QUEUE_URL` (the
   SQS queue from `terraform output ses_events_queue_url`): SES event publishing and the in-process

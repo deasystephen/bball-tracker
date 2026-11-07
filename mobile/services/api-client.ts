@@ -1,3 +1,4 @@
+import { apiErrorCode } from '../utils/api-error-code';
 import { create as createAxiosInstance, AxiosInstance, AxiosError, AxiosResponse, InternalAxiosRequestConfig } from 'axios';
 import { useAuthStore, getLogoutEpoch } from '../store/auth-store';
 import { getApiUrl } from '../config/env';
@@ -202,6 +203,9 @@ export type NormalizedApiError = AxiosError & {
 
 export const UPGRADE_REQUIRED_CODE = 'upgrade_required';
 
+/** The server's error `code` on a failed request (body first, then the lifted code). */
+export { apiErrorCode };
+
 /**
  * True when a failed request says nothing about the thing requested, so a screen should
  * offer a retry instead of "not found" (#892): a network failure or timeout (no response,
@@ -265,8 +269,7 @@ export const normalizeApiError = (error: unknown): unknown => {
 export const isUpgradeRequiredError = (error: unknown): error is NormalizedApiError => {
   if (!isAxiosError(error)) return false;
   const status = error.response?.status;
-  const code = (error as NormalizedApiError).apiError?.code ?? (error as NormalizedApiError).code;
-  return status === 402 || code === UPGRADE_REQUIRED_CODE;
+  return status === 402 || apiErrorCode(error) === UPGRADE_REQUIRED_CODE;
 };
 
 /**

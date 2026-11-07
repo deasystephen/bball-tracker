@@ -125,34 +125,27 @@ describe('websocket integration (socket.io-client)', () => {
     });
   });
 
-  it('rejects the handshake with "Rate limited" once the per-IP budget is spent (audit #16)', (done) => {
+  it('rejects the handshake with "Rate limited" once the per-IP budget is spent (audit #16)', async () => {
     // The limiter middleware keys local test connections by the loopback peer
     // address; exhaust the window for every loopback form up front so the
     // next real handshake — even with a valid token — is refused before auth.
     for (const ip of ['::1', '127.0.0.1', '::ffff:127.0.0.1']) {
       for (let i = 0; i <= MAX_HANDSHAKES_PER_WINDOW; i++) {
-        checkHandshakeAllowed(ip);
+        await checkHandshakeAllowed(ip);
       }
     }
     const coach = createCoach();
     mockPrisma.user.findUnique.mockResolvedValue(coach);
 
     const client = connect(buildDevToken(coach.id));
-    client.on('connect', () => {
-      client.close();
-      resetSocketRateLimits();
-      done(new Error('expected the handshake to be rate limited'));
+    const outcome = await new Promise<Error | 'connected'>((resolve) => {
+      client.on('connect', () => resolve('connected'));
+      client.on('connect_error', (err) => resolve(err));
     });
-    client.on('connect_error', (err) => {
-      client.close();
-      resetSocketRateLimits();
-      try {
-        expect(err.message).toBe(RATE_LIMITED_MESSAGE);
-        done();
-      } catch (assertion) {
-        done(assertion as Error);
-      }
-    });
+    client.close();
+    resetSocketRateLimits();
+    expect(outcome).toBeInstanceOf(Error);
+    expect((outcome as Error).message).toBe(RATE_LIMITED_MESSAGE);
   });
 
   it('allows a coach to join and receive a snapshot + broadcast event', (done) => {

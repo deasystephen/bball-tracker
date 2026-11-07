@@ -37,11 +37,9 @@ import { logger } from '../utils/logger';
 import { USER_SUMMARY_SELECT, type UserSummary } from '../utils/user-select';
 import { captureException, isExpectedClientError } from '../utils/sentry';
 import {
-  RATE_LIMITED_MESSAGE,
-  checkHandshakeAllowed,
   checkJoinAllowed,
   checkRefreshAuthAllowed,
-  hasConcurrentCapacity,
+  handshakeRateLimit,
   registerConnection,
   releaseConnection,
   socketClientIp,
@@ -306,8 +304,8 @@ export async function authenticateSocket(
 // can no longer view (one `game.findMany` over `readableTeamsWhere` for the
 // whole set, the same rule `canViewGame` applies to a single join), so a removed coach stops receiving
 // broadcasts at the next refresh or re-check rather than at disconnect.
-// Timers live in process memory, like rooms and rate-limit counters (the API
-// is single-replica), and are cleared on disconnect.
+// Timers live in process memory with the socket they belong to (a socket
+// lives on one task), and are cleared on disconnect.
 // ---------------------------------------------------------------------------
 
 /** Client → server: a fresh access token for the open connection. */
@@ -785,15 +783,10 @@ export function registerGameEventHandlers(io: SocketServer): void {
   // never reaches the JWKS/user lookup (audit #16). A rejection here is a
   // `connect_error: Rate limited` on the client, which backs off and retries
   // like `Service unavailable`.
-  io.use((socket, next) => {
-    const ip = socketClientIp(socket);
-    if (!checkHandshakeAllowed(ip) || !hasConcurrentCapacity(ip)) {
-      logger.warn('Socket handshake rate limited', { socketId: socket.id, ip });
-      next(new Error(RATE_LIMITED_MESSAGE));
-      return;
-    }
-    next();
-  });
+  // The handshake window is shared across tasks through Redis (#452) and
+  // falls back to memory; the concurrency cap is per task. Neither refuses a
+  // handshake because of Redis.
+  io.use(handshakeRateLimit);
 
   io.use((socket, next) => {
     void authenticateSocket(socket as GameSocket, next);

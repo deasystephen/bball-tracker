@@ -114,7 +114,7 @@ Layered: API routes → services → Prisma. Zod validates every input. Backend 
 - Redis is a best-effort cache; every helper fails open. Keep it that way.
 
 ### Socket.io and replicas
-Rooms and rate-limit counters are in process memory, so the API is **single-replica**: autoscaling `max_capacity` is validated to 1, `MAX_REPLICAS=1` is in the task definition and `utils/replica-guard.ts` exits before listening on anything else. Do not raise capacity as a fix for load; the Redis adapter (#452) comes first. Every broadcast carries the current score so a client that drops events still converges. Event table and handshake recovery rules: `docs/architecture/live-games.md`.
+The API is **single-replica**: autoscaling `max_capacity` is validated to 1, `MAX_REPLICAS=1` is in the task definition and `utils/replica-guard.ts` exits before listening on anything else. HTTP and socket-handshake rate limits are in Redis and fail open to memory (the per-IP socket cap stays per task); the Redis adapter is wired but off until `REDIS_SOCKET_ADAPTER_URL` is set. Do not raise capacity as a fix for load: the two-task load test and the guard flip come first. Every broadcast carries the current score so a client that drops events still converges. Event table and handshake recovery rules: `docs/architecture/live-games.md`.
 
 ### URLs, email and logging
 - `PUBLIC_APP_URL` (web apex) and `API_BASE_URL` (API host) are read **only** via `utils/urls.ts`. The product name in email comes only from `services/mailer/templates/brand.ts#APP_NAME`; the support address is `SUPPORT_EMAIL` there and in mobile `config/env.ts` (a test pins them equal).

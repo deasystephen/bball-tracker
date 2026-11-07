@@ -591,7 +591,8 @@
     "removePhoto": "Remove Photo",
     "unreadable": "The selected image could not be read",
     "tooLarge": "Avatar image must be 5 MB or smaller",
-    "uploadFailed": "Failed to upload photo"
+    "uploadFailed": "Failed to upload photo",
+    "uploadExpired": "That photo upload expired. Please choose it again."
   },
   "tabs": {
     "home": "Home",

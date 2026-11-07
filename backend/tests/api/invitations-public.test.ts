@@ -9,6 +9,7 @@ import { GuardianService } from '../../src/services/guardian-service';
 import { NotFoundError, BadRequestError } from '../../src/utils/errors';
 import { invitationTokenKey } from '../../src/api/middleware/rate-limit';
 import type { Request } from 'express';
+import { createHash } from 'crypto';
 import { invitationViewState } from '../../src/api/invitations/public-routes';
 import { domainEvent, spyOnInfo } from '../support/domain-events';
 
@@ -243,7 +244,9 @@ describe('Public Invitation Token API', () => {
   describe('rate limiting (audit #36)', () => {
     it('keys the lookup limiter on the token, not the client IP', () => {
       const key = invitationTokenKey({ params: { token: 'tok-abc' }, ip: '203.0.113.7' } as unknown as Request);
-      expect(key).toBe('invite-token:tok-abc');
+      expect(key).toBe(`invite-token:${createHash('sha256').update('tok-abc').digest('hex')}`);
+      // Never the bearer token itself (the counter lives in Redis, #452), never the IP.
+      expect(key).not.toContain('tok-abc');
       expect(key).not.toContain('203.0.113.7');
     });
 

@@ -153,10 +153,50 @@ export class EmailNotVerifiedError extends DetailedError<Record<string, unknown>
   }
 }
 
+/**
+ * 400 `upload_expired` — the avatar upload a profile write names no longer
+ * exists: it was never saved within the pending window and the bucket's
+ * lifecycle rule expired it (#1005). Nothing was written; the client asks the
+ * user to choose the photo again.
+ */
+export class UploadExpiredError extends DetailedError<Record<string, unknown>> {
+  constructor() {
+    super('upload_expired', {}, 'That photo upload expired. Please choose it again.', 400);
+    Object.setPrototypeOf(this, UploadExpiredError.prototype);
+  }
+}
+
 export class ConflictError extends AppError {
   constructor(message: string = 'Conflict') {
     super(message, 409);
     Object.setPrototypeOf(this, ConflictError.prototype);
+  }
+}
+
+/** Why `AccountService.convertToManaged` refused (#983). Stable: the operator CLI maps each to advice. */
+export type ConvertRefusalCode =
+  | 'already_managed'
+  | 'never_signed_in'
+  | 'adult_account'
+  | 'personal_league_in_use'
+  | 'coach_not_on_team'
+  | 'no_active_team'
+  | 'no_head_coach'
+  | 'several_head_coaches'
+  | 'coach_unavailable'
+  | 'coaches_changed';
+
+/**
+ * 409 — an account cannot be converted to a managed roster record (#983).
+ * The message describes the state, never a CLI flag; the operator script maps
+ * `code` to what to do next.
+ */
+export class ConvertRefusedError extends DetailedError<Record<string, unknown>> {
+  declare readonly code: ConvertRefusalCode;
+
+  constructor(code: ConvertRefusalCode, message: string) {
+    super(code, {}, message, 409);
+    Object.setPrototypeOf(this, ConvertRefusedError.prototype);
   }
 }
 
