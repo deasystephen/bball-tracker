@@ -836,7 +836,7 @@
     "noCode": "No authorization code was returned. Please try signing in again.",
     "foreignState": "This sign-in link did not come from a sign-in started on this device, or it has expired. Please try again.",
     "exchangeFailed": "Failed to complete sign in. Please try again.",
-    "emailNotVerified": "Your email address is not verified yet. Verify it first, then sign in again.",
+    "emailNotVerified": "Your email address is not verified yet. Verify it with the provider you signed in with, or sign in with your email address instead, then try again.",
     "title": "Sign In Failed",
     "back": "Back to Sign In",
     "signingIn": "Signing you in…"

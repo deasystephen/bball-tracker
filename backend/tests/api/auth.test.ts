@@ -472,6 +472,22 @@ describe('Auth API', () => {
       warnSpy.mockRestore();
     });
 
+    it('ends the issued session when the sign-in fails after syncUser succeeded (buildSessionUser), and still answers 500', async () => {
+      mockWorkOSService.exchangeCodeForToken.mockResolvedValue({
+        user: mockWorkOSUser,
+        accessToken: 'orphaned-access-token',
+        refreshToken: 'mock-refresh-token',
+      } as unknown as Awaited<ReturnType<typeof mockWorkOSService.exchangeCodeForToken>>);
+      mockWorkOSService.syncUser.mockResolvedValue(syncOutcome(mockUser));
+      (mockPrisma.leagueAdmin.findMany as jest.Mock).mockRejectedValueOnce(new Error('db hiccup'));
+
+      const response = await request(app).get('/api/v1/auth/callback').query({ code: 'auth-code-123' });
+
+      expect(response.status).toBe(500);
+      expect(response.body).not.toHaveProperty('accessToken');
+      expect(mockWorkOSService.revokeIssuedSession).toHaveBeenCalledWith('orphaned-access-token');
+    });
+
     it('does not revoke anything when the exchange itself failed (no session was opened)', async () => {
       mockWorkOSService.exchangeCodeForToken.mockRejectedValue(new Error('Invalid code'));
 

@@ -1102,8 +1102,8 @@ describe('WorkOSService', () => {
         expect(mockPrisma.user.findUnique).toHaveBeenLastCalledWith({ where: { id: row.id } });
       });
 
-      // `email_unverified` is no longer reachable through syncUser: the 403 gate
-      // (#956) refuses an unverified email before the relink is considered.
+      // There is no unverified row here: the 403 gate (#956) refuses an
+      // unverified email before the relink is considered.
       it.each([
         { label: 'an old identity that still exists', exists: true, reason: 'identity_exists' },
       ])('logs why it refused: $label', async ({ exists, reason }) => {

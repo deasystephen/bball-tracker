@@ -47,7 +47,7 @@ Two designs were considered:
    memberships) to a new sign-up with the same address.
 
    Everything else keeps the 409, and the warn line `Refusing to link WorkOS identity to an email
-   owned by another identity` carries the `reason`: `disabled` (flag off), `email_unverified`,
+   owned by another identity` carries the `reason`: `disabled` (flag off),
    `identity_exists` (two live identities for one address) or `row_changed` (the row moved to some
    other identity underneath the sign-in; a retried sign-in that already moved it to the *same*
    identity succeeds). Any WorkOS failure other than 404 is a 503, never a relink on a guess.
