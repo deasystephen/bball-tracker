@@ -55,10 +55,11 @@ const OAUTH_ERROR_KEYS: Record<OAuthErrorCode, string> = {
 };
 
 /**
- * 403 `email_not_verified` (#907): the address matches a player a coach added,
- * and only a verified address may claim that account. Retrying changes nothing
- * until the address is verified, so this gets its own copy, not "try again",
- * and is not reported to Sentry (an expected refusal, like every 4xx).
+ * 403 `email_not_verified` (#907, #956): the API opens no account for an
+ * address WorkOS reports unverified (new, coach-added or returning alike).
+ * Retrying changes nothing until the address is verified, so this gets its own
+ * copy, not "try again", and is not reported to Sentry (an expected refusal,
+ * like every 4xx).
  */
 export const EMAIL_NOT_VERIFIED_CODE = 'email_not_verified';
 

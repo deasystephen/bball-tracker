@@ -1,9 +1,11 @@
 /**
  * `GET /auth/callback` claiming a pre-provisioned row, through the real route
- * → `WorkOSService.syncUser` → shared Prisma mock path (#907). Only the WorkOS
- * SDK is stubbed (`tests/support/workos-mock.ts`, installed by `tests/setup.ts`):
- * `authenticateWithCode` returns the identity whose `emailVerified` decides
- * whether the coach-added row may be claimed.
+ * → `WorkOSService.syncUser` → shared Prisma mock path (#907), and the wider
+ * rule that no account exists without a verified email (#956: no new row, no
+ * claim, no returning sign-in; the WorkOS session the exchange opened is
+ * revoked). Only the WorkOS SDK is stubbed (`tests/support/workos-mock.ts`,
+ * installed by `tests/setup.ts`): `authenticateWithCode` returns the identity
+ * whose `emailVerified` decides the outcome.
  *
  * `tests/api/auth.test.ts` mocks the whole service, so it cannot show that a
  * refused claim writes nothing; this file can. "Row untouched" is asserted as
@@ -44,18 +46,23 @@ function preProvisionedRow(): Record<string, unknown> {
   };
 }
 
-function signInAs(emailVerified: boolean): void {
+/** An unsigned compact JWT with the `sid` WorkOS puts on every access token. */
+const ISSUED_ACCESS_TOKEN = `${Buffer.from(JSON.stringify({ alg: 'RS256' })).toString('base64url')}.${Buffer.from(
+  JSON.stringify({ sub: 'workos_roster_kid', sid: 'session_issued' })
+).toString('base64url')}.sig`;
+
+function signInAs(emailVerified: boolean, email: string = EMAIL): void {
   mockWorkOSClient.userManagement.authenticateWithCode.mockResolvedValue({
     user: {
       id: 'workos_roster_kid',
       object: 'user',
-      email: EMAIL,
+      email,
       firstName: 'Roster',
       lastName: 'Kid',
       emailVerified,
       profilePictureUrl: null,
     },
-    accessToken: 'access-token',
+    accessToken: ISSUED_ACCESS_TOKEN,
     refreshToken: 'refresh-token',
   });
 }
@@ -119,6 +126,7 @@ describe('GET /api/v1/auth/callback claiming a pre-provisioned row (#907)', () =
 
   it('refuses with 403 email_not_verified and writes nothing when the email is unverified', async () => {
     signInAs(false);
+    mockWorkOSClient.userManagement.revokeSession.mockResolvedValue(undefined);
 
     const response = await request(app).get('/api/v1/auth/callback').query({ code: 'auth-code' });
 
@@ -132,5 +140,60 @@ describe('GET /api/v1/auth/callback claiming a pre-provisioned row (#907)', () =
     expect(response.body).not.toHaveProperty('refreshToken');
     // The coach's row keeps isManaged / managedById / memberships: nothing was written
     expect(prismaWrites()).toEqual([]);
+    // ... and the WorkOS session the exchange opened is ended (#956)
+    expect(mockWorkOSClient.userManagement.revokeSession).toHaveBeenCalledWith({ sessionId: 'session_issued' });
+  });
+
+  it('still answers the 403 when WorkOS refuses to revoke the issued session', async () => {
+    signInAs(false);
+    mockWorkOSClient.userManagement.revokeSession.mockRejectedValue(new Error('WorkOS down'));
+
+    const response = await request(app).get('/api/v1/auth/callback').query({ code: 'auth-code' });
+
+    expect(response.status).toBe(403);
+    expect(response.body).toMatchObject({ code: 'email_not_verified' });
+    expect(prismaWrites()).toEqual([]);
+  });
+});
+
+describe('GET /api/v1/auth/callback with an unverified email and no row to claim (#956)', () => {
+  beforeEach(() => {
+    authRateLimit.resetKey('::ffff:127.0.0.1');
+    authRateLimit.resetKey('127.0.0.1');
+    (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([]);
+    mockWorkOSClient.userManagement.revokeSession.mockResolvedValue(undefined);
+  });
+
+  it('creates no account for a brand-new unverified identity', async () => {
+    (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(null);
+    signInAs(false, 'newcomer@example.test');
+
+    const response = await request(app).get('/api/v1/auth/callback').query({ code: 'auth-code' });
+
+    expect(response.status).toBe(403);
+    expect(response.body).toMatchObject({ code: 'email_not_verified' });
+    expect(response.body).not.toHaveProperty('accessToken');
+    expect(prismaWrites()).toEqual([]);
+    expect(mockWorkOSClient.userManagement.revokeSession).toHaveBeenCalledWith({ sessionId: 'session_issued' });
+  });
+
+  it('refuses a returning linked user whose address flipped to unverified, leaving the row as it was', async () => {
+    (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({
+      ...preProvisionedRow(),
+      workosUserId: 'workos_roster_kid',
+      emailVerified: true,
+      isManaged: false,
+      managedById: null,
+    });
+    signInAs(false);
+
+    const response = await request(app).get('/api/v1/auth/callback').query({ code: 'auth-code' });
+
+    expect(response.status).toBe(403);
+    expect(response.body).toMatchObject({ code: 'email_not_verified' });
+    expect(response.body).not.toHaveProperty('accessToken');
+    // emailVerified stays true from the last verified sign-in: nothing was written
+    expect(prismaWrites()).toEqual([]);
+    expect(mockWorkOSClient.userManagement.revokeSession).toHaveBeenCalledWith({ sessionId: 'session_issued' });
   });
 });

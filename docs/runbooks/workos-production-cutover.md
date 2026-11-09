@@ -97,10 +97,11 @@ below are those of the staging dashboard; check each against the live UI.
       with a username and password from the review notes (#451) and cannot read a Magic Auth
       code. Mirror any other method enabled in Staging; if a third-party social login is
       offered, Apple's guideline 4.8 also expects Sign in with Apple.
-- [ ] **Email verification: required** for every enabled method (#956). The relink (branch 3a)
-      and the pre-provisioned claim (#952) both act only on `emailVerified === true`; without it,
-      every returning user gets the 409. Record the setting in `docs/architecture/auth-sessions.md`
-      if it differs from what is written there.
+- [ ] **Email verification: required** for every enabled method (#956). `syncUser` refuses every
+      sign-in that reports `emailVerified: false` with 403 `email_not_verified` before it reads a
+      row, so a method that passes unverified addresses through locks its users out until they
+      verify; nobody is relinked, created or merged. Record the setting in
+      `docs/architecture/auth-sessions.md` if it differs from what is written there.
 - [ ] **Sign-up enabled** (every existing user signs up again).
 - [ ] **Branding.** App name Hooplings, logo, colours, matching Staging. **Do not configure a custom
       AuthKit domain in this window**: it can change the access token `iss`, and the API accepts
@@ -266,8 +267,8 @@ the overlap.
 - [ ] Datadog (US5) `service:bball-tracker-api "Relinked user to a new WorkOS identity"` — one line
       per returning user. `"Auth callback email linked to a different WorkOS user"` — none; if
       there is one, the warn line just before it names the `reason` (`disabled` means the flag is
-      not in the running task definition; `email_unverified` means AuthKit is not requiring
-      verification).
+      not in the running task definition). `"Refused an unverified WorkOS email"` (the 403 gate,
+      #956) — none; one or more means AuthKit is not requiring verification for an enabled method.
       `"WorkOS getUser failed while checking a linked identity"` — none.
 - [ ] Sentry `bball-tracker-backend`, `production`: no new `auth-callback-conflict` issue.
 - [ ] From a one-off task (the live task env now has the production key):

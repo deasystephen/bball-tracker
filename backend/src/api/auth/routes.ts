@@ -378,14 +378,25 @@ router.get('/callback', async (req, res) => {
 
     // Sync user to our database. The outcome flags feed the client's
     // `user_logged_in` analytics (#790): booleans only, never PII.
-    const { user, claimedInvite, wasManaged } = await WorkOSService.syncUser({
-      id: workosUser.id,
-      email: workosUser.email,
-      firstName: workosUser.firstName ?? undefined,
-      lastName: workosUser.lastName ?? undefined,
-      emailVerified: workosUser.emailVerified,
-      profilePictureUrl: workosUser.profilePictureUrl ?? undefined,
-    });
+    let synced;
+    try {
+      synced = await WorkOSService.syncUser({
+        id: workosUser.id,
+        email: workosUser.email,
+        firstName: workosUser.firstName ?? undefined,
+        lastName: workosUser.lastName ?? undefined,
+        emailVerified: workosUser.emailVerified,
+        profilePictureUrl: workosUser.profilePictureUrl ?? undefined,
+      });
+    } catch (error) {
+      // The exchange already created a WorkOS session for this identity. The
+      // sign-in is refused (403 unverified email, 409 conflict) or failed, so
+      // the tokens never leave the server: end the session rather than leave
+      // it alive until it expires (#956). Best-effort, never masks the refusal.
+      await WorkOSService.revokeIssuedSession(accessToken);
+      throw error;
+    }
+    const { user, claimedInvite, wasManaged } = synced;
 
     // In production, you'd set this as an HTTP-only cookie or return it securely
     // For now, return user info and token (mobile app will handle token storage)

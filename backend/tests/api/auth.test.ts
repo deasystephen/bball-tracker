@@ -5,7 +5,7 @@
 import request from 'supertest';
 import { readFileSync } from 'fs';
 import path from 'path';
-import { ServiceUnavailableError, ConflictError } from '../../src/utils/errors';
+import { ServiceUnavailableError, ConflictError, EmailNotVerifiedError } from '../../src/utils/errors';
 import { app, httpServer } from '../../src/index';
 import { WorkOSService } from '../../src/services/workos-service';
 import prisma from '../../src/models';
@@ -447,8 +447,37 @@ describe('Auth API', () => {
         expect.objectContaining({ status: 409 })
       );
       expect(warnSpy).not.toHaveBeenCalledWith('Error in auth callback', expect.anything());
+      // The exchange had already opened a WorkOS session: it is ended (#956).
+      expect(mockWorkOSService.revokeIssuedSession).toHaveBeenCalledWith('mock-access-token');
       errorSpy.mockRestore();
       warnSpy.mockRestore();
+    });
+
+    it('ends the WorkOS session the exchange opened when syncUser refuses, and still answers the refusal (#956)', async () => {
+      const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+      mockWorkOSService.exchangeCodeForToken.mockResolvedValue({
+        user: mockWorkOSUser,
+        accessToken: 'refused-access-token',
+        refreshToken: 'mock-refresh-token',
+      } as unknown as Awaited<ReturnType<typeof mockWorkOSService.exchangeCodeForToken>>);
+      mockWorkOSService.syncUser.mockRejectedValue(new EmailNotVerifiedError());
+      mockWorkOSService.revokeIssuedSession.mockResolvedValue(true);
+
+      const response = await request(app).get('/api/v1/auth/callback').query({ code: 'auth-code-123' });
+
+      expect(response.status).toBe(403);
+      expect(response.body).toMatchObject({ code: 'email_not_verified' });
+      expect(response.body).not.toHaveProperty('accessToken');
+      expect(mockWorkOSService.revokeIssuedSession).toHaveBeenCalledWith('refused-access-token');
+      warnSpy.mockRestore();
+    });
+
+    it('does not revoke anything when the exchange itself failed (no session was opened)', async () => {
+      mockWorkOSService.exchangeCodeForToken.mockRejectedValue(new Error('Invalid code'));
+
+      await request(app).get('/api/v1/auth/callback').query({ code: 'invalid-code' });
+
+      expect(mockWorkOSService.revokeIssuedSession).not.toHaveBeenCalled();
     });
 
     // Audit #5: the verifier travels with the code so WorkOS can enforce PKCE.

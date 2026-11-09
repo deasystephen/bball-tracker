@@ -2,7 +2,7 @@
  * WorkOS service layer for authentication and user management
  */
 
-import { jwtVerify, decodeProtectedHeader, errors as joseErrors } from 'jose';
+import { jwtVerify, decodeJwt, decodeProtectedHeader, errors as joseErrors } from 'jose';
 import { assertWorkOSConfig, getWorkOS, getWorkOSClientId, WORKOS_REDIRECT_URI, WORKOS_JWT_ISSUER, getWorkOSJwks } from '../utils/workos-client';
 import { Prisma, User } from '@prisma/client';
 import prisma from '../models';
@@ -176,6 +176,36 @@ export class WorkOSService {
   }
 
   /**
+   * End the WorkOS session behind an access token the code exchange just
+   * issued, when the sign-in is then refused (#956): the tokens never reach the
+   * client, so nothing should stay alive for them server-side. The token came
+   * straight from WorkOS in our own call, so its `sid` claim is read without
+   * a signature check. Best-effort: a missing claim or a WorkOS failure is
+   * logged at warn and reported as `false`, never thrown over the refusal.
+   */
+  static async revokeIssuedSession(accessToken: string): Promise<boolean> {
+    let sessionId: unknown;
+    try {
+      sessionId = decodeJwt(accessToken).sid;
+    } catch {
+      sessionId = undefined;
+    }
+    if (typeof sessionId !== 'string' || sessionId.length === 0) {
+      logger.warn('Cannot revoke the WorkOS session of a refused sign-in: the access token carries no sid');
+      return false;
+    }
+    try {
+      await WorkOSService.revokeSession(sessionId);
+      return true;
+    } catch (error) {
+      logger.warn('Failed to revoke the WorkOS session of a refused sign-in', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return false;
+    }
+  }
+
+  /**
    * Delete the WorkOS user behind a deleted account (#444, D3). Removes the
    * email, name and credentials from the identity provider and invalidates
    * every session and refresh token for it. Called best-effort AFTER the local
@@ -236,9 +266,6 @@ export class WorkOSService {
    *    `workosUserId`, drop `isManaged`/`managedById` so the creating coach
    *    loses control of what is now a real account, and re-evaluate the admin
    *    allowlist (a pre-seeded row must not suppress ADMIN bootstrap).
-   *    Only when WorkOS reports the email verified (#907); an unverified
-   *    sign-in is refused with `EmailNotVerifiedError` (403) and the row is
-   *    left untouched.
    * 3. `email` match on a row linked to a *different* WorkOS identity:
    *    a. that identity does not exist in the WorkOS environment the API now
    *       runs against (the Staging → Production key cutover, #24, or a user
@@ -248,6 +275,15 @@ export class WorkOSService {
    *       signing-in identity (`relinkUnknownIdentity`);
    *    b. otherwise refuse with 409 rather than silently merging accounts.
    * 4. Otherwise create.
+   *
+   * **No account without a verified email (#907, #956).** Before any of the
+   * above, an identity whose email WorkOS reports unverified is refused with
+   * `EmailNotVerifiedError` (403) and nothing is read or written: no new row
+   * is created for it, a pre-provisioned row stays unclaimed, and a linked
+   * user whose address later flipped to unverified in WorkOS is refused the
+   * same way until it is verified again. AuthKit verifies every address for
+   * password and magic-link sign-in; the gate is the in-repo defence for a
+   * social provider that passes an unverified claim through.
    *
    * Email matching is case-insensitive through `emailEquals`, and a new
    * account stores the trimmed, lower-cased address (#955): WorkOS may return
@@ -265,6 +301,12 @@ export class WorkOSService {
       .join(' ') || email.split('@')[0];
     const emailVerified = workosUser.emailVerified || false;
     const workosAvatar = workosUser.profilePictureUrl || null;
+
+    if (!emailVerified) {
+      // info, not warn: the route's respondWithError already logs the 403 at warn.
+      logger.info('Refused an unverified WorkOS email: no account without a verified email');
+      throw new EmailNotVerifiedError();
+    }
 
     // Every write below is conditioned on `deletedAt IS NULL` (#444, D9): the
     // reads above are unlocked, so a sign-in that read the row a moment before
@@ -349,17 +391,8 @@ export class WorkOSService {
         throw new ConflictError('An account with this email is already linked to a different login');
       }
 
-      // Only a verified address may claim a pre-provisioned row (#907):
-      // claiming hands over its team memberships and ends the coach's control.
-      // `email` is unique, so there is no separate row to create instead.
-      if (!emailVerified) {
-        // info, not warn: the route's respondWithError already logs the 403 at warn.
-        logger.info('Refused to link an unverified WorkOS email to a pre-provisioned user', {
-          userId: byEmail.id,
-        });
-        throw new EmailNotVerifiedError();
-      }
-
+      // Claiming hands over the row's team memberships and ends the coach's
+      // control; only a verified address gets here (the gate above, #907).
       const promoteToAdmin = byEmail.role !== 'ADMIN' && isAdminEmail(email);
       logger.info('Linking WorkOS identity to pre-provisioned user', {
         userId: byEmail.id,
@@ -469,10 +502,11 @@ export class WorkOSService {
    * sign-up for the same address.
    *
    * Refuses, having written nothing, when the flag is off, when WorkOS does
-   * not report the email verified, when the old identity still exists (two
-   * live identities for one address: a real conflict), or when the row moved
-   * to some other identity underneath us; the caller logs the reason and
-   * answers 409. A concurrent sign-in that already moved the row to *this*
+   * not report the email verified (defence in depth: `syncUser` already
+   * refused an unverified email with 403 before getting here, #956), when the
+   * old identity still exists (two live identities for one address: a real
+   * conflict), or when the row moved to some other identity underneath us;
+   * the caller logs the reason and answers 409. A concurrent sign-in that already moved the row to *this*
    * identity is a success, not a conflict. Reversible by construction:
    * switching back to the old keys relinks each account the same way.
    */
