@@ -14,7 +14,7 @@ const mockGetWorkOSJwks = jest.fn();
 const mockAssertWorkOSConfig = jest.fn();
 
 import { Prisma } from '@prisma/client';
-import { WorkOSService } from '../../src/services/workos-service';
+import { WorkOSService, type SyncUserInput } from '../../src/services/workos-service';
 import { ConflictError, EmailNotVerifiedError, ServiceUnavailableError, UnauthorizedError } from '../../src/utils/errors';
 import { domainEvent, spyOnInfo } from '../support/domain-events';
 import { logger } from '../../src/utils/logger';
@@ -280,6 +280,46 @@ describe('WorkOSService', () => {
       mockWorkOSClient.userManagement.revokeSession.mockRejectedValue(new Error('WorkOS down'));
 
       await expect(WorkOSService.revokeSession('session_123')).rejects.toThrow('WorkOS down');
+    });
+  });
+
+  describe('revokeIssuedSession (#956)', () => {
+    /** An unsigned compact JWT carrying `payload`: the sid is read without a signature check. */
+    const tokenWith = (payload: Record<string, unknown>): string =>
+      `${Buffer.from(JSON.stringify({ alg: 'RS256' })).toString('base64url')}.${Buffer.from(JSON.stringify(payload)).toString('base64url')}.sig`;
+
+    it('revokes the session named by the sid claim of the token the exchange issued', async () => {
+      mockWorkOSClient.userManagement.revokeSession.mockResolvedValue(undefined);
+
+      await expect(WorkOSService.revokeIssuedSession(tokenWith({ sub: 'user_1', sid: 'session_refused' }))).resolves.toBe(true);
+
+      expect(mockWorkOSClient.userManagement.revokeSession).toHaveBeenCalledWith({ sessionId: 'session_refused' });
+    });
+
+    it('reports false and warns, never throws, when WorkOS refuses the revocation', async () => {
+      const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+      mockWorkOSClient.userManagement.revokeSession.mockRejectedValue(new Error('WorkOS down'));
+
+      await expect(WorkOSService.revokeIssuedSession(tokenWith({ sub: 'user_1', sid: 'session_refused' }))).resolves.toBe(false);
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        'Failed to revoke the WorkOS session of a refused sign-in',
+        expect.objectContaining({ error: 'WorkOS down' })
+      );
+      warnSpy.mockRestore();
+    });
+
+    it.each([
+      ['a token without a sid claim', tokenWith({ sub: 'user_1' })],
+      ['a token that is not a JWT', 'not-a-jwt'],
+    ])('reports false without calling WorkOS for %s', async (_label, token) => {
+      const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+
+      await expect(WorkOSService.revokeIssuedSession(token)).resolves.toBe(false);
+
+      expect(mockWorkOSClient.userManagement.revokeSession).not.toHaveBeenCalled();
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('carries no sid'));
+      warnSpy.mockRestore();
     });
   });
 
@@ -621,7 +661,7 @@ describe('WorkOSService', () => {
       expect(mockPrisma.user.create).not.toHaveBeenCalled();
     });
 
-    describe('unverified email (#907)', () => {
+    describe('unverified email (#907, #956): no account without a verified email', () => {
       const managedRow = (): UserData & { isManaged: boolean; managedById: string | null } => ({
         ...createPlayer({ email: 'kid@example.com', name: 'Roster Name' }),
         workosUserId: null,
@@ -629,23 +669,36 @@ describe('WorkOSService', () => {
         managedById: 'coach-1',
       });
 
-      it('refuses (403 email_not_verified) to claim a pre-provisioned row and writes nothing', async () => {
-        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValueOnce(null); // by workosUserId
-        (mockPrisma.user.findMany as jest.Mock).mockResolvedValueOnce([managedRow()]); // by email
+      afterEach(() => {
+        (mockPrisma.user.findUnique as jest.Mock).mockReset();
+        (mockPrisma.user.findMany as jest.Mock).mockReset();
+      });
 
+      it('refuses (403 email_not_verified) before any read or write', async () => {
         const attempt = WorkOSService.syncUser({ id: 'workos_unverified', email: 'kid@example.com', emailVerified: false });
 
         await expect(attempt).rejects.toBeInstanceOf(EmailNotVerifiedError);
         await expect(attempt).rejects.toMatchObject({ statusCode: 403, code: 'email_not_verified' });
+        expect(mockPrisma.user.findUnique).not.toHaveBeenCalled();
+        expect(mockPrisma.user.findMany).not.toHaveBeenCalled();
         expect(mockPrisma.user.updateMany).not.toHaveBeenCalled();
         expect(mockPrisma.user.update).not.toHaveBeenCalled();
         expect(mockPrisma.user.create).not.toHaveBeenCalled();
       });
 
-      it('does not let an allowlisted admin email bypass the check', async () => {
-        process.env.ADMIN_EMAILS = 'kid@example.com';
-        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValueOnce(null);
-        (mockPrisma.user.findMany as jest.Mock).mockResolvedValueOnce([managedRow()]);
+      it('treats a missing emailVerified as unverified', async () => {
+        await expect(
+          WorkOSService.syncUser({ id: 'workos_unverified', email: 'kid@example.com' } as SyncUserInput)
+        ).rejects.toBeInstanceOf(EmailNotVerifiedError);
+        expect(mockPrisma.user.create).not.toHaveBeenCalled();
+      });
+
+      // The gate runs before the first read, so the rows below are set with
+      // `mockResolvedValue`, never `Once`: a queued value nobody consumes would
+      // leak into the next test.
+      it('leaves a pre-provisioned row unclaimed', async () => {
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(null);
+        (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([managedRow()]);
 
         await expect(
           WorkOSService.syncUser({ id: 'workos_unverified', email: 'kid@example.com', emailVerified: false })
@@ -653,44 +706,50 @@ describe('WorkOSService', () => {
         expect(mockPrisma.user.updateMany).not.toHaveBeenCalled();
       });
 
-      it('still answers 409 when the email is linked to a different identity', async () => {
-        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValueOnce(null);
-        (mockPrisma.user.findMany as jest.Mock).mockResolvedValueOnce([
+      it('does not let an allowlisted admin email bypass the check', async () => {
+        process.env.ADMIN_EMAILS = 'kid@example.com';
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(null);
+        (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([managedRow()]);
+
+        await expect(
+          WorkOSService.syncUser({ id: 'workos_unverified', email: 'kid@example.com', emailVerified: false })
+        ).rejects.toBeInstanceOf(EmailNotVerifiedError);
+        expect(mockPrisma.user.updateMany).not.toHaveBeenCalled();
+        expect(mockPrisma.user.create).not.toHaveBeenCalled();
+      });
+
+      it('answers 403 (not the cutover 409) when the email is linked to a different identity', async () => {
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(null);
+        (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([
           createPlayer({ email: 'kid@example.com', workosUserId: 'workos_other' }),
         ]);
 
         await expect(
           WorkOSService.syncUser({ id: 'workos_unverified', email: 'kid@example.com', emailVerified: false })
-        ).rejects.toBeInstanceOf(ConflictError);
+        ).rejects.toBeInstanceOf(EmailNotVerifiedError);
+        expect(mockWorkOSClient.userManagement.getUser).not.toHaveBeenCalled();
       });
 
-      it('still refreshes an already-linked user (the gate is only on the claim)', async () => {
+      it('refuses a returning linked user whose address flipped to unverified, writing nothing (#956)', async () => {
         const linked = createPlayer({ email: 'linked@example.com', workosUserId: 'workos_linked', profilePictureUrl: 'x' });
-        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValueOnce(linked);
-        (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
-        (mockPrisma.user.findUniqueOrThrow as jest.Mock).mockResolvedValue({ ...linked, emailVerified: false });
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(linked);
 
-        const result = await WorkOSService.syncUser({ id: 'workos_linked', email: 'linked@example.com', emailVerified: false });
-
-        expect(result.claimedInvite).toBe(false);
-        expect(mockPrisma.user.updateMany).toHaveBeenCalledWith({
-          where: { id: linked.id, deletedAt: null, workosUserId: 'workos_linked' },
-          data: { emailVerified: false },
-        });
+        await expect(
+          WorkOSService.syncUser({ id: 'workos_linked', email: 'linked@example.com', emailVerified: false })
+        ).rejects.toBeInstanceOf(EmailNotVerifiedError);
+        // The row keeps emailVerified: true from the last verified sign-in.
+        expect(mockPrisma.user.updateMany).not.toHaveBeenCalled();
+        expect(mockPrisma.user.update).not.toHaveBeenCalled();
       });
 
-      it('still creates a brand-new account (no row to claim)', async () => {
+      it('creates no brand-new account for an unverified email (#956)', async () => {
         (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(null);
         (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([]);
-        const created = createPlayer({ email: 'new@example.com', workosUserId: 'workos_new' });
-        (mockPrisma.user.create as jest.Mock).mockResolvedValue(created);
 
-        const result = await WorkOSService.syncUser({ id: 'workos_new', email: 'new@example.com', emailVerified: false });
-
-        expect(result).toEqual({ user: created, claimedInvite: false, wasManaged: false });
-        expect(mockPrisma.user.create).toHaveBeenCalledWith({
-          data: expect.objectContaining({ workosUserId: 'workos_new', emailVerified: false }),
-        });
+        await expect(
+          WorkOSService.syncUser({ id: 'workos_new', email: 'new@example.com', emailVerified: false })
+        ).rejects.toBeInstanceOf(EmailNotVerifiedError);
+        expect(mockPrisma.user.create).not.toHaveBeenCalled();
       });
     });
 
@@ -707,7 +766,7 @@ describe('WorkOSService', () => {
       const workosUser = {
         id: 'workos_789',
         email: 'johndoe@example.com',
-        emailVerified: false,
+        emailVerified: true,
       };
       const player = createPlayer({
         email: 'johndoe@example.com',
@@ -998,12 +1057,13 @@ describe('WorkOSService', () => {
         expect(mockPrisma.user.updateMany).not.toHaveBeenCalled();
       });
 
-      it('refuses (409) an unverified email without asking WorkOS', async () => {
-        arrange(stagingLinkedRow());
-
+      it('refuses (403 email_not_verified, #956) an unverified email before reading the row or asking WorkOS', async () => {
+        // No arrange(): the gate fires before the first read, and a queued
+        // one-shot row nobody consumed would leak into the next test.
         await expect(
           WorkOSService.syncUser({ id: 'user_prod_1', email: 'coach@example.com', emailVerified: false })
-        ).rejects.toBeInstanceOf(ConflictError);
+        ).rejects.toBeInstanceOf(EmailNotVerifiedError);
+        expect(mockPrisma.user.findMany).not.toHaveBeenCalled();
         expect(mockWorkOSClient.userManagement.getUser).not.toHaveBeenCalled();
         expect(mockPrisma.user.updateMany).not.toHaveBeenCalled();
       });
@@ -1042,16 +1102,17 @@ describe('WorkOSService', () => {
         expect(mockPrisma.user.findUnique).toHaveBeenLastCalledWith({ where: { id: row.id } });
       });
 
+      // There is no unverified row here: the 403 gate (#956) refuses an
+      // unverified email before the relink is considered.
       it.each([
-        { label: 'an unverified email', verified: false, exists: false, reason: 'email_unverified' },
-        { label: 'an old identity that still exists', verified: true, exists: true, reason: 'identity_exists' },
-      ])('logs why it refused: $label', async ({ verified, exists, reason }) => {
+        { label: 'an old identity that still exists', exists: true, reason: 'identity_exists' },
+      ])('logs why it refused: $label', async ({ exists, reason }) => {
         arrange(stagingLinkedRow());
         if (exists) mockWorkOSClient.userManagement.getUser.mockResolvedValueOnce({ id: 'user_staging_1' });
         const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
 
         await expect(
-          WorkOSService.syncUser({ id: 'user_prod_1', email: 'coach@example.com', emailVerified: verified })
+          WorkOSService.syncUser({ id: 'user_prod_1', email: 'coach@example.com', emailVerified: true })
         ).rejects.toBeInstanceOf(ConflictError);
         expect(warn).toHaveBeenCalledWith(
           'Refusing to link WorkOS identity to an email owned by another identity',

@@ -153,13 +153,15 @@ describe('GET /api/v1/auth/callback across the WorkOS key cutover (#24, #955)', 
     );
   });
 
-  it('refuses (409) to relink for an unverified email, without asking WorkOS', async () => {
+  it('refuses (403 email_not_verified, not the cutover 409) an unverified email, without asking WorkOS (#956)', async () => {
     storedRow(userRow());
     signInAs({ id: PRODUCTION_ID, email: STORED_EMAIL, emailVerified: false });
 
     const response = await request(app).get('/api/v1/auth/callback').query({ code: 'auth-code' });
 
-    expect(response.status).toBe(409);
+    expect(response.status).toBe(403);
+    expect(response.body).toMatchObject({ code: 'email_not_verified' });
+    expect(captureException).not.toHaveBeenCalledWith(expect.anything(), { flow: 'auth-callback-conflict' });
     expect(mockWorkOSClient.userManagement.getUser).not.toHaveBeenCalled();
     expect(mockPrisma.user.updateMany).not.toHaveBeenCalled();
   });

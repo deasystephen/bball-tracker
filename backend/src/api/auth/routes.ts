@@ -378,36 +378,48 @@ router.get('/callback', async (req, res) => {
 
     // Sync user to our database. The outcome flags feed the client's
     // `user_logged_in` analytics (#790): booleans only, never PII.
-    const { user, claimedInvite, wasManaged } = await WorkOSService.syncUser({
-      id: workosUser.id,
-      email: workosUser.email,
-      firstName: workosUser.firstName ?? undefined,
-      lastName: workosUser.lastName ?? undefined,
-      emailVerified: workosUser.emailVerified,
-      profilePictureUrl: workosUser.profilePictureUrl ?? undefined,
-    });
-
-    // In production, you'd set this as an HTTP-only cookie or return it securely
-    // For now, return user info and token (mobile app will handle token storage)
-    res.json({
-      success: true,
+    // Everything from here to the response runs under one guard: the exchange
+    // already opened a WorkOS session for this identity, and if the sign-in is
+    // refused (403 unverified email, 409 conflict) or fails before the tokens
+    // reach the client, that session is ended rather than left alive until it
+    // expires (#956). Best-effort, never masks the refusal or the failure.
+    try {
+      const { user, claimedInvite, wasManaged } = await WorkOSService.syncUser({
+        id: workosUser.id,
+        email: workosUser.email,
+        firstName: workosUser.firstName ?? undefined,
+        lastName: workosUser.lastName ?? undefined,
+        emailVerified: workosUser.emailVerified,
+        profilePictureUrl: workosUser.profilePictureUrl ?? undefined,
+      });
       // Same shape as GET /auth/me, so a fresh sign-in carries every session
       // field (e.g. the notifyOnReplies opt-out, #768).
-      user: await buildSessionUser(user),
-      accessToken, // Mobile app will store this securely
-      // Short-lived access token + rotating refresh token. Without the refresh
-      // token the client is dead as soon as the access token expires (#349).
-      refreshToken,
-      // Whether this sign-in claimed a pre-provisioned row (an invited or
-      // roster-added player) rather than creating a new account, and whether
-      // that row was coach-managed (#790).
-      claimedInvite,
-      wasManaged,
-    });
+      const sessionUser = await buildSessionUser(user);
+
+      // In production, you'd set this as an HTTP-only cookie or return it securely
+      // For now, return user info and token (mobile app will handle token storage)
+      res.json({
+        success: true,
+        user: sessionUser,
+        accessToken, // Mobile app will store this securely
+        // Short-lived access token + rotating refresh token. Without the refresh
+        // token the client is dead as soon as the access token expires (#349).
+        refreshToken,
+        // Whether this sign-in claimed a pre-provisioned row (an invited or
+        // roster-added player) rather than creating a new account, and whether
+        // that row was coach-managed (#790).
+        claimedInvite,
+        wasManaged,
+      });
+    } catch (error) {
+      await WorkOSService.revokeIssuedSession(accessToken);
+      throw error;
+    }
   } catch (error) {
     if (error instanceof ConflictError) {
-      // Email already bound to a different WorkOS user that still exists, an
-      // unverified email, or two rows differing only by case. Never a normal
+      // Email already bound to a different WorkOS user that still exists, or
+      // two rows differing only by case (an unverified email is the 403 above,
+      // before any of this is looked at, #956). Never a normal
       // client outcome: a row whose WorkOS id the environment does not know
       // (every row after the #24 key cutover) is relinked by syncUser instead.
       // Kept at `error` and in Sentry so it is seen, unlike the 4xx rule

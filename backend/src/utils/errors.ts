@@ -133,22 +133,22 @@ export class ResendCooldownError extends DetailedError<ResendCooldownDetails> {
 }
 
 /**
- * 403 — a sign-in whose WorkOS identity has an unverified email matched a
- * pre-provisioned row (a coach-added player, a `POST /players` account, an
- * admin pre-create) (#907). Claiming that row hands over its team memberships
- * and ends the coach's control of it, so only a verified address may claim it.
- * `User.email` is unique, so a second row for the same address cannot be
- * created instead: the sign-in is refused, nothing is written, and the person
- * can sign in again once they verify the address with the identity provider.
- * Deliberately not a `ConflictError`: the callback treats 409 as the WorkOS
- * key-cutover signature and alarms on it.
+ * 403 — a sign-in whose WorkOS identity has an unverified email (#907, #956).
+ * No account without a verified email: a brand-new row is not created for it,
+ * a pre-provisioned row (a coach-added player, a `POST /players` account, an
+ * admin pre-create) stays unclaimed, because claiming hands over its team
+ * memberships and ends the coach's control, and a linked user whose address
+ * flipped to unverified in WorkOS is refused until it is verified again.
+ * Nothing is written; the person signs in again once the identity provider has
+ * verified the address. Deliberately not a `ConflictError`: the callback treats
+ * 409 as the WorkOS key-cutover signature and alarms on it.
  */
 export class EmailNotVerifiedError extends DetailedError<Record<string, unknown>> {
   constructor() {
     super(
       'email_not_verified',
       {},
-      'Your email address is not verified. Verify it, then sign in again to join the team that added you.',
+      'Your email address is not verified. Verify it, then sign in again.',
       403
     );
     Object.setPrototypeOf(this, EmailNotVerifiedError.prototype);
