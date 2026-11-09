@@ -50,6 +50,7 @@ import {
   canWriteLeague,
 } from '../utils/permissions';
 import { emailEquals } from '../utils/email-match';
+import { lockLeagueRow } from '../utils/league-row-lock';
 import { USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
 import { createOrConflict, orNotFound } from '../utils/prisma-errors';
 import { lockTeamRow } from '../utils/team-row-lock';
@@ -1003,7 +1004,7 @@ export class TeamService {
           // below (`findOrCreateSeason` takes the same lock again), and taking
           // it before the team keeps the order deletes use.
           const leagueId = candidates.season.leagueId;
-          await tx.$queryRaw`SELECT "id" FROM "League" WHERE "id" = ${leagueId} FOR NO KEY UPDATE`;
+          await lockLeagueRow(tx, leagueId);
 
           // 3. The source team, then WHO again behind the lock.
           if (!(await lockTeamRow(tx, teamId))) {

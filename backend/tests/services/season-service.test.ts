@@ -574,7 +574,7 @@ describe('SeasonService', () => {
       }
     });
 
-    it('does not lock the League or look the name up when the name is unchanged', async () => {
+    it('does not lock the League or look the name up when no name is sent', async () => {
       const admin = createAdmin();
       const season = createSeason();
       (mockPrisma.season.findUnique as jest.Mock).mockResolvedValue({
@@ -587,7 +587,26 @@ describe('SeasonService', () => {
       await SeasonService.updateSeason(season.id, { isActive: false }, admin.id);
 
       expect(mockPrisma.$queryRaw).not.toHaveBeenCalled();
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
       expect(mockPrisma.season.update).toHaveBeenCalledTimes(1);
+    });
+
+    it('treats a PATCH that resends the stored name as no rename: no lock, no lookup, name still written', async () => {
+      const admin = createAdmin();
+      const season = createSeason({ name: 'Fall 2026' });
+      (mockPrisma.season.findUnique as jest.Mock).mockResolvedValue({
+        ...season,
+        league: createLeague({ id: season.leagueId }),
+      });
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(admin);
+      (mockPrisma.season.update as jest.Mock).mockResolvedValue({ ...season, isActive: false });
+
+      await SeasonService.updateSeason(season.id, { name: ' Fall 2026 ', isActive: false }, admin.id);
+
+      expect(mockPrisma.$queryRaw).not.toHaveBeenCalled();
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+      const updateArgs = (mockPrisma.season.update as jest.Mock).mock.calls[0][0];
+      expect(updateArgs.data).toEqual({ name: 'Fall 2026', isActive: false });
     });
 
     it('rejects inverted dates using existing season data for missing fields', async () => {
