@@ -22,7 +22,8 @@ export const createSeasonSchema = z.object({
  * Schema for updating a season
  */
 export const updateSeasonSchema = z.object({
-  name: z.string().min(1).max(100).optional(),
+  // Trimmed like `createSeasonSchema`: the stored form is `normalizeSeasonName` (#1008).
+  name: z.string().trim().min(1).max(100).optional(),
   startDate: z.coerce.date().nullable().optional(),
   endDate: z.coerce.date().nullable().optional(),
   isActive: z.boolean().optional(),

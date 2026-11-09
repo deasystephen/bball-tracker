@@ -403,6 +403,62 @@ describe('TeamService.rolloverTeam against Postgres (#461)', () => {
     expect(await prisma.season.count({ where: { leagueId: c.org.leagueId } })).toBe(2);
   });
 
+  it('refuses renaming a season to a case or space variant of another season, and allows a variant of its own name (#1008)', async () => {
+    const c = await club('rename');
+    const fall = await SeasonService.createSeason({ leagueId: c.org.leagueId, name: `Fall-${fx.run}` }, c.coach);
+    const winter = await SeasonService.createSeason({ leagueId: c.org.leagueId, name: `Winter-${fx.run}` }, c.coach);
+
+    await expect(
+      SeasonService.updateSeason(winter.id, { name: ` fall-${fx.run} ` }, c.coach)
+    ).rejects.toThrow('A season with this name already exists in this league');
+    expect((await prisma.season.findUniqueOrThrow({ where: { id: winter.id } })).name).toBe(`Winter-${fx.run}`);
+
+    const renamed = await SeasonService.updateSeason(fall.id, { name: ` FALL-${fx.run} ` }, c.coach);
+    expect(renamed.name).toBe(`FALL-${fx.run}`);
+  });
+
+  it('serializes a rename and a POST /seasons on case variants of one name behind the League lock, so exactly one lands (#1008)', async () => {
+    const c = await club('rename-race');
+    const winter = await SeasonService.createSeason({ leagueId: c.org.leagueId, name: `Winter-${fx.run}` }, c.coach);
+
+    // Hold the League lock in a side transaction so both writers really
+    // queue behind it and then contend with each other when it releases;
+    // without this the two could simply run one after the other.
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => (release = resolve));
+    let lockHeld!: () => void;
+    const held = new Promise<void>((resolve) => (lockHeld = resolve));
+    const holder = prisma.$transaction(
+      async (tx) => {
+        await tx.$queryRaw`SELECT "id" FROM "League" WHERE "id" = ${c.org.leagueId} FOR NO KEY UPDATE`;
+        lockHeld();
+        await released;
+      },
+      { timeout: 15_000 }
+    );
+    await held;
+
+    let settledEarly = 0;
+    const writers = [
+      SeasonService.updateSeason(winter.id, { name: `spring-${fx.run}` }, c.coach),
+      SeasonService.createSeason({ leagueId: c.org.leagueId, name: `SPRING-${fx.run}` }, c.coach),
+    ].map((p) => p.finally(() => settledEarly++));
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(settledEarly).toBe(0); // both blocked on the lock
+    release();
+    await holder;
+
+    const results = await Promise.allSettled(writers);
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    const loser = results.find((r) => r.status === 'rejected') as PromiseRejectedResult;
+    expect(loser.reason).toBeInstanceOf(BadRequestError);
+    expect((loser.reason as Error).message).toBe('A season with this name already exists in this league');
+    const [{ count }] = await prisma.$queryRaw<{ count: bigint }[]>`
+      SELECT count(*)::bigint AS count FROM "Season"
+      WHERE "leagueId" = ${c.org.leagueId} AND lower("name") = lower(${`spring-${fx.run}`})`;
+    expect(Number(count)).toBe(1);
+  });
+
   it('counts a team once across its seasons: N team-seasons of one lineage are one team for the cap', async () => {
     const c = await club('count');
     const { team: y1 } = await TeamService.rolloverTeam(c.org.teamId, { seasonName: `Y1-${fx.run}` }, c.coach);

@@ -13,6 +13,8 @@ import {
   canReadLeague,
 } from '../utils/permissions';
 import { logger } from '../utils/logger';
+import { createOrConflict } from '../utils/prisma-errors';
+import { lockLeagueRow } from '../utils/league-row-lock';
 import { USER_SUMMARY_SELECT, USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
 
 const LEAGUE_SUMMARY_SELECT = {
@@ -124,8 +126,10 @@ export interface SeasonByName {
  * The season in `leagueId` whose name matches `name` ignoring case and
  * surrounding whitespace, or null. The ONE definition of "this league already
  * has that season": `findOrCreateSeason` (every season create path, the
- * personal-league provisioning included) and the season rollover (#461) read
- * it.
+ * personal-league provisioning included), the season rollover (#461) and the
+ * season rename (`SeasonService.updateSeason`, #1008) read it. The rename
+ * passes `excludeSeasonId`, its own id, so "fall 2026" may become "Fall
+ * 2026" while another season's variant is still refused.
  *
  * The input is normalized in JS (`normalizeSeasonName`, zod's trim). The
  * stored side strips leading and trailing whitespace with `regexp_replace`
@@ -138,12 +142,14 @@ export interface SeasonByName {
 export async function findSeasonByName(
   db: Pick<Prisma.TransactionClient, '$queryRaw'>,
   leagueId: string,
-  name: string
+  name: string,
+  excludeSeasonId?: string
 ): Promise<SeasonByName | null> {
   const rows = await db.$queryRaw<SeasonByName[]>`
     SELECT "id", "isActive", "startDate", "createdAt" FROM "Season"
     WHERE "leagueId" = ${leagueId}
       AND lower(regexp_replace("name", '^\\s+|\\s+$', '', 'g')) = lower(${normalizeSeasonName(name)})
+      ${excludeSeasonId === undefined ? Prisma.empty : Prisma.sql`AND "id" <> ${excludeSeasonId}`}
     ORDER BY "createdAt" ASC
     LIMIT 1`;
   return rows[0] ?? null;
@@ -163,21 +169,22 @@ export interface NewSeason {
  * caller's transaction; authorization and date validation stay with the
  * caller.
  *
- * Takes `FOR NO KEY UPDATE` on the League row first, so two creates in one
+ * Takes the League row lock first (`lockLeagueRow`), so two creates in one
  * league serialize and two case variants of a name can never both be
- * minted. The insert is `INSERT ... ON CONFLICT DO NOTHING` (`createMany`
- * with `skipDuplicates`) and the row is read back by its exact name, so a
- * writer that does not take the lock (the personal-league provisioning
- * upsert) meeting this one on the same name converges instead of raising a
- * P2002, which would abort the whole transaction. Logs `Season created` only
- * when this call inserted the row.
+ * minted. Every Season writer takes that lock (this helper is the only
+ * insert; the personal-league provisioning comes through it too, and the
+ * rename takes it as well, #1008). The insert is still `INSERT ... ON
+ * CONFLICT DO NOTHING` (`createMany` with `skipDuplicates`) read back by its
+ * exact name, so a writer that ever skipped the lock would converge instead
+ * of raising a P2002, which would abort the whole transaction. Logs `Season
+ * created` only when this call inserted the row.
  */
 export async function findOrCreateSeason(
   tx: Prisma.TransactionClient,
   input: NewSeason,
   userId: string
 ): Promise<{ id: string; created: boolean; isActive: boolean }> {
-  await tx.$queryRaw`SELECT "id" FROM "League" WHERE "id" = ${input.leagueId} FOR NO KEY UPDATE`;
+  await lockLeagueRow(tx, input.leagueId);
 
   const name = normalizeSeasonName(input.name);
   const existing = await findSeasonByName(tx, input.leagueId, name);
@@ -382,7 +389,20 @@ export class SeasonService {
   }
 
   /**
-   * Update a season
+   * Update a season.
+   *
+   * A rename follows the season name rule (#461, #1008): the new name is
+   * stored trimmed (`normalizeSeasonName`; `updateSeasonSchema` trims too)
+   * and is taken when another season of the league matches it ignoring case
+   * and surrounding whitespace, the same 400 the create paths answer. The
+   * check and the update run in one transaction under the League row lock
+   * every Season writer takes (`lockLeagueRow`), so a rename and a concurrent
+   * create cannot both land on case variants of one name. A season may be
+   * renamed to a variant of its own name. A PATCH that resends the stored
+   * name is not a rename and takes no lock. `createOrConflict` on the update
+   * is defensive only: no current writer skips the lock, but the exact unique
+   * index is the last word if one ever does, and it answers the same 400
+   * rather than a 500.
    * @param seasonId Season ID
    * @param data Update data
    * @param userId User ID (must be league admin or system admin)
@@ -413,21 +433,9 @@ export class SeasonService {
     // Build update data
     const updateData: Prisma.SeasonUpdateInput = {};
 
-    if (data.name !== undefined) {
-      // Check for duplicate name
-      const existing = await prisma.season.findFirst({
-        where: {
-          leagueId: season.leagueId,
-          name: data.name,
-          id: { not: seasonId },
-        },
-      });
-
-      if (existing) {
-        throw new BadRequestError('A season with this name already exists in this league');
-      }
-
-      updateData.name = data.name;
+    const newName = data.name === undefined ? undefined : normalizeSeasonName(data.name);
+    if (newName !== undefined) {
+      updateData.name = newName;
     }
 
     if (data.startDate !== undefined) {
@@ -451,12 +459,24 @@ export class SeasonService {
       throw new BadRequestError('Start date must be before end date');
     }
 
-    // Update the season
-    const updatedSeason = await prisma.season.update({
-      where: { id: seasonId },
-      data: updateData,
-      include: SEASON_INCLUDE,
-    });
+    const update = (tx: Prisma.TransactionClient): Promise<SeasonWithTeams> =>
+      tx.season.update({ where: { id: seasonId }, data: updateData, include: SEASON_INCLUDE });
+
+    // Resending the stored name is not a rename: no lock, no lookup (the
+    // trimmed value is still written, a no-op for a normalized row).
+    const renaming = newName !== undefined && newName !== season.name;
+    const updatedSeason = !renaming
+      ? await update(prisma)
+      : await prisma.$transaction(async (tx) => {
+          // The lock every Season writer takes: a rename and a create in one
+          // league serialize, so neither lands on a variant of the other's name.
+          await lockLeagueRow(tx, season.leagueId);
+          const taken = await findSeasonByName(tx, season.leagueId, newName, seasonId);
+          if (taken) {
+            throw new BadRequestError(SEASON_NAME_TAKEN_MESSAGE);
+          }
+          return createOrConflict(() => update(tx), SEASON_NAME_TAKEN_MESSAGE, 'Season_leagueId_name_key');
+        });
 
     logger.info('Season updated', { seasonId, leagueId: season.leagueId, userId });
 

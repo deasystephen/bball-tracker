@@ -11,6 +11,7 @@ jest.mock('../../src/services/usage-service', () => ({
   invalidateUsage: jest.fn().mockResolvedValue(undefined),
 }));
 
+import { Prisma } from '@prisma/client';
 import * as permissions from '../../src/utils/permissions';
 import { invalidateUsage } from '../../src/services/usage-service';
 import { TeamService, SEASON_SIBLING_MESSAGE, isSeasonAfter } from '../../src/services/team-service';
@@ -301,7 +302,7 @@ describe('TeamService.rolloverTeam', () => {
     const lookup = (mockPrisma.$queryRaw as jest.Mock).mock.calls.find(([st]) =>
       (st as TemplateStringsArray).join('?').includes('lower(regexp_replace("name"')
     ) as [TemplateStringsArray, ...unknown[]];
-    expect(lookup.slice(1)).toEqual([LEAGUE, 'spring 2025']);
+    expect(lookup.slice(1)).toEqual([LEAGUE, 'spring 2025', Prisma.empty]);
     expect(spies.isLeagueAdmin).not.toHaveBeenCalled();
     expect(mockPrisma.season.createMany).not.toHaveBeenCalled();
     expect(mockPrisma.team.create).toHaveBeenCalledWith(

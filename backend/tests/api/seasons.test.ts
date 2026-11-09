@@ -435,6 +435,25 @@ describe('Seasons API', () => {
       );
     });
 
+    it('answers 400 with the duplicate message when the new name is a case or space variant of another season (#1008)', async () => {
+      mockSeasonService.updateSeason.mockRejectedValue(
+        new BadRequestError('A season with this name already exists in this league')
+      );
+
+      const response = await request(app)
+        .patch(`/api/v1/seasons/${TEST_SEASON_ID}`)
+        .send({ name: ' fall 2026 ' });
+
+      expect(response.status).toBe(400);
+      expect(response.body.error).toBe('A season with this name already exists in this league');
+      // The route hands the service the trimmed name (`updateSeasonSchema`).
+      expect(mockSeasonService.updateSeason).toHaveBeenCalledWith(
+        TEST_SEASON_ID,
+        { name: 'fall 2026' },
+        expect.any(String)
+      );
+    });
+
     it('should return 403 for unauthorized update', async () => {
       mockSeasonService.updateSeason.mockRejectedValue(
         new ForbiddenError('You do not have permission to update this season')

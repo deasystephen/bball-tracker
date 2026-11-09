@@ -182,7 +182,7 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
     newline) still match; there is no migration and existing near-duplicates stay (oldest first). The
     personal-league provisioning (`resolvePersonalSeasonId`) goes through the same helper, so a coach's
     renamed " 2026\t" is reused, not doubled, and it still converges with no P2002 retry (the League
-    lock plus `ON CONFLICT DO NOTHING`). Season rename still matches exactly (#1008).
+    lock plus `ON CONFLICT DO NOTHING`). The season rename (`SeasonService.updateSeason`, #1008) applies the same rule under the same League lock (`utils/league-row-lock.ts#lockLeagueRow`, the one helper every Season writer takes), excluding the season's own id, so "fall 2026" may become "Fall 2026" while another season's variant is refused; resending the stored name takes no lock; `updateSeasonSchema` trims too.
   - Then a **201 `{ created: true, seasonCreated, team }`** (`seasonCreated`: this request inserted the
     season). There is no P2002 retry: the transaction runs inside
     `createOrConflict` naming `Team_lineageId_seasonId_key` (or its columns), so a P2002 on that unique
