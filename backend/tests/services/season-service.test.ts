@@ -6,6 +6,7 @@
  */
 
 import * as permissions from '../../src/utils/permissions';
+import { Prisma } from '@prisma/client';
 import { SeasonService, findOrCreateSeason, findSeasonByName } from '../../src/services/season-service';
 import { mockPrisma } from '../setup';
 import { BadRequestError } from '../../src/utils/errors';
@@ -15,6 +16,7 @@ import {
   createLeague,
   createPlayer,
   createSeason,
+  uniqueViolation,
 } from '../factories';
 import { expectBadRequestError, expectForbiddenError, expectNotFoundError } from '../helpers';
 import { domainEvent, spyOnInfo } from '../support/domain-events';
@@ -44,7 +46,16 @@ describe('findSeasonByName / findOrCreateSeason (#461)', () => {
     // The regex reaches Postgres with its backslashes: all whitespace, not just spaces.
     expect(sql).toContain(`lower(regexp_replace("name", '^\\s+|\\s+$', '', 'g')) = lower(?)`);
     expect(sql).toContain('ORDER BY "createdAt" ASC');
-    expect(values).toEqual(['league-1', 'Spring 2025']);
+    expect(values).toEqual(['league-1', 'Spring 2025', Prisma.empty]);
+  });
+
+  it('excludes one season by id when asked (the rename checking against every other season, #1008)', async () => {
+    mockSeasonRaw([]);
+
+    await expect(findSeasonByName(mockPrisma as never, 'league-1', 'Fall 2026', 'season-self')).resolves.toBeNull();
+
+    const [, ...values] = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0] as [TemplateStringsArray, ...unknown[]];
+    expect(values).toEqual(['league-1', 'Fall 2026', Prisma.sql`AND "id" <> ${'season-self'}`]);
   });
 
   it('findOrCreateSeason stores the normalized (trimmed) name and reads it back by that name', async () => {
@@ -165,7 +176,7 @@ describe('SeasonService', () => {
       const lookup = (mockPrisma.$queryRaw as jest.Mock).mock.calls.find(([strings]) =>
         (strings as TemplateStringsArray).join('?').includes('lower(regexp_replace("name"')
       );
-      expect(lookup?.slice(1)).toEqual([league.id, 'fall']);
+      expect(lookup?.slice(1)).toEqual([league.id, 'fall', Prisma.empty]);
     });
 
     it('answers the duplicate-name 400 when a concurrent create of the exact name wins (ON CONFLICT DO NOTHING inserted nothing)', async () => {
@@ -513,20 +524,19 @@ describe('SeasonService', () => {
       }
     });
 
-    it('rejects duplicate name within same league', async () => {
+    it('rejects a name another season of the league has, matched by the shared rule under the League lock (#1008)', async () => {
       const admin = createAdmin();
-      const season = createSeason();
+      const season = createSeason({ name: 'Fall 2026' });
       (mockPrisma.season.findUnique as jest.Mock).mockResolvedValue({
         ...season,
         league: createLeague({ id: season.leagueId }),
       });
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(admin);
-      (mockPrisma.season.findFirst as jest.Mock).mockResolvedValue(
-        createSeason({ leagueId: season.leagueId, name: 'Taken' })
-      );
+      // `findSeasonByName` (case and whitespace insensitive) answers another season.
+      mockSeasonRaw([{ id: 'other-season', isActive: true }]);
 
       try {
-        await SeasonService.updateSeason(season.id, { name: 'Taken' }, admin.id);
+        await SeasonService.updateSeason(season.id, { name: ' taken ' }, admin.id);
         fail('expected to throw');
       } catch (err) {
         expectBadRequestError(
@@ -535,6 +545,49 @@ describe('SeasonService', () => {
         );
       }
       expect(mockPrisma.season.update).not.toHaveBeenCalled();
+      expect(mockPrisma.season.findFirst).not.toHaveBeenCalled();
+
+      const calls = (mockPrisma.$queryRaw as jest.Mock).mock.calls as [TemplateStringsArray, ...unknown[]][];
+      // The League lock `findOrCreateSeason` takes, then the name lookup excluding this season.
+      expect(calls[0][0].join('?')).toContain('FROM "League" WHERE "id" = ? FOR NO KEY UPDATE');
+      expect(calls[0][1]).toBe(season.leagueId);
+      expect(calls[1][0].join('?')).toContain('FROM "Season"');
+      expect(calls[1].slice(1)).toEqual([season.leagueId, 'taken', Prisma.sql`AND "id" <> ${season.id}`]);
+    });
+
+    it('maps a P2002 on the exact index (an unlocked concurrent insert) to the same 400 (#1008)', async () => {
+      const admin = createAdmin();
+      const season = createSeason();
+      (mockPrisma.season.findUnique as jest.Mock).mockResolvedValue({
+        ...season,
+        league: createLeague({ id: season.leagueId }),
+      });
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(admin);
+      mockSeasonRaw([]);
+      (mockPrisma.season.update as jest.Mock).mockRejectedValue(uniqueViolation('Season_leagueId_name_key'));
+
+      try {
+        await SeasonService.updateSeason(season.id, { name: '2026' }, admin.id);
+        fail('expected to throw');
+      } catch (err) {
+        expectBadRequestError(err, 'A season with this name already exists in this league');
+      }
+    });
+
+    it('does not lock the League or look the name up when the name is unchanged', async () => {
+      const admin = createAdmin();
+      const season = createSeason();
+      (mockPrisma.season.findUnique as jest.Mock).mockResolvedValue({
+        ...season,
+        league: createLeague({ id: season.leagueId }),
+      });
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(admin);
+      (mockPrisma.season.update as jest.Mock).mockResolvedValue({ ...season, isActive: false });
+
+      await SeasonService.updateSeason(season.id, { isActive: false }, admin.id);
+
+      expect(mockPrisma.$queryRaw).not.toHaveBeenCalled();
+      expect(mockPrisma.season.update).toHaveBeenCalledTimes(1);
     });
 
     it('rejects inverted dates using existing season data for missing fields', async () => {
@@ -600,19 +653,22 @@ describe('SeasonService', () => {
         league: createLeague({ id: season.leagueId }),
       });
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(admin);
-      (mockPrisma.season.findFirst as jest.Mock).mockResolvedValue(null);
+      // No other season has the name (the lookup excludes this season, so a
+      // case or space variant of its own name passes too).
+      mockSeasonRaw([]);
       const updated = { ...season, name: 'New', isActive: false };
       (mockPrisma.season.update as jest.Mock).mockResolvedValue(updated);
 
       const result = await SeasonService.updateSeason(
         season.id,
-        { name: 'New', isActive: false },
+        { name: ' New ', isActive: false },
         admin.id
       );
 
       expect(result.name).toBe('New');
       const updateArgs = (mockPrisma.season.update as jest.Mock).mock.calls[0][0];
       expect(updateArgs.where).toEqual({ id: season.id });
+      // Stored trimmed, the same form every create path stores.
       expect(updateArgs.data).toEqual({ name: 'New', isActive: false });
     });
   });

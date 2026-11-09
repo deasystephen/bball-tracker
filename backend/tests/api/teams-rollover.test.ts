@@ -8,6 +8,7 @@
  * covered by `tests/integration/team-rollover.db.test.ts`.
  */
 
+import { Prisma } from '@prisma/client';
 import request from 'supertest';
 import { app, httpServer } from '../../src/index';
 import * as permissions from '../../src/utils/permissions';
@@ -158,7 +159,7 @@ describe('POST /api/v1/teams/:id/rollover', () => {
     const lookup = (mockPrisma.$queryRaw as jest.Mock).mock.calls.find(([st]) =>
       (st as TemplateStringsArray).join('?').includes('lower(regexp_replace("name"')
     ) as [TemplateStringsArray, ...unknown[]];
-    expect(lookup.slice(1)).toEqual([LEAGUE_ID, '2027']);
+    expect(lookup.slice(1)).toEqual([LEAGUE_ID, '2027', Prisma.empty]);
     expect(mockPrisma.team.create).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ ageGroup: 'U13', lineageId: LINEAGE_ID }) })
     );

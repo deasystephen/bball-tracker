@@ -441,6 +441,15 @@ describe('Schema Validation', () => {
         expect(result.success).toBe(true);
       });
 
+      it('trims the season name on update like the create schema does (#1008)', () => {
+        const result = updateSeasonSchema.safeParse({ name: '  Fall 2026 \t' });
+        expect(result.success).toBe(true);
+        if (result.success) {
+          expect(result.data.name).toBe('Fall 2026');
+        }
+        expect(updateSeasonSchema.safeParse({ name: '   ' }).success).toBe(false);
+      });
+
       it('should accept isActive update for season', () => {
         const result = updateSeasonSchema.safeParse({
           isActive: false,
