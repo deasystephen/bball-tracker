@@ -29,7 +29,7 @@
     "@sentry/react-native": "^8.32.0",
     "@tanstack/react-query": "^5.105.3",
     "axios": "^1.21.0",
-    "babel-preset-expo": "~57.0.16",
+    "babel-preset-expo": "~57.0.17",
     "expo": "~57.0.31",
     "expo-application": "~57.0.3",
     "expo-blur": "~57.0.3",
