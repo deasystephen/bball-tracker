@@ -72,6 +72,9 @@ beforeEach(() => {
 });
 
 describe('POST /api/v1/practices', () => {
+  beforeEach(() => freezeDate('2029-12-20T12:00:00Z'));
+  afterEach(() => jest.useRealTimers());
+
   const body = {
     teamId: TEAM_ID,
     location: 'Main gym',
@@ -178,6 +181,7 @@ describe('PATCH /api/v1/practices/:id', () => {
       teamId: TEAM_ID,
       seriesId: SERIES_ID,
       status: 'SCHEDULED',
+      exceptionFields: [],
     });
     mockPrisma.practiceSession.update.mockResolvedValue(practiceRow({ seriesId: SERIES_ID, isException: true, location: 'Gym B' }));
 
@@ -185,7 +189,11 @@ describe('PATCH /api/v1/practices/:id', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.practice.isException).toBe(true);
-    expect(mockPrisma.practiceSession.update.mock.calls[0][0].data).toEqual({ location: 'Gym B', isException: true });
+    expect(mockPrisma.practiceSession.update.mock.calls[0][0].data).toEqual({
+      location: 'Gym B',
+      isException: true,
+      exceptionFields: ['location'],
+    });
   });
 
   it('answers 400 for an empty body or a status change, and for a cancelled practice', async () => {
@@ -202,13 +210,13 @@ describe('PATCH /api/v1/practices/:id', () => {
 describe('POST /api/v1/practices/:id/cancel and DELETE /api/v1/practices/:id', () => {
   beforeEach(() => {
     mockCaller = {};
-    mockPrisma.practiceSession.findUnique.mockResolvedValue({ id: SESSION_ID, teamId: TEAM_ID, seriesId: null, status: 'SCHEDULED' });
+    mockPrisma.practiceSession.findUnique.mockResolvedValue({ id: SESSION_ID, teamId: TEAM_ID, seriesId: null, status: 'SCHEDULED', exceptionFields: [] });
   });
 
   it('cancels with a reason, even without a body', async () => {
     mockPrisma.practiceSession.updateMany.mockResolvedValue({ count: 1 });
     mockPrisma.practiceSession.findUnique
-      .mockResolvedValueOnce({ id: SESSION_ID, teamId: TEAM_ID, seriesId: null, status: 'SCHEDULED' })
+      .mockResolvedValueOnce({ id: SESSION_ID, teamId: TEAM_ID, seriesId: null, status: 'SCHEDULED', exceptionFields: [] })
       .mockResolvedValueOnce(practiceRow({ status: 'CANCELLED', cancelReason: 'Gym closed' }));
 
     const res = await request(app).post(`/api/v1/practices/${SESSION_ID}/cancel`).send({ reason: 'Gym closed' });
@@ -402,6 +410,11 @@ describe('/api/v1/practice-series', () => {
     mockCaller = {};
     mockPrisma.practiceSeries.findUnique.mockResolvedValue(seriesRow());
     mockPrisma.practiceSeries.updateMany.mockResolvedValue({ count: 1 });
+    mockPrisma.practiceSession.findMany.mockResolvedValue([
+      { id: 's1', exceptionFields: [] },
+      { id: 's2', exceptionFields: [] },
+      { id: 's3', exceptionFields: [] },
+    ]);
     mockPrisma.practiceSession.updateMany.mockResolvedValue({ count: 3 });
     mockPrisma.practiceSeries.findUniqueOrThrow.mockResolvedValue(seriesRow({ location: 'Gym B' }));
 

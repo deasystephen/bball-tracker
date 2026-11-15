@@ -38,6 +38,7 @@ const SERIES_SESSION_SELECT = {
   startsAt: true,
   status: true,
   isException: true,
+  exceptionFields: true,
   type: true,
   title: true,
   location: true,
@@ -210,7 +211,8 @@ export class PracticeSeriesService {
 
   /**
    * PATCH /practice-series/:id: "edit all future practices". Sessions that
-   * already started, cancelled ones and exceptions keep their values.
+   * already started and cancelled ones keep their values; an exception keeps
+   * the fields its own edit set (`exceptionFields`) and takes the rest.
    */
   static async updateSeries(
     seriesId: string,
@@ -240,15 +242,37 @@ export class PracticeSeriesService {
       if (count === 0) {
         throw new BadRequestError('This practice series was cancelled');
       }
-      const sessions = await tx.practiceSession.updateMany({
-        where: { seriesId, isException: false, status: 'SCHEDULED', startsAt: { gt: now } },
-        data: fields,
+      // Group the future sessions by which of the edited fields they did not
+      // override, and write each group once (one group unless exceptions exist).
+      const future = await tx.practiceSession.findMany({
+        where: { seriesId, status: 'SCHEDULED', startsAt: { gt: now } },
+        select: { id: true, exceptionFields: true },
       });
+      const groups = new Map<string, { data: Prisma.PracticeSessionUpdateManyMutationInput; ids: string[] }>();
+      for (const session of future) {
+        const entries = Object.entries(fields).filter(([key]) => !session.exceptionFields.includes(key));
+        if (entries.length === 0) continue;
+        const groupKey = entries.map(([key]) => key).join(',');
+        const group = groups.get(groupKey) ?? {
+          data: Object.fromEntries(entries) as Prisma.PracticeSessionUpdateManyMutationInput,
+          ids: [],
+        };
+        group.ids.push(session.id);
+        groups.set(groupKey, group);
+      }
+      let touched = 0;
+      for (const group of groups.values()) {
+        const { count: written } = await tx.practiceSession.updateMany({
+          where: { id: { in: group.ids }, status: 'SCHEDULED' },
+          data: group.data,
+        });
+        touched += written;
+      }
       const updated = await tx.practiceSeries.findUniqueOrThrow({
         where: { id: seriesId },
         include: PRACTICE_SERIES_INCLUDE,
       });
-      return { series: toSeriesView(updated), updatedSessions: sessions.count };
+      return { series: toSeriesView(updated), updatedSessions: touched };
     });
 
     logger.info('Practice series updated', {

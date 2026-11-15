@@ -88,6 +88,9 @@ beforeEach(() => {
 });
 
 describe('PracticeService.createPractice', () => {
+  beforeEach(() => freezeDate('2029-12-20T12:00:00Z'));
+  afterEach(() => jest.useRealTimers());
+
   const input = {
     teamId: TEAM,
     type: 'PRACTICE' as const,
@@ -222,13 +225,17 @@ describe('PracticeService.listPractices', () => {
 });
 
 describe('PracticeService.updatePractice', () => {
-  it('marks a series occurrence as an exception', async () => {
+  beforeEach(() => freezeDate('2029-12-20T12:00:00Z'));
+  afterEach(() => jest.useRealTimers());
+
+  it('marks a series occurrence as an exception and records the fields it set', async () => {
     const spy = spyOnInfo();
     mockPrisma.practiceSession.findUnique.mockResolvedValue({
       id: SESSION,
       teamId: TEAM,
       seriesId: SERIES,
       status: 'SCHEDULED',
+      exceptionFields: ['notes'],
     });
     mockPrisma.practiceSession.update.mockResolvedValue(practiceRow({ seriesId: SERIES, isException: true }));
 
@@ -258,6 +265,8 @@ describe('PracticeService.updatePractice', () => {
           durationMinutes: 60,
           timezone: 'America/Chicago',
           isException: true,
+          // Merged with what an earlier edit set, sorted, no repeats.
+          exceptionFields: ['durationMinutes', 'location', 'notes', 'startsAt', 'timezone', 'title', 'type'],
         },
       })
     );
@@ -269,8 +278,19 @@ describe('PracticeService.updatePractice', () => {
     });
   });
 
+  it('refuses to move a practice to a mistyped year', async () => {
+    mockPrisma.practiceSession.findUnique.mockResolvedValue({ id: SESSION, teamId: TEAM, seriesId: null, status: 'SCHEDULED', exceptionFields: [] });
+    await expect(
+      PracticeService.updatePractice(SESSION, { startsAt: '2031-02-01T23:00:00Z' }, USER)
+    ).rejects.toThrow('startsAt must be within the next 366 days');
+    await expect(
+      PracticeService.updatePractice(SESSION, { startsAt: '2029-11-01T23:00:00Z' }, USER)
+    ).rejects.toThrow('startsAt must be within the last 31 days');
+    expect(mockPrisma.practiceSession.update).not.toHaveBeenCalled();
+  });
+
   it('does not mark a standalone session, and writes only the fields given', async () => {
-    mockPrisma.practiceSession.findUnique.mockResolvedValue({ id: SESSION, teamId: TEAM, seriesId: null, status: 'SCHEDULED' });
+    mockPrisma.practiceSession.findUnique.mockResolvedValue({ id: SESSION, teamId: TEAM, seriesId: null, status: 'SCHEDULED', exceptionFields: [] });
     mockPrisma.practiceSession.update.mockResolvedValue(practiceRow());
     await PracticeService.updatePractice(SESSION, { location: 'Gym C' }, USER);
     expect(mockPrisma.practiceSession.update.mock.calls[0][0].data).toEqual({ location: 'Gym C' });
@@ -287,7 +307,7 @@ describe('PracticeService.updatePractice', () => {
       NotFoundError
     );
 
-    mockPrisma.practiceSession.findUnique.mockResolvedValue({ id: SESSION, teamId: TEAM, seriesId: null, status: 'SCHEDULED' });
+    mockPrisma.practiceSession.findUnique.mockResolvedValue({ id: SESSION, teamId: TEAM, seriesId: null, status: 'SCHEDULED', exceptionFields: [] });
     mocked(hasTeamPermission).mockResolvedValue(false);
     await expect(PracticeService.updatePractice(SESSION, { title: 'x' }, USER)).rejects.toBeInstanceOf(
       ForbiddenError
@@ -296,7 +316,7 @@ describe('PracticeService.updatePractice', () => {
   });
 
   it('maps a row cancelled mid-request to 400, one deleted to 404, and rethrows anything else', async () => {
-    const scheduled = { id: SESSION, teamId: TEAM, seriesId: null, status: 'SCHEDULED' };
+    const scheduled = { id: SESSION, teamId: TEAM, seriesId: null, status: 'SCHEDULED', exceptionFields: [] };
     mockPrisma.practiceSession.findUnique
       .mockResolvedValueOnce(scheduled)
       .mockResolvedValueOnce({ status: 'CANCELLED' });
@@ -321,7 +341,7 @@ describe('PracticeService.cancelPractice', () => {
   it('status-guards the write so a repeat keeps the first cancellation', async () => {
     const spy = spyOnInfo();
     mockPrisma.practiceSession.findUnique
-      .mockResolvedValueOnce({ id: SESSION, teamId: TEAM, seriesId: null, status: 'SCHEDULED' })
+      .mockResolvedValueOnce({ id: SESSION, teamId: TEAM, seriesId: null, status: 'SCHEDULED', exceptionFields: [] })
       .mockResolvedValueOnce(practiceRow({ status: 'CANCELLED', cancelReason: 'Snow' }));
     mockPrisma.practiceSession.updateMany.mockResolvedValue({ count: 1 });
 
@@ -352,7 +372,7 @@ describe('PracticeService.cancelPractice', () => {
 
   it('404s when the row is gone after the write', async () => {
     mockPrisma.practiceSession.findUnique
-      .mockResolvedValueOnce({ id: SESSION, teamId: TEAM, seriesId: null, status: 'SCHEDULED' })
+      .mockResolvedValueOnce({ id: SESSION, teamId: TEAM, seriesId: null, status: 'SCHEDULED', exceptionFields: [] })
       .mockResolvedValueOnce(null);
     mockPrisma.practiceSession.updateMany.mockResolvedValue({ count: 0 });
     await expect(PracticeService.cancelPractice(SESSION, {}, USER)).rejects.toBeInstanceOf(NotFoundError);
@@ -362,7 +382,7 @@ describe('PracticeService.cancelPractice', () => {
 describe('PracticeService.deletePractice', () => {
   it('deletes the session and logs it', async () => {
     const spy = spyOnInfo();
-    mockPrisma.practiceSession.findUnique.mockResolvedValue({ id: SESSION, teamId: TEAM, seriesId: SERIES, status: 'SCHEDULED' });
+    mockPrisma.practiceSession.findUnique.mockResolvedValue({ id: SESSION, teamId: TEAM, seriesId: SERIES, status: 'SCHEDULED', exceptionFields: [] });
     mockPrisma.practiceSession.deleteMany.mockResolvedValue({ count: 1 });
     await PracticeService.deletePractice(SESSION, USER);
     expect(mockPrisma.practiceSession.deleteMany).toHaveBeenCalledWith({ where: { id: SESSION } });
@@ -375,7 +395,7 @@ describe('PracticeService.deletePractice', () => {
   });
 
   it('404s when a concurrent delete got there first', async () => {
-    mockPrisma.practiceSession.findUnique.mockResolvedValue({ id: SESSION, teamId: TEAM, seriesId: null, status: 'SCHEDULED' });
+    mockPrisma.practiceSession.findUnique.mockResolvedValue({ id: SESSION, teamId: TEAM, seriesId: null, status: 'SCHEDULED', exceptionFields: [] });
     mockPrisma.practiceSession.deleteMany.mockResolvedValue({ count: 0 });
     await expect(PracticeService.deletePractice(SESSION, USER)).rejects.toBeInstanceOf(NotFoundError);
   });
@@ -737,11 +757,17 @@ describe('PracticeSeriesService.getSeries', () => {
 });
 
 describe('PracticeSeriesService.updateSeries', () => {
-  it('copies the edit onto future, scheduled, non-exception sessions only', async () => {
+  it('copies the edit onto future, scheduled sessions, minus the fields each exception set', async () => {
     const spy = spyOnInfo();
     mockPrisma.practiceSeries.findUnique.mockResolvedValue(seriesRow());
     mockPrisma.practiceSeries.updateMany.mockResolvedValue({ count: 1 });
-    mockPrisma.practiceSession.updateMany.mockResolvedValue({ count: 5 });
+    mockPrisma.practiceSession.findMany.mockResolvedValue([
+      { id: 's1', exceptionFields: [] },
+      { id: 's2', exceptionFields: [] },
+      { id: 's3', exceptionFields: ['location', 'startsAt'] },
+      { id: 's4', exceptionFields: ['location', 'notes', 'title', 'type'] },
+    ]);
+    mockPrisma.practiceSession.updateMany.mockResolvedValueOnce({ count: 2 }).mockResolvedValueOnce({ count: 1 });
     mockPrisma.practiceSeries.findUniqueOrThrow.mockResolvedValue(seriesRow());
 
     const result = await PracticeSeriesService.updateSeries(
@@ -750,20 +776,25 @@ describe('PracticeSeriesService.updateSeries', () => {
       USER
     );
 
-    expect(result.updatedSessions).toBe(5);
     const fields = { type: 'OTHER', title: 'Shootaround', location: 'Gym B', notes: null };
     expect(mockPrisma.practiceSeries.updateMany).toHaveBeenCalledWith({
       where: { id: SERIES, cancelledAt: null },
       data: fields,
     });
-    expect(mockPrisma.practiceSession.updateMany).toHaveBeenCalledWith({
-      where: { seriesId: SERIES, isException: false, status: 'SCHEDULED', startsAt: { gt: expect.any(Date) } },
-      data: fields,
+    expect(mockPrisma.practiceSession.findMany).toHaveBeenCalledWith({
+      where: { seriesId: SERIES, status: 'SCHEDULED', startsAt: { gt: expect.any(Date) } },
+      select: { id: true, exceptionFields: true },
     });
+    // s1 and s2 take everything; s3 keeps its own location; s4 overrode every edited field.
+    expect(mockPrisma.practiceSession.updateMany.mock.calls.map((c) => c[0])).toEqual([
+      { where: { id: { in: ['s1', 's2'] }, status: 'SCHEDULED' }, data: fields },
+      { where: { id: { in: ['s3'] }, status: 'SCHEDULED' }, data: { type: 'OTHER', title: 'Shootaround', notes: null } },
+    ]);
+    expect(result.updatedSessions).toBe(3);
     expect(domainEvent(spy, 'Practice series updated')).toEqual({
       seriesId: SERIES,
       teamId: TEAM,
-      updatedSessions: 5,
+      updatedSessions: 3,
       userId: USER,
     });
   });
@@ -780,6 +811,7 @@ describe('PracticeSeriesService.updateSeries', () => {
       BadRequestError
     );
     expect(mockPrisma.practiceSession.updateMany).not.toHaveBeenCalled();
+    expect(mockPrisma.practiceSession.findMany).not.toHaveBeenCalled();
   });
 
   it('404s an unknown series and 403s a non-manager', async () => {

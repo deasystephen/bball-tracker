@@ -8,7 +8,7 @@ minimum-attendance alerts, #333 carpool) are in `docs/features/practice-schedule
 ## Data model: separate tables, never `Game`
 
 `PracticeSeries`, `PracticeSession` and `PracticeAvailability` (`backend/prisma/schema.prisma`,
-migration `20261115181655_practice_scheduling`). The issue offered a `type` column on `Game`
+migration `20261115190147_practice_scheduling`). The issue offered a `type` column on `Game`
 instead; that was rejected because a `Game` row carries behaviour a practice must never trip:
 
 - `homeScore` derived from SHOT events under a row lock, `PATCH /games/:id` score rules;
@@ -24,7 +24,7 @@ build would still have shown practices as games. Separate tables change no exist
 | Model | What it is |
 | --- | --- |
 | `PracticeSeries` | The rule: `frequency` (`WEEKLY`/`BIWEEKLY`), `weekdays` (0 = Sunday … 6), `startDate` (local date, `@db.Date`), `startTime` (local `"HH:MM"`), `durationMinutes`, `timezone` (IANA), and exactly one of `endDate` (local, inclusive) or `occurrenceCount`. `cancelledAt` once cancelled. |
-| `PracticeSession` | One dated event: `startsAt` (UTC instant), `durationMinutes`, `timezone`, `type` (`PRACTICE`/`OTHER`), optional `title`/`location`/`notes`, `status` (`SCHEDULED`/`CANCELLED`, `cancelledAt`, `cancelReason`), `seriesId` (null for a standalone practice), `isException`. |
+| `PracticeSession` | One dated event: `startsAt` (UTC instant), `durationMinutes`, `timezone`, `type` (`PRACTICE`/`OTHER`), optional `title`/`location`/`notes`, `status` (`SCHEDULED`/`CANCELLED`, `cancelledAt`, `cancelReason`), `seriesId` (null for a standalone practice), `isException` and `exceptionFields` (which fields a single edit overrode). |
 | `PracticeAvailability` | One answer per (session, player): `status` (the shared `RsvpStatus` YES/NO/MAYBE), optional `comment`. Keyed on the player, as `GameRsvp` is. |
 
 `type` is `PRACTICE | OTHER`: games stay in `Game`, so the issue's `GAME` value has no row to
@@ -74,8 +74,8 @@ on, like games. The coach creates a new series on the new season's team.
 
 | Action | Effect |
 | --- | --- |
-| `PATCH /practices/:id` | Edits one session. On a series occurrence it sets `isException = true`. A cancelled session is not editable (400). |
-| `PATCH /practice-series/:id` | "Edit all future": `type`, `title`, `location`, `notes` on the series and on every session with `startsAt > now`, `status = SCHEDULED`, `isException = false`, in one transaction. Dates, times and weekdays are not editable on a series (cancel it and create a new one). 400 on a cancelled series. Answers `{ series, updatedSessions }`. |
+| `PATCH /practices/:id` | Edits one session. On a series occurrence it sets `isException = true` and adds the edited field names to `exceptionFields`. `startsAt` must stay within 31 days back and 366 ahead of now (a mistyped year), on create too. A cancelled session is not editable (400). |
+| `PATCH /practice-series/:id` | "Edit all future": `type`, `title`, `location`, `notes` on the series and on every session with `startsAt > now` and `status = SCHEDULED`, in one transaction; an exception takes every edited field except the ones in its own `exceptionFields` (a notes-only exception still follows a new location). Dates, times and weekdays are not editable on a series (cancel it and create a new one). 400 on a cancelled series. Answers `{ series, updatedSessions }`. |
 | `POST /practices/:id/cancel` | `status = CANCELLED`, `cancelledAt`, optional `reason`. Status-guarded, so a repeat keeps the first time and reason. The row and its answers stay. |
 | `DELETE /practices/:id` | Deletes the session and its answers. |
 | `DELETE /practice-series/:id` | Cancels the series: stamps `cancelledAt` and deletes every session with `startsAt > now` (exceptions and cancelled ones included; their answers cascade). Sessions that already started stay, still linked, as history. Idempotent: a repeat deletes nothing. Answers `{ series, deletedSessions }`. |

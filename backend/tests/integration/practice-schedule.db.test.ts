@@ -178,13 +178,15 @@ describe('practice scheduling (real Postgres)', () => {
     ).rejects.toBeInstanceOf(ForbiddenError);
   });
 
-  it('turns a single edit into an exception that a later series edit leaves alone', async () => {
+  it('turns a single edit into an exception whose own fields a later series edit leaves alone', async () => {
+    const moved = new Date(Date.now() + 60 * DAY_MS).toISOString();
     const exception = await PracticeService.updatePractice(
       futureSessionIds[1],
-      { location: 'Gym B', startsAt: '2030-01-01T23:30:00Z' },
+      { location: 'Gym B', startsAt: moved },
       users.coach
     );
     expect(exception.isException).toBe(true);
+    expect(exception.exceptionFields).toEqual(['location', 'startsAt']);
     expect(exception.seriesId).toBe(seriesId);
 
     const { updatedSessions } = await PracticeSeriesService.updateSeries(
@@ -192,11 +194,13 @@ describe('practice scheduling (real Postgres)', () => {
       { location: 'New gym', notes: 'Bring water' },
       users.coach
     );
-    expect(updatedSessions).toBe(futureSessionIds.length - 1);
+    expect(updatedSessions).toBe(futureSessionIds.length);
 
     const rows = await prisma.practiceSession.findMany({ where: { seriesId }, select: { id: true, location: true, notes: true } });
     const byId = new Map(rows.map((r) => [r.id, r]));
+    // The exception keeps its own location but takes the new notes.
     expect(byId.get(futureSessionIds[1])?.location).toBe('Gym B');
+    expect(byId.get(futureSessionIds[1])?.notes).toBe('Bring water');
     expect(byId.get(futureSessionIds[0])?.location).toBe('New gym');
     expect(byId.get(pastSessionId)?.location).toBe('Main gym');
     expect(byId.get(pastSessionId)?.notes).toBeNull();

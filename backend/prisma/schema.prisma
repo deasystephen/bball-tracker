@@ -752,9 +752,11 @@ model PracticeSession {
   /// IANA zone the session was scheduled in (display and email formatting).
   timezone        String
   status          PracticeStatus @default(SCHEDULED)
-  /// True once a series occurrence was edited on its own; a series-wide edit
-  /// skips it from then on.
+  /// True once a series occurrence was edited on its own.
   isException     Boolean        @default(false)
+  /// The fields that edit set (`PRACTICE_EXCEPTION_FIELDS`): a later
+  /// series-wide edit leaves exactly these alone on this session.
+  exceptionFields String[]       @default([])
   cancelledAt     DateTime?
   cancelReason    String?
   createdAt       DateTime       @default(now())

@@ -44,6 +44,7 @@ CREATE TABLE "PracticeSession" (
     "timezone" TEXT NOT NULL,
     "status" "PracticeStatus" NOT NULL DEFAULT 'SCHEDULED',
     "isException" BOOLEAN NOT NULL DEFAULT false,
+    "exceptionFields" TEXT[] DEFAULT ARRAY[]::TEXT[],
     "cancelledAt" TIMESTAMP(3),
     "cancelReason" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,

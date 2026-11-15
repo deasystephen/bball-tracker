@@ -18,6 +18,8 @@ import prisma from '../models';
 import {
   CancelPracticeInput,
   CreatePracticeInput,
+  MAX_PRACTICE_FUTURE_DAYS,
+  MAX_PRACTICE_PAST_DAYS,
   PracticeQueryParams,
   UpdatePracticeInput,
   UpsertAvailabilityInput,
@@ -35,6 +37,20 @@ import { isForeignKeyViolation, isRecordNotFound } from '../utils/prisma-errors'
 import { USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
 import { logger } from '../utils/logger';
 import { toRsvpSummary, toRsvpView, type EmailProjected, type RsvpSummary } from './rsvp-service';
+
+/**
+ * The fields a single-session edit can override on a series occurrence, and
+ * so the names `PracticeSession.exceptionFields` holds.
+ */
+export const PRACTICE_EXCEPTION_FIELDS = [
+  'type',
+  'title',
+  'location',
+  'notes',
+  'startsAt',
+  'durationMinutes',
+  'timezone',
+] as const;
 
 /** The team and series context every session payload carries. */
 export const PRACTICE_INCLUDE = {
@@ -55,7 +71,21 @@ const SESSION_WRITE_SELECT = {
   teamId: true,
   seriesId: true,
   status: true,
+  exceptionFields: true,
 } satisfies Prisma.PracticeSessionSelect;
+
+const DAY_MS = 86_400_000;
+
+/** 400 unless `startsAt` is within the single-practice window around now (a mistyped year). */
+function assertPracticeStartInRange(startsAt: Date): void {
+  const now = Date.now();
+  if (startsAt.getTime() < now - MAX_PRACTICE_PAST_DAYS * DAY_MS) {
+    throw new BadRequestError(`startsAt must be within the last ${MAX_PRACTICE_PAST_DAYS} days`);
+  }
+  if (startsAt.getTime() > now + MAX_PRACTICE_FUTURE_DAYS * DAY_MS) {
+    throw new BadRequestError(`startsAt must be within the next ${MAX_PRACTICE_FUTURE_DAYS} days`);
+  }
+}
 type SessionForWrite = Prisma.PracticeSessionGetPayload<{ select: typeof SESSION_WRITE_SELECT }>;
 
 /**
@@ -143,6 +173,7 @@ export class PracticeService {
       throw new NotFoundError('Team not found');
     }
     await assertCanManagePractices(userId, data.teamId);
+    assertPracticeStartInRange(new Date(data.startsAt));
 
     let practice: PracticeView;
     try {
@@ -180,14 +211,11 @@ export class PracticeService {
     if (!practice) {
       throw new NotFoundError('Practice not found');
     }
-    const [hasAccess, availabilitySummary] = await Promise.all([
-      canAccessTeam(userId, practice.teamId),
-      summarizeAvailability(sessionId, practice.teamId),
-    ]);
-    if (!hasAccess) {
+    // Sequential on purpose: a denied caller triggers no aggregate query.
+    if (!(await canAccessTeam(userId, practice.teamId))) {
       throw new ForbiddenError('You do not have access to this practice');
     }
-    return { ...practice, availabilitySummary };
+    return { ...practice, availabilitySummary: await summarizeAvailability(sessionId, practice.teamId) };
   }
 
   /**
@@ -232,8 +260,9 @@ export class PracticeService {
 
   /**
    * PATCH /practices/:id. Editing one occurrence of a series marks it an
-   * exception: the series keeps its other sessions, and a later series-wide
-   * edit leaves this one alone. A cancelled session is not editable.
+   * exception and records which fields it set (`exceptionFields`): a later
+   * series-wide edit still reaches this session's other fields, never these.
+   * A cancelled session is not editable.
    */
   static async updatePractice(
     sessionId: string,
@@ -244,6 +273,10 @@ export class PracticeService {
     if (session.status === 'CANCELLED') {
       throw new BadRequestError('A cancelled practice cannot be edited');
     }
+    if (data.startsAt !== undefined) {
+      assertPracticeStartInRange(new Date(data.startsAt));
+    }
+    const edited = PRACTICE_EXCEPTION_FIELDS.filter((field) => data[field] !== undefined);
 
     try {
       const practice = await prisma.practiceSession.update({
@@ -256,7 +289,12 @@ export class PracticeService {
           ...(data.startsAt !== undefined ? { startsAt: new Date(data.startsAt) } : {}),
           ...(data.durationMinutes !== undefined ? { durationMinutes: data.durationMinutes } : {}),
           ...(data.timezone !== undefined ? { timezone: data.timezone } : {}),
-          ...(session.seriesId ? { isException: true } : {}),
+          ...(session.seriesId
+            ? {
+                isException: true,
+                exceptionFields: [...new Set([...session.exceptionFields, ...edited])].sort(),
+              }
+            : {}),
         },
         include: PRACTICE_INCLUDE,
       });
