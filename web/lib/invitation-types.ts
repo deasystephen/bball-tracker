@@ -1,7 +1,8 @@
 /**
  * `GET /invitations/by-token/:token` is polymorphic: a team invitation
  * (`kind: 'team'`, or no `kind` on older API builds) or a guardian invitation
- * (`kind: 'guardian'` — PARENT role, docs/plans/parent-role-spec.md).
+ * (`kind: 'guardian'` — PARENT role, docs/plans/parent-role-spec.md) or a
+ * staff invitation (`kind: 'staff'` — a coaching role, #460).
  */
 export interface TeamInvitationDetails {
   kind?: 'team';
@@ -32,4 +33,16 @@ export interface GuardianInvitationDetails {
   expiresAt: string;
 }
 
-export type InvitationDetails = TeamInvitationDetails | GuardianInvitationDetails;
+export interface StaffInvitationDetails {
+  kind: 'staff';
+  id: string;
+  status: 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED' | 'CANCELLED';
+  teamName: string;
+  roleType: 'HEAD_COACH' | 'ASSISTANT_COACH' | 'TEAM_MANAGER';
+  inviterName: string;
+  /** Sender's tombstone signal; label from this, never from `inviterName`. */
+  inviterDeletedAt: string | null;
+  expiresAt: string;
+}
+
+export type InvitationDetails = TeamInvitationDetails | GuardianInvitationDetails | StaffInvitationDetails;

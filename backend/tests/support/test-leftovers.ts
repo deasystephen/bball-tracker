@@ -52,7 +52,15 @@ export interface RemovedTestRows {
 /** The subset of the client this module needs; a transaction client fits too. */
 type Db = Pick<
   PrismaClient,
-  '$queryRaw' | 'user' | 'league' | 'team' | 'teamLineage' | 'game' | 'teamInvitation' | 'guardianInvitation'
+    | '$queryRaw'
+  | 'user'
+  | 'league'
+  | 'team'
+  | 'teamLineage'
+  | 'game'
+  | 'teamInvitation'
+  | 'guardianInvitation'
+  | 'staffInvitation'
 >;
 
 const RUN_ID = /^[0-9a-f]{8}$/;
@@ -139,21 +147,25 @@ export interface DeletedUsers {
 /**
  * Hard-deletes the users `where` matches, after the invitations they SENT.
  *
- * `invitedById` is ON DELETE RESTRICT on both `TeamInvitation` and
- * `GuardianInvitation` (the only RESTRICT foreign keys onto `User`; every other
+ * `invitedById` is ON DELETE RESTRICT on `TeamInvitation`, `GuardianInvitation`
+ * and `StaffInvitation` (the only RESTRICT foreign keys onto `User`; every other
  * relation cascades or sets null), so those rows have to go first or the user
  * delete fails with P2003 (#783). Opens no transaction of its own, so it also
- * runs on a transaction client: a caller that needs the three deletes atomic
+ * runs on a transaction client: a caller that needs the deletes atomic
  * runs it inside `$transaction`.
  */
 export async function deleteUsersWhere(
-  db: Pick<PrismaClient, 'user' | 'teamInvitation' | 'guardianInvitation'>,
+  db: Pick<PrismaClient, 'user' | 'teamInvitation' | 'guardianInvitation' | 'staffInvitation'>,
   where: Prisma.UserWhereInput
 ): Promise<DeletedUsers> {
   const guardianInvitations = await db.guardianInvitation.deleteMany({ where: { invitedBy: where } });
   const teamInvitations = await db.teamInvitation.deleteMany({ where: { invitedBy: where } });
+  const staffInvitations = await db.staffInvitation.deleteMany({ where: { invitedBy: where } });
   const users = await db.user.deleteMany({ where });
-  return { users: users.count, invitations: guardianInvitations.count + teamInvitations.count };
+  return {
+    users: users.count,
+    invitations: guardianInvitations.count + teamInvitations.count + staffInvitations.count,
+  };
 }
 
 /** Removes the rows a scope covers, in the order the foreign keys allow. */

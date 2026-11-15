@@ -184,8 +184,16 @@ describe('AccountService.deleteAccount', () => {
       },
       data: { status: 'EXPIRED' },
     });
-    // D17: every matching invitedEmail is scrubbed, not just PENDING rows
-    expect(mockPrisma.$executeRaw).toHaveBeenCalledTimes(1);
+    // D17: every matching invitedEmail is scrubbed, not just PENDING rows:
+    // guardian invitations, then staff invitations (#460: PENDING expired
+    // first so the link cannot be accepted for the sentinel, then the scrub)
+    expect(mockPrisma.$executeRaw).toHaveBeenCalledTimes(3);
+    const scrubSql = (mockPrisma.$executeRaw as jest.Mock).mock.calls.map((call) =>
+      (call[0] as TemplateStringsArray).join('?')
+    );
+    expect(scrubSql[0]).toContain('UPDATE "GuardianInvitation"');
+    expect(scrubSql[1]).toMatch(/UPDATE "StaffInvitation"\s+SET "status" = 'EXPIRED'/);
+    expect(scrubSql[2]).toMatch(/UPDATE "StaffInvitation"\s+SET "invitedEmail" = 'deleted-'/);
     expect(mockPrisma.user.updateMany).toHaveBeenCalledWith({
       where: { managedById: USER_ID },
       data: { managedById: null },
@@ -555,7 +563,8 @@ describe('AccountService.exportUserData', () => {
       [
         'announcementReplies', 'announcements', 'calendarFeedTokens', 'exportedAt', 'gameEvents', 'gameRsvps',
         'guardianInvitations', 'guardiansAsChild', 'guardiansAsParent', 'leagueAdmins', 'personalLeague', 'playerStats',
-        'pushTokens', 'receivedInvitations', 'sentGuardianInvitations', 'sentInvitations', 'teamMembers', 'teamStaff', 'user',
+        'pushTokens', 'receivedInvitations', 'sentGuardianInvitations', 'sentInvitations', 'sentStaffInvitations', 'staffInvitations',
+        'teamMembers', 'teamStaff', 'user',
       ].sort()
     );
     expect(data.user).not.toHaveProperty('workosUserId');

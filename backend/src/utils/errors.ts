@@ -268,6 +268,25 @@ export class UploadExpiredError extends DetailedError<Record<string, unknown>> {
   }
 }
 
+/**
+ * 409 `sign_in_required` — a staff invitation (#460) cannot be accepted from
+ * the public link because the address belongs to an unclaimed managed roster
+ * record: its managing coach may still rewrite that email (B2.10), so a staff
+ * role on the row would be a grant the coach could claim. The invitee signs in
+ * with the address and accepts in the app instead.
+ */
+export class SignInRequiredError extends DetailedError<Record<string, never>> {
+  constructor() {
+    super(
+      'sign_in_required',
+      {},
+      'Sign in to the app with this email address to accept this invitation',
+      409
+    );
+    Object.setPrototypeOf(this, SignInRequiredError.prototype);
+  }
+}
+
 export class ConflictError extends AppError {
   constructor(message: string = 'Conflict') {
     super(message, 409);

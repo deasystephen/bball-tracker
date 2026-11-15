@@ -2,10 +2,11 @@
  * Public invitation routes — no authentication required.
  * The invitation token itself is the shared secret.
  *
- * A token resolves to EITHER a TeamInvitation (`kind: 'team'`) or a
+ * A token resolves to a TeamInvitation (`kind: 'team'`), a
  * GuardianInvitation (`kind: 'guardian'`, PARENT role —
- * docs/plans/parent-role-spec.md). Team invitations are looked up first; a
- * miss falls through to guardian invitations.
+ * docs/plans/parent-role-spec.md) or a StaffInvitation (`kind: 'staff'`,
+ * #460). Team invitations are looked up first; a miss falls through to
+ * guardian, then staff invitations.
  *
  * Mount these BEFORE the auth-protected invitation router so Express
  * resolves /by-token/* without hitting the authenticate middleware.
@@ -15,6 +16,8 @@ import { Router } from 'express';
 import type { InvitationStatus } from '@prisma/client';
 import { InvitationService } from '../../services/invitation-service';
 import { GuardianService } from '../../services/guardian-service';
+import { StaffInvitationService } from '../../services/staff-invitation-service';
+import { invalidateUsage } from '../../services/usage-service';
 import { NotFoundError } from '../../utils/errors';
 import { respondWithError } from '../../utils/respond-with-error';
 import { logger } from '../../utils/logger';
@@ -64,20 +67,24 @@ export function invitationViewState(
 }
 
 /**
- * Run the team-invitation lookup first; on NotFound, try the guardian one.
+ * Run the team-invitation lookup first; on NotFound, try the guardian one,
+ * then the staff one. The last kind's NotFound is the answer.
  */
-async function resolveByKind<T, G>(
+async function resolveByKind<T, G, S>(
   team: () => Promise<T>,
-  guardian: () => Promise<G>
-): Promise<T | G> {
-  try {
-    return await team();
-  } catch (error) {
-    if (error instanceof NotFoundError) {
-      return guardian();
+  guardian: () => Promise<G>,
+  staff: () => Promise<S>
+): Promise<T | G | S> {
+  for (const lookup of [team, guardian] as const) {
+    try {
+      return await lookup();
+    } catch (error) {
+      if (!(error instanceof NotFoundError)) {
+        throw error;
+      }
     }
-    throw error;
   }
+  return staff();
 }
 
 /**
@@ -112,7 +119,8 @@ router.get('/by-token/:token', invitationLookupIpRateLimit, invitationTokenRateL
         kind: 'team' as const,
         ...(await InvitationService.getInvitationByToken(token as string)),
       }),
-      () => GuardianService.getInvitationByToken(token as string)
+      () => GuardianService.getInvitationByToken(token as string),
+      () => StaffInvitationService.getInvitationByToken(token as string)
     );
     logger.info('Invitation viewed by token', {
       invitationId: invitation.id,
@@ -132,8 +140,11 @@ router.get('/by-token/:token', invitationLookupIpRateLimit, invitationTokenRateL
 
 /**
  * POST /api/v1/invitations/by-token/:token/accept
- * Accepts the invitation on behalf of the invited player (team kind) or the
- * invited adult (guardian kind — creates the Guardian link).
+ * Accepts the invitation on behalf of the invited player (team kind), the
+ * invited adult (guardian kind — creates the Guardian link) or the invited
+ * staff member (staff kind, #460 — creates the account when the address has
+ * none, and the TeamStaff row; 409 `sign_in_required` when the address is an
+ * unclaimed managed roster record).
  * Token acts as authentication (one-time secret, like a password-reset link).
  */
 router.post('/by-token/:token/accept', inviteAcceptRateLimit, async (req, res) => {
@@ -162,6 +173,18 @@ router.post('/by-token/:token/accept', inviteAcceptRateLimit, async (req, res) =
           invitation: omitToken(accepted.invitation),
           guardian: accepted.guardian,
           message: 'Invitation accepted. You are now a guardian of this player.',
+        };
+      },
+      async () => {
+        const accepted = await StaffInvitationService.acceptInvitationByToken(token as string);
+        // Joining a team's staff changes the account's metered team count.
+        await invalidateUsage(accepted.staff.userId);
+        return {
+          kind: 'staff' as const,
+          invitation: omitToken(accepted.invitation),
+          staff: accepted.staff,
+          alreadyStaff: accepted.alreadyStaff,
+          message: 'Invitation accepted. You have been added to the team staff.',
         };
       }
     );

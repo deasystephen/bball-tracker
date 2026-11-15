@@ -28,8 +28,8 @@
  *   │    leagueAdmin (log admin-less leagues), gameRsvp,           │
  *   │    guardian links both ways (+ promote next primary),        │
  *   │    PENDING team invitations → CANCELLED,                     │
- *   │    PENDING guardian invitations → EXPIRED,                   │
- *   │    every GuardianInvitation.invitedEmail match → sentinel,   │
+ *   │    PENDING guardian + staff invitations → EXPIRED,           │
+ *   │    every Guardian/StaffInvitation.invitedEmail → sentinel,   │
  *   │    personal league → neutral name (deleted when empty),      │
  *   │    managedById = me → null                                   │
  *   │ 4  count what still points at the row (USER_REFERENCE_SELECT) │
@@ -104,6 +104,7 @@ export const USER_REFERENCE_COUNT_SELECT = {
   guardiansAsChild: true,
   guardianInvitationsAsChild: true,
   sentGuardianInvitations: true,
+  sentStaffInvitations: true,
   playerStats: true,
   gameRsvps: true,
   pushTokens: true,
@@ -579,6 +580,13 @@ export class AccountService {
     const emailOr: Prisma.GuardianInvitationWhereInput[] = user.email
       ? [{ invitedEmail: emailEquals(user.email) }]
       : [];
+    // Staff invitations (#460) hold only an address until accepted.
+    const staffInvitationsQuery = user.email
+      ? prisma.staffInvitation.findMany({
+          where: { invitedEmail: emailEquals(user.email) },
+          select: STAFF_INVITATION_EXPORT_SELECT,
+        })
+      : Promise.resolve([]);
 
     const [
       teamMembers,
@@ -590,6 +598,8 @@ export class AccountService {
       sentInvitations,
       guardianInvitations,
       sentGuardianInvitations,
+      staffInvitations,
+      sentStaffInvitations,
       gameRsvps,
       gameEvents,
       playerStats,
@@ -611,6 +621,8 @@ export class AccountService {
         select: GUARDIAN_INVITATION_EXPORT_SELECT,
       }),
       prisma.guardianInvitation.findMany({ where: { invitedById: userId }, select: SENT_GUARDIAN_INVITATION_SELECT }),
+      staffInvitationsQuery,
+      prisma.staffInvitation.findMany({ where: { invitedById: userId }, select: SENT_STAFF_INVITATION_SELECT }),
       prisma.gameRsvp.findMany({ where: { userId } }),
       prisma.gameEvent.findMany({ where: { playerId: userId }, orderBy: { createdAt: 'asc' } }),
       prisma.playerStats.findMany({ where: { playerId: userId } }),
@@ -634,6 +646,8 @@ export class AccountService {
       sentInvitations,
       guardianInvitations,
       sentGuardianInvitations,
+      staffInvitations,
+      sentStaffInvitations,
       gameRsvps,
       gameEvents,
       playerStats,
@@ -1050,7 +1064,7 @@ async function resolveManagingCoach(
 
 /** Invitations that were really sent; a cancelled one is a stray, not a sign of a coach. */
 const SENT_FOR_REAL = { where: { status: { not: 'CANCELLED' } } } satisfies {
-  where: Prisma.TeamInvitationWhereInput & Prisma.GuardianInvitationWhereInput;
+  where: Prisma.TeamInvitationWhereInput & Prisma.GuardianInvitationWhereInput & Prisma.StaffInvitationWhereInput;
 };
 
 /** Every adult signal in one read, taken under the player's FOR UPDATE lock. */
@@ -1064,6 +1078,7 @@ const ADULT_SIGNALS_SELECT = {
       announcements: true,
       sentInvitations: SENT_FOR_REAL,
       sentGuardianInvitations: SENT_FOR_REAL,
+      sentStaffInvitations: SENT_FOR_REAL,
     },
   },
   leagueAdmins: { select: { leagueId: true } },
@@ -1289,16 +1304,27 @@ async function purgeLoginBindings(tx: Prisma.TransactionClient, userId: string):
 
 /**
  * D17, shared by account deletion and the un-claim: the address must not
- * survive on any guardian invitation, whatever its status or child.
+ * survive on any guardian or staff invitation, whatever its status.
  * Per-row sentinel keeps NOT NULL and cannot collide; the partial unique
- * index covers PENDING rows only, and the caller expired those first.
- * Overwriting `invitedEmail` on an ACCEPTED row leaves the `Guardian` link it
- * created untouched.
+ * indexes cover PENDING rows only, and the caller expired the guardian ones
+ * first. PENDING staff invitations (#460) are expired here, before the scrub,
+ * so their emailed link can no longer create an account for the sentinel.
+ * Overwriting `invitedEmail` on an ACCEPTED row leaves the `Guardian` link or
+ * `TeamStaff` row it created untouched; a staff row's `recipientHash` is
+ * cleared too, as team invitations' is.
  */
 async function scrubInvitedEmail(tx: Prisma.TransactionClient, email: string): Promise<void> {
   await tx.$executeRaw`
     UPDATE "GuardianInvitation"
     SET "invitedEmail" = 'deleted-' || "id" || '@invalid'
+    WHERE lower("invitedEmail") = lower(${email})`;
+  await tx.$executeRaw`
+    UPDATE "StaffInvitation"
+    SET "status" = 'EXPIRED'
+    WHERE lower("invitedEmail") = lower(${email}) AND "status" = 'PENDING'`;
+  await tx.$executeRaw`
+    UPDATE "StaffInvitation"
+    SET "invitedEmail" = 'deleted-' || "id" || '@invalid', "recipientHash" = ''
     WHERE lower("invitedEmail") = lower(${email})`;
 }
 
@@ -1374,6 +1400,26 @@ const SENT_GUARDIAN_INVITATION_SELECT = {
   createdAt: true,
 } satisfies Prisma.GuardianInvitationSelect;
 
+const STAFF_INVITATION_EXPORT_SELECT = {
+  id: true,
+  teamId: true,
+  invitedEmail: true,
+  roleType: true,
+  status: true,
+  expiresAt: true,
+  createdAt: true,
+  acceptedAt: true,
+  rejectedAt: true,
+} satisfies Prisma.StaffInvitationSelect;
+
+const SENT_STAFF_INVITATION_SELECT = {
+  id: true,
+  teamId: true,
+  roleType: true,
+  status: true,
+  createdAt: true,
+} satisfies Prisma.StaffInvitationSelect;
+
 /** The other side of a guardian link, in the shared user shape (#813). */
 const GUARDIAN_CHILD_EXPORT_INCLUDE = { child: { select: USER_SUMMARY_SELECT } } satisfies Prisma.GuardianInclude;
 const GUARDIAN_PARENT_EXPORT_INCLUDE = { parent: { select: USER_SUMMARY_SELECT } } satisfies Prisma.GuardianInclude;
@@ -1392,6 +1438,9 @@ export interface UserDataExport {
   sentInvitations: Prisma.TeamInvitationGetPayload<{ select: typeof SENT_INVITATION_SELECT }>[];
   guardianInvitations: Prisma.GuardianInvitationGetPayload<{ select: typeof GUARDIAN_INVITATION_EXPORT_SELECT }>[];
   sentGuardianInvitations: Prisma.GuardianInvitationGetPayload<{ select: typeof SENT_GUARDIAN_INVITATION_SELECT }>[];
+  /** Staff invitations sent to the account's address (#460). */
+  staffInvitations: Prisma.StaffInvitationGetPayload<{ select: typeof STAFF_INVITATION_EXPORT_SELECT }>[];
+  sentStaffInvitations: Prisma.StaffInvitationGetPayload<{ select: typeof SENT_STAFF_INVITATION_SELECT }>[];
   gameRsvps: Prisma.GameRsvpGetPayload<Record<string, never>>[];
   gameEvents: Prisma.GameEventGetPayload<Record<string, never>>[];
   playerStats: Prisma.PlayerStatsGetPayload<Record<string, never>>[];

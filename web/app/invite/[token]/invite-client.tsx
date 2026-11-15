@@ -4,7 +4,11 @@ import { useState } from 'react';
 import { childDisplayName, inviterDisplayName } from '../../../lib/display-name';
 import { acceptInvitation } from '../../../lib/invitation-accept';
 import { formatExpiry } from '../../../lib/format-date';
-import type { GuardianInvitationDetails, InvitationDetails } from '../../../lib/invitation-types';
+import type {
+  GuardianInvitationDetails,
+  InvitationDetails,
+  StaffInvitationDetails,
+} from '../../../lib/invitation-types';
 import { APP_STORE_RELEASED, openInApp } from '../../../lib/open-in-app';
 import { AppStoreLink } from '../../store-links';
 
@@ -20,6 +24,13 @@ function isExpired(expiresAt: string): boolean {
   return new Date(expiresAt) < new Date();
 }
 
+/** Unknown role types (a newer API) fall back to a neutral label. */
+const STAFF_ROLE_LABEL: Record<StaffInvitationDetails['roleType'], string> = {
+  HEAD_COACH: 'Head Coach',
+  ASSISTANT_COACH: 'Assistant Coach',
+  TEAM_MANAGER: 'Team Manager',
+};
+
 const RELATIONSHIP_LABEL: Record<GuardianInvitationDetails['relationship'], string> = {
   MOTHER: 'mother',
   FATHER: 'father',
@@ -34,7 +45,9 @@ export function InviteClient({ invitation, token }: Props) {
   const expired = isExpired(invitation.expiresAt);
   const isPending = invitation.status === 'PENDING' && !expired;
   const guardian = invitation.kind === 'guardian' ? invitation : null;
-  const teamInvite = invitation.kind === 'guardian' ? null : invitation;
+  const staff = invitation.kind === 'staff' ? invitation : null;
+  const teamInvite = invitation.kind === 'guardian' || invitation.kind === 'staff' ? null : invitation;
+  const staffRole = staff ? (STAFF_ROLE_LABEL[staff.roleType] ?? 'staff member') : '';
   // Tombstoned child: label from deletedAt, never from the stored name (#894).
   const childLabel = guardian ? childDisplayName(guardian) : '';
   const childRole = guardian ? `${childLabel}'s ${RELATIONSHIP_LABEL[guardian.relationship]}` : '';
@@ -69,8 +82,12 @@ export function InviteClient({ invitation, token }: Props) {
           <p className="success-state">
             {guardian
               ? `You are now ${childRole}!`
-              : `You've joined ${invitation.teamName}!`}
+              : staff
+                ? `You've joined ${staff.teamName} as ${staffRole}!`
+                : `You've joined ${invitation.teamName}!`}
           </p>
+          {/* A staff invite may have created the account: it is claimed by signing in with the invited address. */}
+          {staff && <p>Sign in to the app with the email address this invitation was sent to.</p>}
           {/* No "download the app" before the release: there is nothing to download yet. */}
           {APP_STORE_RELEASED && (
             <p>
@@ -158,7 +175,9 @@ export function InviteClient({ invitation, token }: Props) {
         <h1>
           {guardian
             ? `You're invited to be ${childRole}`
-            : "You're invited to join a team!"}
+            : staff
+              ? `You're invited to join a team as ${staffRole}`
+              : "You're invited to join a team!"}
         </h1>
 
         <div className="invite-meta">
@@ -183,6 +202,12 @@ export function InviteClient({ invitation, token }: Props) {
             <div className="invite-meta-row">
               <span className="meta-label">Team</span>
               <span className="meta-value">{invitation.teamName}</span>
+            </div>
+          )}
+          {staff && (
+            <div className="invite-meta-row">
+              <span className="meta-label">Role</span>
+              <span className="meta-value">{staffRole}</span>
             </div>
           )}
           <div className="invite-meta-row">

@@ -84,7 +84,7 @@ Removing the last guardian never deletes the child.
   first, two concurrent resends, another club's resend and listing, the rollover resend, a lapsed row on
   another team, the partial-index collision answering 400).
 - **Accept.** The public routes are polymorphic: `GET /invitations/by-token/:token` returns
-  `invitation.kind: 'team' | 'guardian'` (guardian view: `childName`, `childDeletedAt`, `teamName`,
+  `invitation.kind: 'team' | 'guardian' | 'staff'` (staff: #460, `roster-and-invitations.md`; guardian view: `childName`, `childDeletedAt`, `teamName`,
   `inviterName`, `inviterDeletedAt`, `relationship`, `status`, `expiresAt`; the two `…DeletedAt` fields are
   ISO strings or `null`, the tombstone signals for the names, #813, and the `guardianInvitations` items on
   `GET /invitations` have the same shape) and `POST /invitations/by-token/:token/accept` returns

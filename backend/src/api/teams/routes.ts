@@ -17,12 +17,14 @@ import {
   announcementQuerySchema,
   addStaffSchema,
   updateStaffRoleSchema,
+  inviteStaffSchema,
 } from './schemas';
 import { BadRequestError } from '../../utils/errors';
 import { invalidateUsage } from '../../services/usage-service';
 import { createInvitationSchema, inviteGuardianSchema } from '../invitations/schemas';
 import { InvitationService } from '../../services/invitation-service';
 import { GuardianService } from '../../services/guardian-service';
+import { StaffInvitationService } from '../../services/staff-invitation-service';
 import { omitToken } from '../invitations/serializers';
 import { AnnouncementService } from '../../services/announcement-service';
 import { validateUuidParams } from '../middleware/validate-params';
@@ -545,6 +547,74 @@ router.delete('/:teamId/staff/:userId', validateUuidParams('teamId', 'userId'), 
     respondWithError(res, error, { log: 'Error removing team staff', fallback: 'Failed to remove team staff' });
   }
 });
+
+/**
+ * POST /api/v1/teams/:teamId/staff-invitations
+ * Invite an address (with or without an account) to a staff role (#460).
+ * Same gate as POST /staff (head coach / league admin / system admin). No
+ * account is created until the invitee accepts. Body: { email, roleType,
+ * supersede? }. 201 { invitation, emailSent }; never the token.
+ */
+router.post('/:teamId/staff-invitations', inviteRateLimit, validateUuidParams('teamId'), async (req, res) => {
+  try {
+    const validationResult = inviteStaffSchema.safeParse(req.body);
+    if (!validationResult.success) {
+      throw new BadRequestError(
+        validationResult.error.issues.map((e: { message: string }) => e.message).join(', ')
+      );
+    }
+
+    const { emailSent, ...invitation } = await StaffInvitationService.inviteStaff(
+      req.params.teamId as string,
+      validationResult.data,
+      req.user!.id
+    );
+
+    // emailSent: false = the invitation exists but the email failed; the
+    // client warns the coach (never silent).
+    res.status(201).json({ success: true, invitation: omitToken(invitation), emailSent });
+  } catch (error) {
+    respondWithError(res, error, { log: 'Error inviting team staff', fallback: 'Failed to invite team staff' });
+  }
+});
+
+/**
+ * GET /api/v1/teams/:teamId/staff-invitations
+ * Pending, unexpired staff invitations of the team. Callers who may manage
+ * staff only (403 otherwise): the invited addresses are not staff emails yet.
+ */
+router.get('/:teamId/staff-invitations', validateUuidParams('teamId'), async (req, res) => {
+  try {
+    const invitations = await StaffInvitationService.listPendingForTeam(
+      req.params.teamId as string,
+      req.user!.id
+    );
+    res.json({ success: true, invitations: invitations.map(omitToken) });
+  } catch (error) {
+    respondWithError(res, error, { log: 'Error listing staff invitations', fallback: 'Failed to list staff invitations' });
+  }
+});
+
+/**
+ * DELETE /api/v1/teams/:teamId/staff-invitations/:invitationId
+ * Cancel a pending staff invitation (same gate as inviting). The link dies.
+ */
+router.delete(
+  '/:teamId/staff-invitations/:invitationId',
+  validateUuidParams('teamId', 'invitationId'),
+  async (req, res) => {
+    try {
+      const invitation = await StaffInvitationService.cancelInvitation(
+        req.params.teamId as string,
+        req.params.invitationId as string,
+        req.user!.id
+      );
+      res.json({ success: true, invitation: omitToken(invitation), message: 'Invitation cancelled.' });
+    } catch (error) {
+      respondWithError(res, error, { log: 'Error cancelling staff invitation', fallback: 'Failed to cancel staff invitation' });
+    }
+  }
+);
 
 // ============================================
 // Announcement Routes

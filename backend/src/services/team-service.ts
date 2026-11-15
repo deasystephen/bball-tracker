@@ -62,7 +62,7 @@ const TEAM_SUMMARY_SELECT = {
   name: true,
 } satisfies Prisma.TeamSelect;
 
-const TEAM_STAFF_INCLUDE = {
+export const TEAM_STAFF_INCLUDE = {
   user: { select: USER_SUMMARY_WITH_EMAIL_SELECT },
   role: true,
 } satisfies Prisma.TeamStaffInclude;
@@ -1441,7 +1441,7 @@ export class TeamService {
   }
 
   /** Find the team's default role row for a role type (e.g. HEAD_COACH). */
-  private static async findRoleByType(
+  static async findRoleByType(
     teamId: string,
     roleType: StaffRoleType,
     db: Prisma.TransactionClient = prisma
