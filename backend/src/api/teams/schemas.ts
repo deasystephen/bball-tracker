@@ -225,7 +225,8 @@ export type AddPlayerInput = z.infer<typeof addPlayerSchema>;
 export type UpdateTeamMemberInput = z.infer<typeof updateTeamMemberSchema>;
 export type StaffRoleType = z.infer<typeof staffRoleTypeSchema>;
 export type AddStaffInput = z.infer<typeof addStaffSchema>;
-export type InviteStaffInput = z.infer<typeof inviteStaffSchema>;
+// Input shape (supersede optional) so service callers, tests included, can omit it.
+export type InviteStaffInput = z.input<typeof inviteStaffSchema>;
 export type UpdateStaffRoleInput = z.infer<typeof updateStaffRoleSchema>;
 export type CreateRoleInput = z.infer<typeof createRoleSchema>;
 export type TeamQueryParams = z.infer<typeof teamQuerySchema>;

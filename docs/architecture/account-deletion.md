@@ -70,7 +70,8 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
        invitation that carries it, any status, any child (`scrubInvitedEmail`, D17, shared with
        `deleteAccount`), after every PENDING one is expired; the same function expires every
        PENDING staff invitation to the address and scrubs `invitedEmail` and `recipientHash` on
-       every staff invitation that carries it (#460). Every expired one is returned with
+       every staff invitation that carries it (#460). `deleteAccount` also cancels the PENDING staff
+       invitations the user sent. Every expired one is returned with
        its `childId` as `expiredGuardianInvitations`, so the operator can contact each child's
        coach.
      - **Reset:** `isManaged` true, `managedById` the coach, role `PLAYER`, free tier.

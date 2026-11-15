@@ -41,6 +41,7 @@ const RELATIONSHIP_LABEL: Record<GuardianInvitationDetails['relationship'], stri
 export function InviteClient({ invitation, token }: Props) {
   const [acceptState, setAcceptState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState('');
+  const [alreadyStaff, setAlreadyStaff] = useState(false);
 
   const expired = isExpired(invitation.expiresAt);
   const isPending = invitation.status === 'PENDING' && !expired;
@@ -71,6 +72,7 @@ export function InviteClient({ invitation, token }: Props) {
       setAcceptState('error');
       return;
     }
+    setAlreadyStaff(result.alreadyStaff);
     setAcceptState('done');
   }
 
@@ -83,7 +85,9 @@ export function InviteClient({ invitation, token }: Props) {
             {guardian
               ? `You are now ${childRole}!`
               : staff
-                ? `You've joined ${staff.teamName} as ${staffRole}!`
+                ? alreadyStaff
+                  ? `You're already on ${staff.teamName}'s staff. Your role was not changed.`
+                  : `You've joined ${staff.teamName} as ${staffRole}!`
                 : `You've joined ${invitation.teamName}!`}
           </p>
           {/* A staff invite may have created the account: it is claimed by signing in with the invited address. */}

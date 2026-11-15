@@ -48,7 +48,7 @@ import { publicAppUrl } from '../utils/urls';
 import { mailer } from './mailer';
 import { staffInvitationTemplate } from './mailer/templates';
 import { TEAM_STAFF_INCLUDE, TeamService, type TeamStaffWithRelations } from './team-service';
-import type { StaffRoleType } from '../api/teams/schemas';
+import type { InviteStaffInput, StaffRoleType } from '../api/teams/schemas';
 
 const STAFF_INVITE_EXPIRES_DAYS = 7;
 
@@ -101,17 +101,9 @@ export type StaffInvitationSummary = Prisma.StaffInvitationGetPayload<{
 export type StaffInvitationListItem = Prisma.StaffInvitationGetPayload<{
   select: typeof STAFF_INVITATION_LIST_SELECT;
 }>;
-type PublicStaffInvitationRow = Prisma.StaffInvitationGetPayload<{
+type PublicStaffInvitationSummary = Prisma.StaffInvitationGetPayload<{
   select: typeof PUBLIC_STAFF_INVITATION_SELECT;
 }>;
-type StaffInvitationRow = StaffInvitationSummary;
-
-export interface InviteStaffInput {
-  email: string;
-  roleType: StaffRoleType;
-  /** Resend: expire the live PENDING row for this team + address and create a fresh one (new token). */
-  supersede?: boolean;
-}
 
 /** Limited view of a staff invitation: the public token lookup and the invitee's own list. */
 export interface PublicStaffInvitation {
@@ -138,7 +130,7 @@ export interface AcceptStaffInvitationResult {
   alreadyStaff: boolean;
 }
 
-function toPublic(row: PublicStaffInvitationRow): PublicStaffInvitation {
+function toPublic(row: PublicStaffInvitationSummary): PublicStaffInvitation {
   return {
     kind: 'staff',
     id: row.id,
@@ -340,15 +332,21 @@ export class StaffInvitationService {
     invitationId: string,
     userId: string
   ): Promise<StaffInvitationSummary> {
+    // Team 404, then the 403 gate, then the invitation: a caller who may not
+    // manage the team's staff learns nothing about which ids exist on it.
+    const team = await prisma.team.findUnique({ where: { id: teamId }, select: { id: true } });
+    if (!team) {
+      throw new NotFoundError('Team not found');
+    }
+    if (!(await canManageStaff(userId, teamId))) {
+      throw new ForbiddenError('You do not have permission to manage team staff');
+    }
     const invitation = await prisma.staffInvitation.findFirst({
       where: { id: invitationId, teamId },
       select: { id: true, status: true },
     });
     if (!invitation) {
       throw new NotFoundError('Invitation not found');
-    }
-    if (!(await canManageStaff(userId, teamId))) {
-      throw new ForbiddenError('You do not have permission to manage team staff');
     }
     if (invitation.status !== 'PENDING') {
       throw new BadRequestError(`Cannot cancel invitation with status: ${invitation.status}`);
@@ -369,17 +367,17 @@ export class StaffInvitationService {
   }
 
   /**
-   * Pending, unexpired staff invitations addressed to the signed-in account
-   * (matched on its email with `emailEquals`). Rides on `GET /invitations` as
-   * `staffInvitations`. Never includes the token.
+   * Pending, unexpired staff invitations addressed to the signed-in account,
+   * matched on its email (`req.user.email`, read by `authenticate`) with
+   * `emailEquals`. Rides on `GET /invitations` as `staffInvitations`. Never
+   * includes the token.
    */
-  static async listPendingForUser(userId: string): Promise<PublicStaffInvitation[]> {
-    const user = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
-    if (!user?.email) {
+  static async listPendingForEmail(email: string | null | undefined): Promise<PublicStaffInvitation[]> {
+    if (!email) {
       return [];
     }
     const rows = await prisma.staffInvitation.findMany({
-      where: { invitedEmail: emailEquals(user.email), status: 'PENDING', expiresAt: { gt: new Date() } },
+      where: { invitedEmail: emailEquals(email), status: 'PENDING', expiresAt: { gt: new Date() } },
       select: PUBLIC_STAFF_INVITATION_SELECT,
       orderBy: { createdAt: 'desc' },
     });
@@ -421,10 +419,11 @@ export class StaffInvitationService {
    *
    * A row whose address was stripped (declined, or scrubbed by account
    * deletion) is no longer PENDING and carries no address to compare: nobody
-   * can act on it, so it is returned and the status check answers 400 rather
-   * than telling the invitee's own retry "not sent to you".
+   * can act on it, so it reads as no staff invitation at all (the route's
+   * fall-through then answers 404). The invitee's own retry is not told "not
+   * sent to you", and no other caller learns the id exists.
    */
-  static async findInvitationForUser(invitationId: string, userId: string): Promise<StaffInvitationRow | null> {
+  static async findInvitationForUser(invitationId: string, userId: string): Promise<StaffInvitationSummary | null> {
     const invitation = await prisma.staffInvitation.findUnique({
       where: { id: invitationId },
       select: STAFF_INVITATION_SELECT,
@@ -433,7 +432,7 @@ export class StaffInvitationService {
       return null;
     }
     if (invitation.status !== 'PENDING' && invitation.invitedEmail === strippedStaffInvitationEmail(invitation.id)) {
-      return invitation;
+      return null;
     }
     const caller = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
     if (!isSameEmail(caller?.email, invitation.invitedEmail)) {
@@ -450,7 +449,7 @@ export class StaffInvitationService {
   static async acceptInvitation(
     invitationId: string,
     userId: string,
-    found?: StaffInvitationRow
+    found?: StaffInvitationSummary
   ): Promise<AcceptStaffInvitationResult> {
     const invitation = found ?? (await this.requireInvitedUser(invitationId, userId));
     return this.accept(invitation, userId);
@@ -465,7 +464,7 @@ export class StaffInvitationService {
   static async rejectInvitation(
     invitationId: string,
     userId: string,
-    found?: StaffInvitationRow
+    found?: StaffInvitationSummary
   ): Promise<StaffInvitationSummary> {
     const invitation = found ?? (await this.requireInvitedUser(invitationId, userId));
     if (invitation.status !== 'PENDING') {
@@ -490,7 +489,7 @@ export class StaffInvitationService {
     return rejected;
   }
 
-  private static async requireInvitedUser(invitationId: string, userId: string): Promise<StaffInvitationRow> {
+  private static async requireInvitedUser(invitationId: string, userId: string): Promise<StaffInvitationSummary> {
     const invitation = await this.findInvitationForUser(invitationId, userId);
     if (!invitation) {
       throw new NotFoundError('Invitation not found');
@@ -522,7 +521,7 @@ export class StaffInvitationService {
    */
   private static async resolveAcceptingUser(
     tx: Prisma.TransactionClient,
-    invitation: Pick<StaffInvitationRow, 'invitedEmail' | 'roleType'>,
+    invitation: Pick<StaffInvitationSummary, 'invitedEmail' | 'roleType'>,
     verifiedUserId: string | undefined
   ): Promise<{ id: string; created: boolean }> {
     if (verifiedUserId) {
@@ -576,7 +575,7 @@ export class StaffInvitationService {
    *    never demote the last head coach).
    */
   private static async accept(
-    invitation: StaffInvitationRow,
+    invitation: StaffInvitationSummary,
     verifiedUserId?: string
   ): Promise<AcceptStaffInvitationResult> {
     if (invitation.status === 'ACCEPTED') {
@@ -606,7 +605,8 @@ export class StaffInvitationService {
           if (!(await lockTeamRow(tx, invitation.teamId))) {
             throw new NotFoundError('Team not found');
           }
-          if (!(await canManageStaff(invitation.invitedById, invitation.teamId, tx))) {
+          const inviterLive = await tx.user.count({ where: { id: invitation.invitedById, deletedAt: null } });
+          if (inviterLive === 0 || !(await canManageStaff(invitation.invitedById, invitation.teamId, tx))) {
             throw new BadRequestError(INVITER_LOST_RIGHT);
           }
 
@@ -644,7 +644,8 @@ export class StaffInvitationService {
           };
         }),
       ALREADY_STAFF,
-      'TeamStaff_teamId_userId_key'
+      // As addStaffMember: the retired three-column name too, for a database still carrying it.
+      { anyOf: ['TeamStaff_teamId_userId_key', 'TeamStaff_teamId_userId_roleId_key'] }
     );
 
     // After COMMIT: a rolled-back accept must not log a role that never landed.

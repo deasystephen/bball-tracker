@@ -182,7 +182,9 @@ router.post('/by-token/:token/accept', inviteAcceptRateLimit, async (req, res) =
         return {
           kind: 'staff' as const,
           invitation: omitToken(accepted.invitation),
-          staff: accepted.staff,
+          // Only what the page shows: an unauthenticated caller never gets the
+          // account's id, name or email (the authenticated accept returns the row).
+          staff: { teamId: accepted.staff.teamId, roleType: accepted.staff.role.type },
           alreadyStaff: accepted.alreadyStaff,
           message: 'Invitation accepted. You have been added to the team staff.',
         };

@@ -172,6 +172,8 @@ describe('staff invitations (#460) through the real StaffInvitationService', () 
     // lockTeamRow / lockUsers: every row asked for exists and is live.
     mockPrisma.$queryRaw.mockImplementation(async () => [{ id: 'locked', deletedAt: null }]);
     mockPrisma.$executeRaw.mockResolvedValue(0);
+    // The inviter's row is live unless a test says otherwise.
+    mockPrisma.user.count.mockResolvedValue(1);
     sendSpy = jest.spyOn(mailer, 'send').mockResolvedValue({ messageId: 'm-1' });
   });
 
@@ -442,6 +444,14 @@ describe('staff invitations (#460) through the real StaffInvitationService', () 
       expect(mockPrisma.staffInvitation.update).not.toHaveBeenCalled();
     });
 
+    it('a non-manager gets 403 whether or not the invitation id exists on the team', async () => {
+      mockCaller = { id: ASSISTANT_ID, email: 'assistant@example.com' };
+      givenTeam({ callerIsHeadCoach: false });
+      const res = await request(app).delete(`/api/v1/teams/${TEAM_ID}/staff-invitations/${INVITATION_ID}`);
+      expect(res.status).toBe(403);
+      expect(mockPrisma.staffInvitation.findFirst).not.toHaveBeenCalled();
+    });
+
     it('answers 400 when a concurrent accept wins the cancel (P2025 on the guarded update)', async () => {
       givenTeam();
       mockPrisma.staffInvitation.findFirst.mockResolvedValue({ id: INVITATION_ID, status: 'PENDING' });
@@ -642,7 +652,7 @@ describe('staff invitations (#460) through the real StaffInvitationService', () 
       expectNoSecret(res.body);
     });
 
-    it('a retry after the invitee declined (address stripped) answers 400, not a misleading 403', async () => {
+    it('a declined (address-stripped) row reads as no invitation: 404 for anyone, never a misleading 403', async () => {
       mockPrisma.staffInvitation.findUnique.mockImplementation(
         async ({ select }: { select: Record<string, unknown> }) =>
           applySelect(
@@ -652,8 +662,8 @@ describe('staff invitations (#460) through the real StaffInvitationService', () 
       );
       const reject = await request(app).post(`/api/v1/invitations/${INVITATION_ID}/reject`);
       const accept = await request(app).post(`/api/v1/invitations/${INVITATION_ID}/accept`);
-      expect(reject.status).toBe(400);
-      expect(accept.status).toBe(400);
+      expect(reject.status).toBe(404);
+      expect(accept.status).toBe(404);
       expect(mockPrisma.staffInvitation.update).not.toHaveBeenCalled();
     });
 
@@ -731,7 +741,9 @@ describe('staff invitations (#460) through the real StaffInvitationService', () 
       const res = await request(app).post(`/api/v1/invitations/by-token/${SECRET_TOKEN}/accept`);
 
       expect(res.status).toBe(200);
-      expect(res.body).toMatchObject({ kind: 'staff', alreadyStaff: false, staff: { userId: INVITEE_ID } });
+      // The unauthenticated answer names the team and role only, never the account.
+      expect(res.body).toMatchObject({ kind: 'staff', alreadyStaff: false });
+      expect(res.body.staff).toEqual({ teamId: TEAM_ID, roleType: 'ASSISTANT_COACH' });
       const inserts = userInserts();
       expect(inserts).toHaveLength(1);
       const sql = (inserts[0][0] as TemplateStringsArray).join('?');
@@ -774,7 +786,9 @@ describe('staff invitations (#460) through the real StaffInvitationService', () 
       const res = await request(app).post(`/api/v1/invitations/by-token/${SECRET_TOKEN}/accept`);
 
       expect(res.status).toBe(200);
-      expect(res.body.staff.userId).toBe(INVITEE_ID);
+      expect(mockPrisma.teamStaff.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ userId: INVITEE_ID }) })
+      );
       expect(userInserts()).toHaveLength(0);
     });
 
@@ -799,7 +813,9 @@ describe('staff invitations (#460) through the real StaffInvitationService', () 
 
       const res = await request(app).post(`/api/v1/invitations/by-token/${SECRET_TOKEN}/accept`);
       expect(res.status).toBe(200);
-      expect(res.body.staff.userId).toBe(INVITEE_ID);
+      expect(mockPrisma.teamStaff.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ userId: INVITEE_ID }) })
+      );
 
       mockPrisma.user.findFirst
         .mockResolvedValueOnce(null)
@@ -827,6 +843,18 @@ describe('staff invitations (#460) through the real StaffInvitationService', () 
       );
       expect(mockPrisma.staffInvitation.updateMany).not.toHaveBeenCalled();
       expect(mockPrisma.teamStaff.create).not.toHaveBeenCalled();
+    });
+
+    it('refuses 400 when the inviter account was deleted, even a deleted system ADMIN', async () => {
+      givenAcceptable();
+      mockPrisma.user.findFirst.mockResolvedValue({ id: INVITEE_ID, workosUserId: 'wk-new', isManaged: false });
+      mockPrisma.user.count.mockResolvedValue(0);
+
+      const res = await request(app).post(`/api/v1/invitations/by-token/${SECRET_TOKEN}/accept`);
+
+      expect(res.status).toBe(400);
+      expect(mockPrisma.user.count).toHaveBeenCalledWith({ where: { id: HEAD_COACH_ID, deletedAt: null } });
+      expect(mockPrisma.staffInvitation.updateMany).not.toHaveBeenCalled();
     });
 
     it('maps a P2002 on the staff unique (a concurrent direct add) to 400, never 500', async () => {

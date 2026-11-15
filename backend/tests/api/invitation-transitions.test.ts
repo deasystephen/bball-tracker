@@ -156,7 +156,7 @@ describe('invitation transitions through the real InvitationService (#766)', () 
     expectNoToken(res.body);
     expectGuardedTransition('REJECTED');
     expect(mockPrisma.user.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: PLAYER_ID, workosUserId: null, deletedAt: null } })
+      expect.objectContaining({ where: { id: PLAYER_ID, workosUserId: null, deletedAt: null, teamStaff: { none: {} } } })
     );
     expect(mockPrisma.teamMember.upsert).not.toHaveBeenCalled();
   });

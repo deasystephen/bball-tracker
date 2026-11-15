@@ -22,7 +22,9 @@ eng-review amendments recorded there).
     row, `workosUserId` null; `managedById` set only if null, name/role never touched): managed
     `User` (`isManaged: true`, `managedById` = coach — deliberate authz statement, B2.10 edit
     rights until claim) + `TeamMember` + `TeamInvitation` in one transaction, "added" email copy.
-    **The player is on the roster immediately**; accept only activates their login. On a reused
+    **The player is on the roster immediately**; accept only activates their login. A row that
+    holds a staff role (an accepted staff invitation not yet signed in, #460) is never reused this
+    way: it goes to case 3. On a reused
     row a supplied `profilePictureUrl` is written only when the row has none (a second
     `updateMany` guarded on `profilePictureUrl: null` inside the transaction, so a race cannot
     overwrite); when the row keeps its own photo the upload is discarded after commit with
@@ -236,18 +238,21 @@ for every address match and the address stored trimmed and lower-cased; the shar
   `invitedEmail` and `invitedBy { id, name, deletedAt }`) to `canManageStaff` callers only (403
   otherwise: an invitee's address is not a staff email until they accept).
   **`DELETE /teams/:teamId/staff-invitations/:invitationId`** cancels (same gate; 404 for another
-  team's id; a status-guarded update, so a cancel that loses to an accept is a 400). Cancel keeps
-  the address, like the player flow.
+  team's id, checked after the 403 so a non-manager learns nothing about ids; a status-guarded
+  update, so a cancel that loses to an accept is a 400). Cancel keeps the address, like the player
+  flow.
 - **Accept, three paths.** `GET /invitations` (no `teamId`/`playerId`, status unset or PENDING)
   carries `staffInvitations` for the caller: pending, unexpired rows whose address `emailEquals` the
   account's, as `{ kind: 'staff', id, status, teamName, roleType, inviterName, inviterDeletedAt,
   expiresAt }` (no token, no address). `POST /invitations/:id/accept|reject` try the id as a
   guardian invitation, then a staff invitation (the caller's email must match `invitedEmail`, 403
-  otherwise; a declined or scrubbed row has no address to match and answers its status 400 instead),
-  then a team invitation. The public `GET /invitations/by-token/:token` falls through
+  otherwise; a declined or scrubbed row has no address to match and reads as no staff invitation,
+  so the fall-through answers 404), then a team invitation. The public `GET /invitations/by-token/:token` falls through
   team → guardian → staff and returns the same `kind: 'staff'` view; `POST …/by-token/:token/accept`
-  accepts it. Accept answers `{ kind: 'staff', invitation, staff, alreadyStaff }` and invalidates the
-  account's usage cache.
+  accepts it. Accept answers `{ kind: 'staff', invitation, staff, alreadyStaff }` (the by-token
+  answer trims `staff` to `{ teamId, roleType }`: an unauthenticated caller never gets the account's
+  id, name or email) and invalidates the account's usage cache. With `alreadyStaff` the web page and
+  the app say the role was not changed.
   - **Which account:** the verified caller on the authenticated path (never a second lookup by
     address); by token, the live account holding the address (`emailEquals`), else a new one,
     created **inside the accept transaction** with a native `INSERT … ON CONFLICT ("email") DO
@@ -259,8 +264,9 @@ for every address match and the address stored trimmed and lower-cased; the shar
     with the address (which claims the row) and accepts in the app.
   - **The transaction** locks the account's `User` row, then the `Team` row (account deletion's
     order: user first, teams after), so a tombstone never gets a staff row (404) and the accept
-    serialises with staff removal and re-role; **re-checks that the inviter may still manage the
-    team's staff** (`canManageStaff(invitedById)` behind the lock; 400 otherwise), so a head coach
+    serialises with staff removal and re-role; **re-checks that the inviter is a live account that may
+    still manage the team's staff** (`deletedAt` null and `canManageStaff(invitedById)` behind the
+    lock; 400 otherwise; `isSystemAdmin` alone would pass a deleted ADMIN's tombstone), so a head coach
     who is removed, demoted or deleted after sending cannot come back through an invitation sent to
     an address they control, and a club that changes head coach re-sends; flips PENDING → ACCEPTED
     guarded on the status (the loser of a race gets 400); and creates the `TeamStaff` row with the
@@ -273,9 +279,16 @@ for every address match and the address stored trimmed and lower-cased; the shar
   decline sets `invitedEmail` to the per-row sentinel `deleted-<id>@invalid` in the same guarded
   update; `recipientHash` stays, so the cooldown still applies to a re-invite. Cancel and expiry
   keep the address. With no `User` row created at invite time there is nothing else to strip.
+- **An accepted-but-unclaimed staff account stays unmanaged.** Add Player's case 2 never adopts a
+  row that holds a `TeamStaff` row (`teamStaff: { none: {} }` on its claim-guarded `updateMany`):
+  it re-branches to case 3 like a claimed account, because a managing coach could otherwise rewrite
+  the row's email (B2.10) and claim the staff role. For the same reason a player-invitation
+  rejection never strips the address of a row that holds a staff role (`stripUnclaimedEmail`).
+  Proven in `tests/integration/staff-invitation.db.test.ts`.
 - **Account deletion and the under-13 un-claim** expire every PENDING staff invitation to the
   address and scrub `invitedEmail` (sentinel) and `recipientHash` on every one, in
-  `account-service.ts#scrubInvitedEmail` (D17, with the guardian invitations). The data-subject
+  `account-service.ts#scrubInvitedEmail` (D17, with the guardian invitations). Deleting an account
+  also cancels the PENDING staff invitations it sent. The data-subject
   export carries `staffInvitations` (sent to the address) and `sentStaffInvitations`; sent staff
   invitations that are not CANCELLED are an adult signal.
 - **App builds that predate staff invitations** never list one (`staffInvitations` is a key they

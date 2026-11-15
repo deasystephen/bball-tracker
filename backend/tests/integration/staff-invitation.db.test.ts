@@ -19,6 +19,7 @@ jest.unmock('../../src/models');
 import prisma from '../../src/models';
 import { StaffInvitationService } from '../../src/services/staff-invitation-service';
 import { AccountService } from '../../src/services/account-service';
+import { InvitationService } from '../../src/services/invitation-service';
 import { BadRequestError, SignInRequiredError } from '../../src/utils/errors';
 import { DbFixtures, type Org } from '../support/db-fixtures';
 
@@ -150,7 +151,16 @@ describe('StaffInvitationService (real Postgres, #460)', () => {
 
     const invitation = await StaffInvitationService.inviteStaff(org.teamId, { email, roleType: 'ASSISTANT_COACH' }, headCoachId);
 
-    expect(await StaffInvitationService.listPendingForUser(lookalikeId)).toEqual([]);
+    // An invitation to the look-alike's own address must not be listed for the `_` address.
+    const lookalike = await prisma.user.findUniqueOrThrow({ where: { id: lookalikeId }, select: { email: true } });
+    const other = await StaffInvitationService.inviteStaff(
+      org.teamId,
+      { email: lookalike.email!, roleType: 'ASSISTANT_COACH' },
+      headCoachId
+    );
+    const listed = (await StaffInvitationService.listPendingForEmail(email)).map((row) => row.id);
+    expect(listed).toEqual([invitation.id]);
+    expect(listed).not.toContain(other.id);
     const result = await StaffInvitationService.acceptInvitationByToken(await tokenOf(invitation.id));
     expect(result.staff.userId).not.toBe(lookalikeId);
     expect(await prisma.teamStaff.count({ where: { teamId: org.teamId, userId: lookalikeId } })).toBe(0);
@@ -165,7 +175,7 @@ describe('StaffInvitationService (real Postgres, #460)', () => {
       headCoachId
     );
 
-    const pending = await StaffInvitationService.listPendingForUser(inviteeId);
+    const pending = await StaffInvitationService.listPendingForEmail(stored.email);
     expect(pending.map((row) => row.id)).toEqual([invitation.id]);
 
     const result = await StaffInvitationService.acceptInvitation(invitation.id, inviteeId);
@@ -220,6 +230,46 @@ describe('StaffInvitationService (real Postgres, #460)', () => {
     // The account create ran inside the refused transaction and rolled back with it.
     expect(await prisma.user.count({ where: { email } })).toBe(0);
     expect((await prisma.staffInvitation.findUniqueOrThrow({ where: { id: invitation.id } })).status).toBe('PENDING');
+  });
+
+  it('Add Player never adopts an accepted-but-unclaimed staff account as a managed record', async () => {
+    const email = address('staff-then-player');
+    const invitation = await StaffInvitationService.inviteStaff(org.teamId, { email, roleType: 'ASSISTANT_COACH' }, headCoachId);
+    const { staff } = await StaffInvitationService.acceptInvitationByToken(await tokenOf(invitation.id));
+
+    // Another club's coach adds the same address as a player.
+    const otherCoachId = await fx.user('other-coach', 'COACH');
+    const other = await fx.org('other-club');
+    await fx.staff(otherCoachId, other);
+    const result = await InvitationService.addRosterPlayer(other.teamId, { name: 'Staff Person', playerEmail: email }, otherCoachId);
+
+    // Case 3 (invitation only), as for a claimed account: the row stays unmanaged,
+    // so nobody gains B2.10 rights to rewrite its email and claim the staff role.
+    expect(result.rostered).toBe(false);
+    const row = await prisma.user.findUniqueOrThrow({ where: { id: staff.userId } });
+    expect(row).toMatchObject({ isManaged: false, managedById: null, email });
+
+    // And the invitee's rejection of that player invitation keeps the address.
+    await InvitationService.rejectInvitation(result.invitation!.id, staff.userId);
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: staff.userId } })).email).toBe(email);
+  });
+
+  it('deleting the sender cancels their PENDING staff invitations, and a deleted ADMIN\'s link is refused', async () => {
+    const adminId = await fx.user('admin-sender', 'ADMIN');
+    const email = address('admin-target');
+    const invitation = await StaffInvitationService.inviteStaff(org.teamId, { email, roleType: 'HEAD_COACH' }, adminId);
+    const token = await tokenOf(invitation.id);
+
+    await AccountService.deleteAccount(adminId, { actorId: adminId, mode: 'self' });
+
+    expect((await prisma.staffInvitation.findUniqueOrThrow({ where: { id: invitation.id } })).status).toBe('CANCELLED');
+    await expect(StaffInvitationService.acceptInvitationByToken(token)).rejects.toBeInstanceOf(BadRequestError);
+    // Even were the row still PENDING, the tombstoned inviter fails the re-check.
+    await prisma.staffInvitation.update({ where: { id: invitation.id }, data: { status: 'PENDING' } });
+    await expect(StaffInvitationService.acceptInvitationByToken(token)).rejects.toThrow(
+      'the coach who sent it can no longer manage'
+    );
+    expect(await prisma.user.count({ where: { email } })).toBe(0);
   });
 
   it('a team manager invitation creates a PLAYER account (the app asks the role step)', async () => {

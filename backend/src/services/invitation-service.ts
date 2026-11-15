@@ -971,8 +971,11 @@ export class InvitationService {
     if (otherLive > 0) {
       return;
     }
+    // A row holding a staff role (an accepted staff invitation, #460, not yet
+    // signed in) keeps its address: stripping it would strand that role, and
+    // the player rejection is about the roster, not the staff grant.
     await tx.user.updateMany({
-      where: { id: playerId, workosUserId: null, deletedAt: null },
+      where: { id: playerId, workosUserId: null, deletedAt: null, teamStaff: { none: {} } },
       data: { email: null, ...EMAIL_SUPPRESSION_CLEARED },
     });
   }
@@ -1320,8 +1323,12 @@ export class InvitationService {
         // (red-team RT4), and on deletedAt so a deletion committing in the
         // window is never rostered (#643). Zero rows: a tombstone (or a row
         // gone outright) is a 404; otherwise it was claimed, re-branch to case 3.
+        // A row that holds a staff role (an accepted staff invitation not yet
+        // signed in, #460) is never adopted as managed either: the managing
+        // coach could then rewrite its email (B2.10) and claim the staff role.
+        // It re-branches to case 3 like a claimed account.
         const { count } = await tx.user.updateMany({
-          where: { id: reuse.id, workosUserId: null, deletedAt: null },
+          where: { id: reuse.id, workosUserId: null, deletedAt: null, teamStaff: { none: {} } },
           data: {
             isManaged: true,
             ...(reuse.managedById ? {} : { managedById: userId }),

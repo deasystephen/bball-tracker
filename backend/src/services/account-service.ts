@@ -267,6 +267,12 @@ export class AccountService {
       if (row.email) {
         await scrubInvitedEmail(tx, row.email);
       }
+      // A staff grant the user sent dies with them (#460); accept re-checks the
+      // inviter too, this keeps the coach's pending list honest.
+      await tx.staffInvitation.updateMany({
+        where: { invitedById: userId, status: 'PENDING' },
+        data: { status: 'CANCELLED' },
+      });
 
       // D16: the personal league carries the coach's name.
       const personal = await tx.league.findUnique({

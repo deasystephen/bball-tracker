@@ -742,7 +742,7 @@ describe('InvitationService', () => {
       // otherwise syncUser would turn a later sign-up into silent membership.
       // The bounce/complaint state described the address being removed (#449).
       expect(txUserUpdateMany).toHaveBeenCalledWith({
-        where: { id: invitation.playerId, workosUserId: null, deletedAt: null },
+        where: { id: invitation.playerId, workosUserId: null, deletedAt: null, teamStaff: { none: {} } },
         data: { email: null, emailSuppressedAt: null, emailSuppressedReason: null },
       });
     });
@@ -1914,7 +1914,7 @@ describe('InvitationService', () => {
       // Guarded on workosUserId: null so a mid-window claim can never be
       // flipped back to managed (red-team RT4)
       expect(txUserUpdate).toHaveBeenCalledWith({
-        where: { id: unclaimed.id, workosUserId: null, deletedAt: null },
+        where: { id: unclaimed.id, workosUserId: null, deletedAt: null, teamStaff: { none: {} } },
         data: { isManaged: true, managedById: coach.id },
       });
       // Never touch name/role of a row another flow provisioned
@@ -1986,7 +1986,7 @@ describe('InvitationService', () => {
       expect(txUserUpdate).toHaveBeenCalledTimes(2);
       // The flags update never carries the photo, so an existing one is never overwritten
       expect(txUserUpdate).toHaveBeenNthCalledWith(1, {
-        where: { id: unclaimed.id, workosUserId: null, deletedAt: null },
+        where: { id: unclaimed.id, workosUserId: null, deletedAt: null, teamStaff: { none: {} } },
         data: { isManaged: true, managedById: coach.id },
       });
       // Decided under the lock (the guarded photo write matched no row): the
@@ -2408,7 +2408,7 @@ describe('InvitationService', () => {
       // managedById belonged to the race winner's creator — left alone; the
       // write is claim-guarded (red-team RT4)
       expect(txUserUpdate).toHaveBeenCalledWith({
-        where: { id: raceWinner.id, workosUserId: null, deletedAt: null },
+        where: { id: raceWinner.id, workosUserId: null, deletedAt: null, teamStaff: { none: {} } },
         data: { isManaged: true },
       });
     });

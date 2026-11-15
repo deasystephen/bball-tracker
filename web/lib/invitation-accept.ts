@@ -7,7 +7,10 @@ import { CLIENT_HEADERS, acceptInvitationByTokenUrl } from './api-urls';
  * `X-Hooplings-Client: web` (#964), which the API logs as `client` on the
  * accept's lines.
  */
-export type AcceptResult = { ok: true } | { ok: false; message: string };
+export type AcceptResult =
+  /** `alreadyStaff`: a staff invitation (#460) whose account already held a staff row, left unchanged. */
+  | { ok: true; alreadyStaff: boolean }
+  | { ok: false; message: string };
 
 export const ACCEPT_FALLBACK_ERROR = 'Something went wrong. Please try again.';
 export const ACCEPT_NETWORK_ERROR = 'Network error. Please check your connection and try again.';
@@ -18,9 +21,9 @@ export async function acceptInvitation(apiUrl: string, token: string): Promise<A
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...CLIENT_HEADERS },
     });
-    const data = (await res.json()) as { error?: string };
+    const data = (await res.json()) as { error?: string; alreadyStaff?: boolean };
     if (!res.ok) return { ok: false, message: data.error ?? ACCEPT_FALLBACK_ERROR };
-    return { ok: true };
+    return { ok: true, alreadyStaff: data.alreadyStaff === true };
   } catch {
     return { ok: false, message: ACCEPT_NETWORK_ERROR };
   }

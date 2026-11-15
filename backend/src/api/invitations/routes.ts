@@ -49,7 +49,7 @@ router.get('/', async (req, res) => {
     const [guardianInvitations, staffInvitations] = includeGuardian
       ? await Promise.all([
           GuardianService.listPendingForUser(req.user!.id),
-          StaffInvitationService.listPendingForUser(req.user!.id),
+          StaffInvitationService.listPendingForEmail(req.user!.email),
         ])
       : [[], []];
 
