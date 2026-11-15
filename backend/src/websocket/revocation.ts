@@ -115,9 +115,7 @@ export function revokeLocalUserSockets(io: SocketServer, userId: string): number
   } catch (error) {
     reportDefect(error, { userId });
   }
-  if (closed > 0) {
-    logger.info('Socket sessions revoked', { userId, count: closed });
-  }
+  // Each cut logs its own `Socket reauth required` line (reason `revoked`).
   return closed;
 }
 
@@ -151,17 +149,19 @@ function reportDefect(error: unknown, ids: Record<string, string | undefined>): 
 }
 
 let sweepTimer: ReturnType<typeof setInterval> | null = null;
-/** When the sweep in flight started, or null when none is. */
-let sweepStartedAt: number | null = null;
-let sweepStallReported = false;
 let sweepFailing = false;
 
 /**
  * One sweep (see the module comment). Returns how many sockets it closed.
  * A database failure keeps every socket (logged, first failure of a streak
- * reported to Sentry); the next sweep tries again.
+ * reported to Sentry); the next sweep tries again. `cancelled` is true once
+ * the periodic sweep that started this run was stopped (shutdown): a query
+ * the shutdown's Prisma disconnect fails is then not reported.
  */
-export async function sweepRevokedSockets(io: SocketServer): Promise<number> {
+export async function sweepRevokedSockets(
+  io: SocketServer,
+  cancelled: () => boolean = () => false
+): Promise<number> {
   const sockets = localSockets(io);
   if (sockets.length === 0) return 0;
   // What each socket was when the rows were read: a socket that changed user
@@ -181,6 +181,7 @@ export async function sweepRevokedSockets(io: SocketServer): Promise<number> {
       );
     }
   } catch (error) {
+    if (cancelled()) return 0;
     logger.warn('Socket revocation sweep failed', {
       error: error instanceof Error ? error.message : String(error),
     });
@@ -188,6 +189,7 @@ export async function sweepRevokedSockets(io: SocketServer): Promise<number> {
     sweepFailing = true;
     return 0;
   }
+  if (cancelled()) return 0;
   sweepFailing = false;
   const rows = new Map(chunks.flat().map((row) => [row.id, row]));
 
@@ -226,29 +228,33 @@ export function installSocketRevocation(io: SocketServer): void {
  */
 export function startRevocationSweep(io: SocketServer, intervalMs = REVOCATION_SWEEP_INTERVAL_MS): void {
   stopRevocationSweep();
-  sweepTimer = setInterval(() => {
-    if (sweepStartedAt !== null) {
-      const runningMs = Date.now() - sweepStartedAt;
-      if (runningMs >= REVOCATION_SWEEP_STALL_MS && !sweepStallReported) {
-        sweepStallReported = true;
+  // In-flight state belongs to this timer alone, so a restart never shares
+  // or clears another timer's marker.
+  let startedAt: number | null = null;
+  let stallReported = false;
+  const timer = setInterval(() => {
+    if (startedAt !== null) {
+      const runningMs = Date.now() - startedAt;
+      if (runningMs >= REVOCATION_SWEEP_STALL_MS && !stallReported) {
+        stallReported = true;
         reportDefect(new Error('Socket revocation sweep stalled'), { runningMs: String(runningMs) });
       }
       return;
     }
-    sweepStartedAt = Date.now();
-    sweepStallReported = false;
-    void sweepRevokedSockets(io)
+    startedAt = Date.now();
+    stallReported = false;
+    void sweepRevokedSockets(io, () => sweepTimer !== timer)
       .catch((error: unknown) => reportDefect(error, {}))
       .finally(() => {
-        sweepStartedAt = null;
+        startedAt = null;
       });
   }, intervalMs);
-  sweepTimer.unref();
+  timer.unref();
+  sweepTimer = timer;
 }
 
 /** Stop the periodic sweep. Safe to call more than once. */
 export function stopRevocationSweep(): void {
   if (sweepTimer) clearInterval(sweepTimer);
   sweepTimer = null;
-  sweepStartedAt = null;
 }

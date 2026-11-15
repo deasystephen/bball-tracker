@@ -329,6 +329,22 @@ describe('startRevocationSweep', () => {
     expect(captureException).toHaveBeenCalledWith(expect.any(Error), expect.objectContaining({ flow: 'socket-revocation' }));
   });
 
+  it('does not report a query that fails after the sweep was stopped (shutdown)', async () => {
+    let fail: (error: Error) => void = () => undefined;
+    findMany.mockImplementation(
+      () =>
+        new Promise((_, reject) => {
+          fail = reject;
+        })
+    );
+    startRevocationSweep(fakeIo([fakeSocket('u1')]));
+    await jest.advanceTimersByTimeAsync(REVOCATION_SWEEP_INTERVAL_MS);
+    stopRevocationSweep();
+    fail(new Error('Prisma disconnected'));
+    await jest.advanceTimersByTimeAsync(0);
+    expect(captureException).not.toHaveBeenCalled();
+  });
+
   it('reports a sweep that never settles once, and runs none beside it', async () => {
     findMany.mockImplementation(() => new Promise(() => undefined));
     startRevocationSweep(fakeIo([fakeSocket('u1')]));

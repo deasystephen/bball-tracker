@@ -186,9 +186,9 @@ current score so a client can drop events and still converge.
     passed`, and `Socket reauth required` with `reason: 'expired'`). Anomalies are `info`:
     `Socket reauth required` with `reason: 'rejected'` (the verifier refused an unexpired token,
     or the account was deleted), `'user_changed'` or `'revoked'` (next bullet), `Socket
-    refresh-auth rejected`, `Socket evicted from game room`, `Socket sessions revoked` and `Socket
-    revocation sweep closed sockets`. A failed sweep is `warn` (`Socket revocation sweep failed`).
-    Ids only.
+    refresh-auth rejected`, `Socket evicted from game room` and `Socket revocation sweep closed
+    sockets`. A failed sweep is `warn` (`Socket revocation sweep failed`); a revocation defect or a
+    stalled sweep is `error` (`Socket revocation error`). Ids only.
   - **Room access (audit #72).** Every accepted `refresh-auth` and every passing re-check runs
     `pruneGameRooms`, which resolves every `game:<id>` room at once with `viewableGameIds`: one
     `game.findMany` with `id in` the rooms and `team` filtered by `readableTeamsWhere` (the
@@ -248,7 +248,9 @@ current score so a client can drop events and still converge.
     statement timeout, so a query that never settled would stop the sweep with it (a hazard every
     REST request shares; the expiry re-check still bounds such a socket): a sweep still running
     after `REVOCATION_SWEEP_STALL_MS` (60 s) is reported once, at `error` and to Sentry
-    (`Socket revocation sweep stalled`).
+    (`Socket revocation sweep stalled`). Each start of the timer keeps its own in-flight marker, and
+    a query that fails after its timer was stopped (the shutdown routine stops it before the Prisma
+    disconnect) is dropped silently rather than reported.
   - **Why not a room or a Redis signal.** A per-user room would let the adapter fan a cut out to
     other tasks, but room fan-out cannot close a remote transport and the sweep already bounds
     every task. A Redis signal from the scripts could only shave seconds off that bound, since
