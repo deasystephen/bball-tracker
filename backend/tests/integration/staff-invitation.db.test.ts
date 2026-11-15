@@ -181,6 +181,8 @@ describe('StaffInvitationService (real Postgres, #460)', () => {
 
     const result = await StaffInvitationService.acceptInvitation(invitation.id, inviteeId);
     expect(result.staff.userId).toBe(inviteeId);
+    // A coaching role makes the bare PLAYER account a COACH (team creation).
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: inviteeId } })).role).toBe('COACH');
   });
 
   it('refuses by-token accept on an unclaimed managed roster record (409), leaving the invitation pending', async () => {
@@ -228,9 +230,10 @@ describe('StaffInvitationService (real Postgres, #460)', () => {
       'the coach who sent it can no longer manage'
     );
 
-    // The account create ran inside the refused transaction and rolled back with it.
+    // The account create ran inside the refused transaction and rolled back with it,
+    // and the dead invitation is cancelled so it stops showing as pending.
     expect(await prisma.user.count({ where: { email } })).toBe(0);
-    expect((await prisma.staffInvitation.findUniqueOrThrow({ where: { id: invitation.id } })).status).toBe('PENDING');
+    expect((await prisma.staffInvitation.findUniqueOrThrow({ where: { id: invitation.id } })).status).toBe('CANCELLED');
   });
 
   it('Add Player never adopts an accepted-but-unclaimed staff account as a managed record', async () => {
@@ -324,9 +327,13 @@ describe('StaffInvitationService (real Postgres, #460)', () => {
 
     expect(rejected.status).toBe('REJECTED');
     expect(await prisma.staffInvitation.count({ where: { invitedEmail: { equals: email!, mode: 'insensitive' } } })).toBe(0);
-    // Re-inviting at once is refused by the cooldown, not lost with the address.
+    // A Resend at once is refused by the cooldown: the hash outlives the address.
     await expect(
-      StaffInvitationService.inviteStaff(org.teamId, { email: email!, roleType: 'ASSISTANT_COACH' }, headCoachId)
+      StaffInvitationService.inviteStaff(
+        org.teamId,
+        { email: email!, roleType: 'ASSISTANT_COACH', supersede: true },
+        headCoachId
+      )
     ).rejects.toMatchObject({ code: 'resend_cooldown' });
   });
 

@@ -220,17 +220,22 @@ for every address match and the address stored trimmed and lower-cased; the shar
   `PLAYER` (the default, so the app's role step asks) for a team manager, not managed,
   `emailVerified: false`, named with the email local part (the placeholder the app's one-time name
   prompt replaces) and `ageConfirmedAt` null (the age screen runs at its first sign-in, and a staff
-  row is an adult signal for the under-age branches, `children-and-age.md`).
+  row is an adult signal for the under-age branches, `children-and-age.md`). An existing bare
+  `PLAYER` account that accepts a coaching role becomes `COACH` (the global role gates team creation;
+  the guardian accept promotes PLAYER to PARENT the same way); other roles are left alone.
 - **`POST /teams/:teamId/staff-invitations { email, roleType, supersede? }`** (`inviteRateLimit`).
   Gate: **`canManageStaff`**, the predicate `POST /staff` uses (head coach, league admin, system
   admin; an assistant coach gets 403). `roleType` is `HEAD_COACH | ASSISTANT_COACH | TEAM_MANAGER`
   (`staffRoleTypeSchema`), resolved to the team's default role (404 when the team lacks it). Refused
   before anything is written: team 404, 403, role 404, 400 `This person is already a staff member of
   this team` when the address belongs to a live account on the team's staff. Then one transaction
-  behind the team row lock (`lockTeamRow`, the lock every staff mutation takes): a live PENDING row
-  for the team + address answers 400 `A pending staff invitation already exists for this email`
-  unless `supersede`; the cooldown reads the newest row for the team + `recipientHash` (any status,
-  so a decline or a cancel does not reset it) and answers 429 `resend_cooldown`; lapsed PENDING
+  behind the team row lock (`lockTeamRow`, the lock every staff mutation takes): a team-season that
+  is not its lineage's latest (`latestTeamSeasonId`, #461) answers 400 (invite the team's current
+  season); a live PENDING row for the team + address answers 400 `A pending staff invitation already
+  exists for this email` unless `supersede`; **on Resend (`supersede`) only**, as the shared helper's
+  contract says, the cooldown reads the newest row for the team + `recipientHash` (any status, so a
+  decline or a cancel between resends does not reset it) and answers 429 `resend_cooldown` (a plain
+  invite after a cancel is not held); lapsed PENDING
   rows (and with `supersede` the live one, so the old link dies) are flipped to EXPIRED; the new row
   is created (7-day expiry). 201 `{ invitation, emailSent }`. Template:
   `services/mailer/templates/staff-invitation.ts`, link `${PUBLIC_APP_URL}/invite/<token>`.
@@ -273,8 +278,11 @@ for every address match and the address stored trimmed and lower-cased; the shar
     who is removed, demoted or deleted after sending cannot come back through an invitation sent to
     an address they control, and a club that changes head coach re-sends (removing or demoting a head
     coach also cancels the PENDING staff invitations they sent on that team, in the same transaction,
-    unless they still manage staff as a league or system admin); a team that no longer has the invited
-    default role answers 400; flips PENDING → ACCEPTED
+    when `canManageStaff` no longer holds for them, so a league or system admin keeps theirs); refuses
+    an invitation whose team-season is no longer its lineage's latest (a rollover since: the staff row
+    would land on last season's team); and in both of those cases cancels the row after the rollback
+    (`Staff invitation cancelled` with a `reason`), so it stops showing as pending. A team that no
+    longer has the invited default role answers 400. It then flips PENDING → ACCEPTED
     guarded on the status (the loser of a race gets 400); and creates the `TeamStaff` row with the
     invited role **unless the account already holds one**, which is left unchanged
     (`alreadyStaff: true`). Accepting never re-roles, so it can never demote the last head coach.

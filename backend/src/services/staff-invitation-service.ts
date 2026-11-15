@@ -48,7 +48,7 @@ import { withTimeout } from '../utils/promise-timeout';
 import { publicAppUrl } from '../utils/urls';
 import { mailer } from './mailer';
 import { staffInvitationTemplate } from './mailer/templates';
-import { TEAM_STAFF_INCLUDE, TeamService, type TeamStaffWithRelations } from './team-service';
+import { TEAM_STAFF_INCLUDE, TeamService, latestTeamSeasonId, type TeamStaffWithRelations } from './team-service';
 import type { InviteStaffInput, StaffRoleType } from '../api/teams/schemas';
 
 const STAFF_INVITE_EXPIRES_DAYS = 7;
@@ -59,6 +59,27 @@ const PENDING_STAFF_CONFLICT = 'A pending staff invitation already exists for th
 const ALREADY_STAFF = 'This person is already a staff member of this team';
 const INVITER_LOST_RIGHT =
   "This invitation is no longer valid: the coach who sent it can no longer manage this team's staff";
+const PAST_SEASON =
+  "This invitation is for a past season of the team. Ask the head coach to send a new one.";
+
+/**
+ * An accept refused because the invitation itself can never be accepted
+ * (its sender lost the right, or its team-season is no longer the team's
+ * latest). The transaction rolls back, then `accept` cancels the row so it
+ * stops showing as pending anywhere.
+ */
+class DeadStaffInvitationError extends BadRequestError {
+  constructor(message: string, readonly reason: 'inviter_lost_right' | 'past_season') {
+    super(message);
+    Object.setPrototypeOf(this, DeadStaffInvitationError.prototype);
+  }
+}
+
+/** Whether the team-season is its lineage's latest (#461): the row a team continues on. */
+async function isLatestTeamSeason(tx: Prisma.TransactionClient, teamId: string): Promise<boolean> {
+  const team = await tx.team.findUnique({ where: { id: teamId }, select: { lineageId: true } });
+  return !!team && (await latestTeamSeasonId(tx, team.lineageId)) === teamId;
+}
 
 /** Same bound as the other invitation sends: well under the mobile client's 10s timeout. */
 const EMAIL_SEND_TIMEOUT_MS = 5_000;
@@ -209,6 +230,9 @@ export class StaffInvitationService {
           if (!(await lockTeamRow(tx, teamId))) {
             throw new NotFoundError('Team not found');
           }
+          if (!(await isLatestTeamSeason(tx, teamId))) {
+            throw new BadRequestError(PAST_SEASON);
+          }
 
           const now = new Date();
           const live = await tx.staffInvitation.findFirst({
@@ -219,15 +243,20 @@ export class StaffInvitationService {
             throw new BadRequestError(PENDING_STAFF_CONFLICT);
           }
 
-          const latest = await tx.staffInvitation.findFirst({
-            where: { teamId, recipientHash },
-            orderBy: { createdAt: 'desc' },
-            select: { createdAt: true },
-          });
-          assertResendCooldown(latest?.createdAt, 'address', {
-            onRefused: (retryAfterSeconds) =>
-              logger.info('Staff invitation resend refused (cooldown)', { teamId, invitedById: userId, retryAfterSeconds }),
-          });
+          // Resend only (the shared helper's contract): the newest row for the
+          // address, any status, so a cancel or decline between resends does
+          // not reset the window. A plain invite after a cancel is not held.
+          if (data.supersede) {
+            const latest = await tx.staffInvitation.findFirst({
+              where: { teamId, recipientHash },
+              orderBy: { createdAt: 'desc' },
+              select: { createdAt: true },
+            });
+            assertResendCooldown(latest?.createdAt, 'address', {
+              onRefused: (retryAfterSeconds) =>
+                logger.info('Staff invitation resend refused (cooldown)', { teamId, invitedById: userId, retryAfterSeconds }),
+            });
+          }
 
           // Lazy expiry: a lapsed PENDING row never blocks; with supersede the
           // live one is expired too, so the old link dies.
@@ -424,7 +453,10 @@ export class StaffInvitationService {
    * fall-through then answers 404). The invitee's own retry is not told "not
    * sent to you", and no other caller learns the id exists.
    */
-  static async findInvitationForUser(invitationId: string, userId: string): Promise<StaffInvitationSummary | null> {
+  static async findInvitationForUser(
+    invitationId: string,
+    callerEmail: string | null | undefined
+  ): Promise<StaffInvitationSummary | null> {
     const invitation = await prisma.staffInvitation.findUnique({
       where: { id: invitationId },
       select: STAFF_INVITATION_SELECT,
@@ -435,8 +467,7 @@ export class StaffInvitationService {
     if (invitation.status !== 'PENDING' && invitation.invitedEmail === strippedStaffInvitationEmail(invitation.id)) {
       return null;
     }
-    const caller = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
-    if (!isSameEmail(caller?.email, invitation.invitedEmail)) {
+    if (!isSameEmail(callerEmail, invitation.invitedEmail)) {
       throw new ForbiddenError('This invitation was not sent to you');
     }
     return invitation;
@@ -490,8 +521,10 @@ export class StaffInvitationService {
     return rejected;
   }
 
+  /** For a service caller without the row: read the caller's address, then the addressee check. */
   private static async requireInvitedUser(invitationId: string, userId: string): Promise<StaffInvitationSummary> {
-    const invitation = await this.findInvitationForUser(invitationId, userId);
+    const caller = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
+    const invitation = await this.findInvitationForUser(invitationId, caller?.email);
     if (!invitation) {
       throw new NotFoundError('Invitation not found');
     }
@@ -551,10 +584,33 @@ export class StaffInvitationService {
       }
     }
 
-    if (row.workosUserId === null && row.isManaged) {
-      throw new SignInRequiredError();
-    }
     return { id: row.id, created };
+  }
+
+  /**
+   * Run an accept; when it is refused because the invitation can never be
+   * accepted (`DeadStaffInvitationError`, rolled back with the transaction),
+   * cancel the row so it stops showing as pending, then rethrow.
+   */
+  private static async cancelIfDead<T>(invitation: StaffInvitationSummary, run: () => Promise<T>): Promise<T> {
+    try {
+      return await run();
+    } catch (err) {
+      if (err instanceof DeadStaffInvitationError) {
+        const { count } = await prisma.staffInvitation.updateMany({
+          where: { id: invitation.id, status: 'PENDING' },
+          data: { status: 'CANCELLED' },
+        });
+        if (count > 0) {
+          logger.info('Staff invitation cancelled', {
+            invitationId: invitation.id,
+            teamId: invitation.teamId,
+            reason: err.reason,
+          });
+        }
+      }
+      throw err;
+    }
   }
 
   /**
@@ -598,7 +654,7 @@ export class StaffInvitationService {
 
     const roleType = invitation.roleType as StaffRoleType;
 
-    const { result, account } = await createOrConflict(
+    const { result, account } = await this.cancelIfDead(invitation, () => createOrConflict(
       () =>
         prisma.$transaction(async (tx) => {
           const account = await this.resolveAcceptingUser(tx, invitation, verifiedUserId);
@@ -624,7 +680,10 @@ export class StaffInvitationService {
           }
           const inviterLive = await tx.user.count({ where: { id: invitation.invitedById, deletedAt: null } });
           if (inviterLive === 0 || !(await canManageStaff(invitation.invitedById, invitation.teamId, tx))) {
-            throw new BadRequestError(INVITER_LOST_RIGHT);
+            throw new DeadStaffInvitationError(INVITER_LOST_RIGHT, 'inviter_lost_right');
+          }
+          if (!(await isLatestTeamSeason(tx, invitation.teamId))) {
+            throw new DeadStaffInvitationError(PAST_SEASON, 'past_season');
           }
 
           const { count } = await tx.staffInvitation.updateMany({
@@ -643,13 +702,25 @@ export class StaffInvitationService {
           if (existing) {
             staff = existing;
           } else {
-            const role = await tx.teamRole.findFirst({ where: { teamId: invitation.teamId, type: roleType } });
-            if (!role) {
-              throw new BadRequestError('This team no longer has the role this invitation was for');
-            }
+            const role = await TeamService.findRoleByType(invitation.teamId, roleType, tx).catch((err: unknown) => {
+              // Not "invitation not found": the public route maps a 404 to that.
+              throw err instanceof NotFoundError
+                ? new BadRequestError('This team no longer has the role this invitation was for')
+                : err;
+            });
             staff = await tx.teamStaff.create({
               data: { teamId: invitation.teamId, userId: account.id, roleId: role.id },
               include: TEAM_STAFF_INCLUDE,
+            });
+          }
+
+          // A coaching role makes a bare PLAYER account a COACH, the global role
+          // that gates team creation (an account created above already is one;
+          // the guardian accept promotes PLAYER to PARENT the same way).
+          if (roleType !== 'TEAM_MANAGER') {
+            await tx.user.updateMany({
+              where: { id: account.id, role: 'PLAYER', deletedAt: null },
+              data: { role: 'COACH' },
             });
           }
 
@@ -666,7 +737,7 @@ export class StaffInvitationService {
       ALREADY_STAFF,
       // As addStaffMember: the retired three-column name too, for a database still carrying it.
       { anyOf: ['TeamStaff_teamId_userId_key', 'TeamStaff_teamId_userId_roleId_key'] }
-    );
+    ));
 
     // After COMMIT: a rolled-back accept must not log a role that never landed.
     logger.info('Staff invitation accepted', {
