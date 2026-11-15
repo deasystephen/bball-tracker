@@ -51,6 +51,14 @@ tombstoned as described next and the response says `erased: false`. In ONE trans
 - **After the transaction commits (best-effort):** the WorkOS user is deleted, which also kills
   every session and refresh token. If that call fails the response says `identityDeleted: false`
   and Sentry gets an event tagged `flow: account-delete` — see "When WorkOS deletion fails".
+- **Live-game connections close within seconds (#1004).** A deletion through the app
+  (`DELETE /auth/me`, `DELETE /players/:id/account`) closes the person's open Socket.io
+  connections at once, right after the commit and before the WorkOS call (one that was still
+  connecting at that moment within about 10 seconds). A deletion by the operator script runs in another
+  process, so the API notices it on its next revocation sweep: within about 10 seconds
+  (`REVOCATION_SWEEP_INTERVAL_MS`), whether or not Redis is up (the sweep reads the database). The
+  bound holds while the API can read the database; during a database outage the connection stays
+  until the sweep or the access-token re-check succeeds again. Nothing to do by hand.
 
 The identity cannot come back: the old token no longer resolves to a user (401), and a fresh
 sign-in with the same email creates a brand-new, empty account. Every write path onto a user row
@@ -311,9 +319,11 @@ age in writing from the account's address; the next sign-in asks the question ag
      After commit the WorkOS user is deleted, which ends its WorkOS sessions and refresh tokens.
      The old access token fails on every new API call (no row has its id), and a sign-in that was
      already under way when the conversion committed is refused instead of writing the email or
-     photo back. A request authenticated just before the commit can still finish its write, and a
-     live-game connection the child has open stays connected and keeps receiving that game's
-     updates until the access token expires (minutes); nothing closes either sooner yet (#1004).
+     photo back. A request authenticated just before the commit can still finish its write. A
+     live-game connection the child has open is closed by the API's revocation sweep within about
+     10 seconds of the commit (the script runs outside the API, so the sweep, which reads the
+     database and not Redis, is what notices; #1004). The client's reconnect is then refused, so it
+     stops receiving that game's updates.
 
      **Refusals** (exit 1, nothing written; the script prints the reason and the next step, keyed
      on the refusal code):

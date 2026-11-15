@@ -32,6 +32,7 @@ import {
 import { EMAIL_SUPPRESSION_CLEARED } from '../utils/email-suppression';
 import { emailEquals, isSameEmail } from '../utils/email-match';
 import { logger } from '../utils/logger';
+import { revokeUserSockets } from '../websocket/io-registry';
 
 /**
  * A managed player that is on no team yet stays editable/deletable by its
@@ -579,6 +580,8 @@ export class PlayerService {
     }
 
     logger.info('Player deleted', { playerId, userId });
+    // A claimed player's live sockets go with the row (#1004).
+    revokeUserSockets(playerId);
 
     // Best-effort, after the delete and outside any transaction (#725): the row
     // is gone, so its avatar object is unreferenced. No-op for WorkOS photo

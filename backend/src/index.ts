@@ -11,6 +11,7 @@ import helmet from 'helmet';
 import { createServer } from 'http';
 import { Server as SocketServer } from 'socket.io';
 import { setupWebSocketHandlers } from './websocket';
+import { stopRevocationSweep } from './websocket/revocation';
 import apiRouter from './api';
 import { requestContext } from './api/middleware/request-context';
 import { requestLogger, loggablePath } from './api/middleware/request-logger';
@@ -223,7 +224,13 @@ if (require.main === module) {
 
   // Graceful stop on ECS's SIGTERM (and Ctrl-C locally): utils/shutdown.ts (#747).
   const shutdown = createShutdown({
-    io,
+    io: {
+      close: async () => {
+        // No sweep against a closing server or a disconnected Prisma (#1004).
+        stopRevocationSweep();
+        await io.close();
+      },
+    },
     consumer,
     disconnectPrisma: () => prisma.$disconnect(),
     closeRedis: async () => {
