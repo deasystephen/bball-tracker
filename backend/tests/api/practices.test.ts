@@ -306,7 +306,27 @@ describe('availability', () => {
   });
 });
 
+
+/**
+ * Freezes only `Date` (no timer is faked, so promises and supertest run
+ * normally) at a day inside the fixtures' series window, so the 31-day
+ * backdate rule does not turn these fixed DST dates stale as time passes.
+ */
+function freezeDate(iso: string): void {
+  jest.useFakeTimers({
+    now: new Date(iso),
+    doNotFake: [
+      'hrtime', 'nextTick', 'performance', 'queueMicrotask', 'requestAnimationFrame', 'cancelAnimationFrame',
+      'requestIdleCallback', 'cancelIdleCallback', 'setImmediate', 'clearImmediate', 'setInterval',
+      'clearInterval', 'setTimeout', 'clearTimeout',
+    ],
+  });
+}
+
 describe('/api/v1/practice-series', () => {
+  beforeEach(() => freezeDate('2026-10-25T12:00:00Z'));
+  afterEach(() => jest.useRealTimers());
+
   const body = {
     teamId: TEAM_ID,
     location: 'Main gym',
@@ -325,6 +345,7 @@ describe('/api/v1/practice-series', () => {
     frequency: 'WEEKLY',
     weekdays: [2],
     startDate: new Date('2026-10-20T00:00:00Z'),
+    endDate: new Date('2026-11-10T00:00:00Z'),
     startTime: '18:00',
     timezone: 'America/New_York',
     cancelledAt: null,
@@ -341,7 +362,9 @@ describe('/api/v1/practice-series', () => {
     const res = await request(app).post('/api/v1/practice-series').send(body);
 
     expect(res.status).toBe(201);
-    expect(res.body.series.id).toBe(SERIES_ID);
+    expect(res.body.series).toEqual(
+      expect.objectContaining({ id: SERIES_ID, startDate: '2026-10-20', endDate: '2026-11-10' })
+    );
     const sessions = mockPrisma.practiceSession.createMany.mock.calls[0][0].data as Array<{ startsAt: Date }>;
     expect(sessions.map((s) => s.startsAt.toISOString())).toEqual([
       '2026-10-20T22:00:00.000Z',

@@ -43,13 +43,16 @@ function formatterFor(timeZone: string): Intl.DateTimeFormat {
   return formatter;
 }
 
-/** A region zone ("America/New_York", "Etc/GMT+5") or UTC; never a bare offset such as "+05:30". */
-const REGION_ZONE_RE = /^(?:UTC|[A-Za-z]+(?:\/[A-Za-z0-9_+-]+)+)$/;
+/**
+ * A region zone ("America/New_York") or UTC. Never a fixed offset: a bare
+ * "+05:30" or an "Etc/GMT+5" would silently ignore daylight saving.
+ */
+const REGION_ZONE_RE = /^(?:UTC|(?!Etc\/)[A-Za-z]+(?:\/[A-Za-z0-9_+-]+)+)$/;
 
 /**
  * The runtime's canonical name for `timeZone` ("america/new_york" and
- * "US/Eastern" both give "America/New_York"), or null when it is unknown or is
- * a fixed UTC offset, which would silently ignore daylight saving. Builds an
+ * "US/Eastern" both give "America/New_York"; "Etc/UTC" and "GMT" give "UTC"),
+ * or null when it is unknown or a fixed offset. Builds an
  * uncached formatter, so arbitrary client input never grows the cache.
  */
 export function canonicalTimeZone(timeZone: string): string | null {

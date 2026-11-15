@@ -21,6 +21,8 @@ import {
 import { domainEvent, spyOnInfo } from '../support/domain-events';
 
 jest.mock('../../src/utils/permissions', () => ({
+  // The real one, over the Prisma mock: it is a plain guardian lookup.
+  getGuardianChildIds: jest.requireActual('../../src/utils/permissions').getGuardianChildIds,
   canAccessTeam: jest.fn(),
   hasTeamPermission: jest.fn(),
   isGuardianOf: jest.fn(),
@@ -59,12 +61,16 @@ const practiceRow = (overrides: Record<string, unknown> = {}): Record<string, un
   ...overrides,
 });
 
-const availabilityRow = (userId: string, email: string | null): Record<string, unknown> => ({
+const availabilityRow = (
+  userId: string,
+  email: string | null,
+  comment: string | null = null
+): Record<string, unknown> => ({
   id: 'av',
   sessionId: SESSION,
   userId,
   status: 'YES',
-  comment: null,
+  comment,
   createdAt: new Date(),
   updatedAt: new Date(),
   user: { id: userId, name: 'Someone', isManaged: false, deletedAt: null, email },
@@ -160,7 +166,12 @@ describe('PracticeService.getPractice', () => {
 describe('summarizeAvailability', () => {
   it('counts every status', async () => {
     mockPrisma.practiceAvailability.groupBy.mockResolvedValue([{ status: 'MAYBE', _count: { status: 2 } }]);
-    expect(await summarizeAvailability(SESSION)).toEqual({ yes: 0, no: 0, maybe: 2 });
+    expect(await summarizeAvailability(SESSION, TEAM)).toEqual({ yes: 0, no: 0, maybe: 2 });
+    // Only players still on the roster count.
+    expect(mockPrisma.practiceAvailability.groupBy.mock.calls[0][0].where).toEqual({
+      sessionId: SESSION,
+      user: { teamMembers: { some: { teamId: TEAM } } },
+    });
   });
 });
 
@@ -284,12 +295,23 @@ describe('PracticeService.updatePractice', () => {
     expect(mockPrisma.practiceSession.update).not.toHaveBeenCalled();
   });
 
-  it('maps a row that vanished or was cancelled mid-request to 404, and rethrows anything else', async () => {
-    mockPrisma.practiceSession.findUnique.mockResolvedValue({ id: SESSION, teamId: TEAM, seriesId: null, status: 'SCHEDULED' });
+  it('maps a row cancelled mid-request to 400, one deleted to 404, and rethrows anything else', async () => {
+    const scheduled = { id: SESSION, teamId: TEAM, seriesId: null, status: 'SCHEDULED' };
+    mockPrisma.practiceSession.findUnique
+      .mockResolvedValueOnce(scheduled)
+      .mockResolvedValueOnce({ status: 'CANCELLED' });
+    mockPrisma.practiceSession.update.mockRejectedValueOnce(knownError('P2025'));
+    await expect(PracticeService.updatePractice(SESSION, { title: 'x' }, USER)).rejects.toBeInstanceOf(
+      BadRequestError
+    );
+
+    mockPrisma.practiceSession.findUnique.mockResolvedValueOnce(scheduled).mockResolvedValueOnce(null);
     mockPrisma.practiceSession.update.mockRejectedValueOnce(knownError('P2025'));
     await expect(PracticeService.updatePractice(SESSION, { title: 'x' }, USER)).rejects.toBeInstanceOf(
       NotFoundError
     );
+
+    mockPrisma.practiceSession.findUnique.mockResolvedValue(scheduled);
     mockPrisma.practiceSession.update.mockRejectedValueOnce(new Error('db down'));
     await expect(PracticeService.updatePractice(SESSION, { title: 'x' }, USER)).rejects.toThrow('db down');
   });
@@ -465,21 +487,37 @@ describe('PracticeService.getAvailability', () => {
   beforeEach(() => {
     mockPrisma.practiceSession.findUnique.mockResolvedValue({ id: SESSION, teamId: TEAM });
     mockPrisma.practiceAvailability.findMany.mockResolvedValue([
-      availabilityRow(USER, 'me@example.test'),
-      availabilityRow(CHILD, 'other@example.test'),
+      availabilityRow(USER, 'me@example.test', 'Late'),
+      availabilityRow(CHILD, 'other@example.test', 'At my dad’s'),
     ]);
+    mockPrisma.guardian.findMany.mockResolvedValue([]);
   });
 
-  it('shows other people’s email only to roster managers, and counts the listed rows', async () => {
+  it('shows other people’s email and comment only to roster managers, and counts the listed rows', async () => {
     mocked(hasTeamPermission).mockResolvedValue(false);
     const asPlayer = await PracticeService.getAvailability(SESSION, USER);
     expect(asPlayer.summary).toEqual({ yes: 2, no: 0, maybe: 0 });
     expect(asPlayer.availability[0].user.email).toBe('me@example.test');
+    expect(asPlayer.availability[0].comment).toBe('Late');
     expect(asPlayer.availability[1].user).not.toHaveProperty('email');
+    expect(asPlayer.availability[1].comment).toBeNull();
+    expect(mockPrisma.practiceAvailability.findMany.mock.calls[0][0].where).toEqual({
+      sessionId: SESSION,
+      user: { teamMembers: { some: { teamId: TEAM } } },
+    });
 
     mocked(hasTeamPermission).mockResolvedValue(true);
     const asCoach = await PracticeService.getAvailability(SESSION, USER);
     expect(asCoach.availability[1].user.email).toBe('other@example.test');
+    expect(asCoach.availability[1].comment).toBe('At my dad’s');
+  });
+
+  it('shows a guardian their own child’s comment', async () => {
+    mocked(hasTeamPermission).mockResolvedValue(false);
+    mockPrisma.guardian.findMany.mockResolvedValue([{ childId: CHILD }]);
+    const asParent = await PracticeService.getAvailability(SESSION, USER);
+    expect(asParent.availability[1].comment).toBe('At my dad’s');
+    expect(asParent.availability[1].user).not.toHaveProperty('email');
   });
 
   it('404s an unknown session and 403s a caller without access', async () => {
@@ -512,13 +550,53 @@ const seriesInput = {
 const seriesRow = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
   id: SERIES,
   teamId: TEAM,
+  startDate: new Date('2026-10-20T00:00:00.000Z'),
+  endDate: new Date('2026-11-10T00:00:00.000Z'),
   cancelledAt: null,
   team: { id: TEAM, name: 'Lakers' },
   sessions: [{ id: SESSION }],
   ...overrides,
 });
 
+
+/**
+ * Freezes only `Date` (no timer is faked, so promises and supertest run
+ * normally) at a day inside the fixtures' series window, so the 31-day
+ * backdate rule does not turn these fixed DST dates stale as time passes.
+ */
+function freezeDate(iso: string): void {
+  jest.useFakeTimers({
+    now: new Date(iso),
+    doNotFake: [
+      'hrtime', 'nextTick', 'performance', 'queueMicrotask', 'requestAnimationFrame', 'cancelAnimationFrame',
+      'requestIdleCallback', 'cancelIdleCallback', 'setImmediate', 'clearImmediate', 'setInterval',
+      'clearInterval', 'setTimeout', 'clearTimeout',
+    ],
+  });
+}
+
 describe('PracticeSeriesService.createSeries', () => {
+  beforeEach(() => freezeDate('2026-10-25T12:00:00Z'));
+  afterEach(() => jest.useRealTimers());
+
+  it('returns the dates as YYYY-MM-DD, the form the API accepts', async () => {
+    mockPrisma.team.findUnique.mockResolvedValue({ id: TEAM });
+    mockPrisma.practiceSeries.create.mockResolvedValue({ id: SERIES });
+    mockPrisma.practiceSession.createMany.mockResolvedValue({ count: 7 });
+    mockPrisma.practiceSeries.findUniqueOrThrow.mockResolvedValue(seriesRow({ endDate: null }));
+    const series = await PracticeSeriesService.createSeries(seriesInput, USER);
+    expect(series.startDate).toBe('2026-10-20');
+    expect(series.endDate).toBeNull();
+  });
+
+  it('refuses a start date more than 31 days back, which a series cancel could never clear', async () => {
+    mockPrisma.team.findUnique.mockResolvedValue({ id: TEAM });
+    await expect(
+      PracticeSeriesService.createSeries({ ...seriesInput, startDate: '2026-09-23', endDate: '2026-11-10' }, USER)
+    ).rejects.toThrow('startDate must be within the last 31 days');
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+  });
+
   it('writes the series and one session per occurrence in one transaction, at DST-correct instants', async () => {
     const spy = spyOnInfo();
     mockPrisma.team.findUnique.mockResolvedValue({ id: TEAM });

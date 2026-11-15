@@ -12,6 +12,12 @@ import { canonicalTimeZone, isValidTimeZone, parseLocalDate, daysBetween } from 
 export const MAX_SERIES_OCCURRENCES = 100;
 /** Furthest a series' endDate may be from its startDate, in days. */
 export const MAX_SERIES_SPAN_DAYS = 366;
+/**
+ * Furthest in the past a series may start, in days: room to record the last
+ * few weeks, but not a year of past sessions that a series cancel (which
+ * deletes only future ones) could not clear.
+ */
+export const MAX_SERIES_BACKDATE_DAYS = 31;
 
 export const PRACTICE_TITLE_MAX = 100;
 export const PRACTICE_LOCATION_MAX = 200;

@@ -93,8 +93,8 @@ describe('practice scheduling (real Postgres)', () => {
     expect(new Set(series.sessions.map((s) => newYorkTime(s.startsAt)))).toEqual(new Set(['18:00']));
     expect(new Set(series.sessions.map((s) => s.startsAt.getUTCHours()))).toEqual(new Set([22, 23]));
     // The date columns round-trip as calendar dates.
-    expect(series.startDate.toISOString().slice(0, 10)).toBe(START_DATE);
-    expect(series.endDate?.toISOString().slice(0, 10)).toBe(END_DATE);
+    expect(series.startDate).toBe(START_DATE);
+    expect(series.endDate).toBe(END_DATE);
 
     const now = Date.now();
     const past = series.sessions.filter((s) => s.startsAt.getTime() <= now);
@@ -155,6 +155,13 @@ describe('practice scheduling (real Postgres)', () => {
     expect(result.availability.find((a) => a.userId === users.kid)?.user.email).toBe(
       `kid.${fx.run}@example.test`
     );
+    // Teammates see the answer but neither the address nor the comment.
+    const asTeammate = await PracticeService.getAvailability(futureSessionIds[0], users.player);
+    const kidRow = asTeammate.availability.find((a) => a.userId === users.kid);
+    expect(kidRow?.comment).toBeNull();
+    expect(kidRow?.user).not.toHaveProperty('email');
+    const asParent = await PracticeService.getAvailability(futureSessionIds[0], users.parent);
+    expect(asParent.availability.find((a) => a.userId === users.kid)?.comment).toBe('Dentist');
 
     // Only roster members have an answer: the coach, and the parent without
     // playerId, would inflate the headcount.

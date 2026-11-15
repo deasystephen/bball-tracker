@@ -8,8 +8,8 @@
  *
  * Access: reads go through `canAccessTeam` / `readableTeamsWhere` (staff,
  * member, league admin, guardian of a member); writes need `canManageTeam` on
- * the session's team; availability follows the game-RSVP rule (any reader
- * answers for themself, a guardian for a rostered child). Detail:
+ * the session's team; availability belongs to rostered players (a player for
+ * themself, a guardian for a rostered child). Detail:
  * docs/architecture/practice-scheduling.md.
  */
 
@@ -25,12 +25,13 @@ import {
 import { BadRequestError, ForbiddenError, NotFoundError } from '../utils/errors';
 import {
   canAccessTeam,
+  getGuardianChildIds,
   hasTeamPermission,
   isGuardianOf,
   isSystemAdmin,
   readableTeamsWhere,
 } from '../utils/permissions';
-import { isRecordNotFound } from '../utils/prisma-errors';
+import { isForeignKeyViolation, isRecordNotFound } from '../utils/prisma-errors';
 import { USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
 import { logger } from '../utils/logger';
 import { toRsvpSummary, toRsvpView, type EmailProjected, type RsvpSummary } from './rsvp-service';
@@ -44,16 +45,51 @@ export const PRACTICE_INCLUDE = {
 } satisfies Prisma.PracticeSessionInclude;
 
 const AVAILABILITY_INCLUDE = {
-  // `email` is stripped by `toRsvpView` for callers without canManageRoster.
+  // `email` is stripped by `toAvailabilityView` for callers without canManageRoster.
   user: { select: USER_SUMMARY_WITH_EMAIL_SELECT },
 } satisfies Prisma.PracticeAvailabilityInclude;
+
+/** What a write path needs to know about the session before it acts. */
+const SESSION_WRITE_SELECT = {
+  id: true,
+  teamId: true,
+  seriesId: true,
+  status: true,
+} satisfies Prisma.PracticeSessionSelect;
+type SessionForWrite = Prisma.PracticeSessionGetPayload<{ select: typeof SESSION_WRITE_SELECT }>;
+
+/**
+ * The answers that count for a session: those of players still on its team's
+ * roster. A removed player's rows stay in the table (history) but leave the
+ * list and the headcount.
+ */
+function countedAvailabilityWhere(sessionId: string, teamId: string): Prisma.PracticeAvailabilityWhereInput {
+  return { sessionId, user: { teamMembers: { some: { teamId } } } };
+}
 
 export type PracticeView = Prisma.PracticeSessionGetPayload<{ include: typeof PRACTICE_INCLUDE }>;
 type AvailabilityWithUser = Prisma.PracticeAvailabilityGetPayload<{
   include: typeof AVAILABILITY_INCLUDE;
 }>;
-/** An availability row; `user.email` only for roster managers and the row's own user. */
+/**
+ * An availability row. `user.email` only for roster managers and the row's own
+ * user; the free-text `comment` (it can say where a child is) only for roster
+ * managers, the row's own user and a guardian of that player, `null` for
+ * everyone else.
+ */
 export type AvailabilityView = EmailProjected<AvailabilityWithUser>;
+
+/** The projection above; shared by the read and the write path. */
+export function toAvailabilityView(
+  row: AvailabilityWithUser,
+  callerId: string,
+  canManageRoster: boolean,
+  callerChildIds: readonly string[]
+): AvailabilityView {
+  const view = toRsvpView(row, callerId, canManageRoster);
+  const mayReadComment = canManageRoster || row.userId === callerId || callerChildIds.includes(row.userId);
+  return mayReadComment ? view : { ...view, comment: null };
+}
 
 export type PracticeDetail = PracticeView & { availabilitySummary: RsvpSummary };
 
@@ -69,19 +105,14 @@ export interface PracticeAvailabilityList {
   summary: RsvpSummary;
 }
 
-/** Status counts for one session, zero-filled. */
-export async function summarizeAvailability(sessionId: string): Promise<RsvpSummary> {
+/** Status counts for one session (current roster only), zero-filled. */
+export async function summarizeAvailability(sessionId: string, teamId: string): Promise<RsvpSummary> {
   const counts = await prisma.practiceAvailability.groupBy({
     by: ['status'],
-    where: { sessionId },
+    where: countedAvailabilityWhere(sessionId, teamId),
     _count: { status: true },
   });
   return toRsvpSummary(counts.map((c) => ({ status: c.status, count: c._count.status })));
-}
-
-/** True for a foreign-key failure (P2003): the parent row was deleted mid-request. */
-function isForeignKeyViolation(err: unknown): boolean {
-  return err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2003';
 }
 
 /** 403 unless the caller may manage `teamId` (create, edit, cancel, delete practices). */
@@ -92,13 +123,10 @@ export async function assertCanManagePractices(userId: string, teamId: string): 
 }
 
 /** The session's team, after a 404 for a missing id and a 403 for a non-manager. */
-async function findSessionForWrite(
-  sessionId: string,
-  userId: string
-): Promise<{ id: string; teamId: string; seriesId: string | null; status: string }> {
+async function findSessionForWrite(sessionId: string, userId: string): Promise<SessionForWrite> {
   const session = await prisma.practiceSession.findUnique({
     where: { id: sessionId },
-    select: { id: true, teamId: true, seriesId: true, status: true },
+    select: SESSION_WRITE_SELECT,
   });
   if (!session) {
     throw new NotFoundError('Practice not found');
@@ -155,7 +183,7 @@ export class PracticeService {
     if (!(await canAccessTeam(userId, practice.teamId))) {
       throw new ForbiddenError('You do not have access to this practice');
     }
-    return { ...practice, availabilitySummary: await summarizeAvailability(sessionId) };
+    return { ...practice, availabilitySummary: await summarizeAvailability(sessionId, practice.teamId) };
   }
 
   /**
@@ -235,11 +263,14 @@ export class PracticeService {
       });
       return practice;
     } catch (err) {
-      // Deleted, or cancelled, between the read and the write.
-      if (isRecordNotFound(err)) {
-        throw new NotFoundError('Practice not found');
+      if (!isRecordNotFound(err)) {
+        throw err;
       }
-      throw err;
+      // Cancelled (400) or deleted (404) between the read and the write.
+      const now = await prisma.practiceSession.findUnique({ where: { id: sessionId }, select: { status: true } });
+      throw now
+        ? new BadRequestError('A cancelled practice cannot be edited')
+        : new NotFoundError('Practice not found');
     }
   }
 
@@ -306,7 +337,7 @@ export class PracticeService {
   ): Promise<AvailabilityView> {
     const session = await prisma.practiceSession.findUnique({
       where: { id: sessionId },
-      select: { id: true, teamId: true, status: true },
+      select: SESSION_WRITE_SELECT,
     });
     if (!session) {
       throw new NotFoundError('Practice not found');
@@ -315,12 +346,14 @@ export class PracticeService {
     const playerId = data.playerId;
     const onBehalfOfChild = playerId !== undefined && playerId !== userId;
     const subjectId = onBehalfOfChild ? playerId : userId;
-    const [isGuardian, member] = await Promise.all([
+    const [isGuardian, member, canManageRoster] = await Promise.all([
       onBehalfOfChild ? isGuardianOf(userId, playerId) : Promise.resolve(true),
       prisma.teamMember.findUnique({
         where: { teamId_playerId: { teamId: session.teamId, playerId: subjectId } },
         select: { id: true },
       }),
+      // Only the guardian path projects the row (the caller's own row is theirs).
+      onBehalfOfChild ? hasTeamPermission(userId, session.teamId, 'canManageRoster') : Promise.resolve(true),
     ]);
     if (!isGuardian) {
       throw new ForbiddenError('You can only answer for players you are a guardian of');
@@ -365,11 +398,8 @@ export class PracticeService {
       userId,
     });
 
-    if (!onBehalfOfChild) {
-      return row;
-    }
-    const canManageRoster = await hasTeamPermission(userId, session.teamId, 'canManageRoster');
-    return toRsvpView(row, userId, canManageRoster);
+    // The caller's own row, or their child's: the comment is theirs to see.
+    return toAvailabilityView(row, userId, canManageRoster, [subjectId]);
   }
 
   /** GET /practices/:id/availability: every response plus the counts. */
@@ -385,17 +415,18 @@ export class PracticeService {
       throw new ForbiddenError('You do not have access to this practice');
     }
 
-    const [rows, canManageRoster] = await Promise.all([
+    const [rows, canManageRoster, childIds] = await Promise.all([
       prisma.practiceAvailability.findMany({
-        where: { sessionId },
+        where: countedAvailabilityWhere(sessionId, session.teamId),
         include: AVAILABILITY_INCLUDE,
         orderBy: { createdAt: 'asc' },
       }),
       hasTeamPermission(userId, session.teamId, 'canManageRoster'),
+      getGuardianChildIds(userId),
     ]);
 
     return {
-      availability: rows.map((row) => toRsvpView(row, userId, canManageRoster)),
+      availability: rows.map((row) => toAvailabilityView(row, userId, canManageRoster, childIds)),
       // From the rows themselves, so the counts always match the list.
       summary: toRsvpSummary(rows.map((row) => ({ status: row.status, count: 1 }))),
     };

@@ -12,6 +12,11 @@ export function isUniqueViolation(err: unknown): err is Prisma.PrismaClientKnown
   return err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002';
 }
 
+/** True for a foreign-key failure (Prisma `P2003`): the parent row was deleted mid-request. */
+export function isForeignKeyViolation(err: unknown): err is Prisma.PrismaClientKnownRequestError {
+  return err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2003';
+}
+
 /** True when the record an `update`/`delete` targeted matched nothing (Prisma `P2025`). */
 export function isRecordNotFound(err: unknown): err is Prisma.PrismaClientKnownRequestError {
   return err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2025';

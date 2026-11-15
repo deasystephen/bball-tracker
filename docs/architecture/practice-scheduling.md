@@ -41,8 +41,8 @@ export carries it as `practiceAvailability`.
 No team or league stores a time zone, and ECS runs in UTC, so a series carries its own IANA
 `timezone` (the client sends the device zone, `Intl.DateTimeFormat().resolvedOptions().timeZone`).
 The schema stores the runtime's canonical name (`zoned-time.ts#canonicalTimeZone`:
-`america/new_york` and `US/Eastern` become `America/New_York`) and refuses a bare UTC offset such as
-`-05:00`, which would ignore daylight saving. Only canonical names reach the formatter cache, so a
+`america/new_york` and `US/Eastern` become `America/New_York`, `Etc/UTC` becomes `UTC`) and refuses
+a fixed offset (`-05:00`, `Etc/GMT+5`), which would ignore daylight saving. Only canonical names reach the formatter cache, so a
 client cannot grow it by sending spellings.
 `utils/practice-recurrence.ts#expandRecurrence` walks the local calendar from `startDate`, keeps the
 chosen weekdays (BIWEEKLY: every other Sunday-to-Saturday week, counting the week that holds
@@ -57,7 +57,11 @@ takes the first.
 `$transaction`. A series must end: `endDate` at most 366 days after `startDate`, or
 `occurrenceCount` 1 to 100 whose last session also falls within 366 days of `startDate`, and the
 expansion may produce at most `MAX_SERIES_OCCURRENCES` (100) sessions (400 otherwise; 400 too when
-no chosen weekday falls in the range). A team deleted between the check and the insert answers 404. Nothing regenerates a
+no chosen weekday falls in the range). `startDate` may be at most 31 days in the past
+(`MAX_SERIES_BACKDATE_DAYS`): a series cancel deletes only future sessions, so a mistyped year would
+otherwise leave a year of past sessions to delete one by one. A team deleted between the check and
+the insert answers 404. The series payload returns `startDate` / `endDate` as `"YYYY-MM-DD"` (the
+`@db.Date` value is UTC midnight, which a client would render a day early west of UTC). Nothing regenerates a
 series later, so there is no job and no horizon to extend, and a session edited or deleted on its
 own stays as the coach left it. A season-long weekly practice is ~40 rows.
 
@@ -92,9 +96,14 @@ All through `utils/permissions.ts`, never a copy:
   rostered player answers for themself; with `playerId`, a guardian (`isGuardianOf`) answers for a
   rostered child and the row is keyed on the child. A coach, a league admin, or a guardian who omits
   `playerId` gets 403 (game RSVPs, by contrast, accept any reader). A cancelled session refuses
-  answers (400). Rows are projected with `rsvp-service.ts#toRsvpView` (now generic): `user.email`
-  only for callers with `canManageRoster` and on the caller's own row. `GET …/availability` derives
-  its summary from the rows it returns (`toRsvpSummary`, shared with game RSVPs).
+  answers (400).
+- **Who sees what in an answer** (`practice-service.ts#toAvailabilityView`): `user.email` only for
+  callers with `canManageRoster` and on the caller's own row (`rsvp-service.ts#toRsvpView`, now
+  generic); the free-text `comment`, which can say where a child is, only for `canManageRoster`
+  callers, the row's own user and a guardian of that player (`null` for every other reader).
+- **What counts**: the list and `availabilitySummary` include only players still on the team's
+  roster; a removed player's rows stay in the table but leave the headcount. `GET …/availability`
+  derives its summary from the rows it returns (`toRsvpSummary`, shared with game RSVPs).
 
 ## Entitlement
 
@@ -118,9 +127,9 @@ Deleted sessions (a cancelled series' future) simply leave the feed.
 | Method | Path | Body / query | Answer |
 | --- | --- | --- | --- |
 | POST | `/api/v1/practices` | `{ teamId, startsAt (ISO with Z/offset), durationMinutes 5–720, timezone, type?, title? ≤100, location? ≤200, notes? ≤1000 }` | 201 `{ practice }` |
-| GET | `/api/v1/practices` | `?teamId&status&from&to&limit (1–200, 50)&offset` | `{ practices, total, limit, offset }`, soonest first |
+| GET | `/api/v1/practices` | `?teamId&status&from&to&limit (1–200, 50)&offset` | `{ practices, total, limit, offset }`, ascending `startsAt`; there is no default `from`, so an "upcoming" view passes `from=<now>` |
 | GET | `/api/v1/practices/:id` | | `{ practice }` incl. `availabilitySummary { yes, no, maybe }` |
-| PATCH | `/api/v1/practices/:id` | any of the create fields but `teamId` | `{ practice }` |
+| PATCH | `/api/v1/practices/:id` | any of the create fields but `teamId` | `{ practice }`; 400 when the practice is (or was just) cancelled |
 | POST | `/api/v1/practices/:id/cancel` | `{ reason? ≤500 }` | `{ practice }` |
 | DELETE | `/api/v1/practices/:id` | | `{ success, message }` |
 | PUT | `/api/v1/practices/:id/availability` | `{ status, comment? ≤500, playerId? }` | `{ availability }` |

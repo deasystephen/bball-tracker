@@ -19,6 +19,7 @@ import { Prisma } from '@prisma/client';
 import prisma from '../models';
 import {
   CreatePracticeSeriesInput,
+  MAX_SERIES_BACKDATE_DAYS,
   MAX_SERIES_OCCURRENCES,
   MAX_SERIES_SPAN_DAYS,
   UpdatePracticeSeriesInput,
@@ -28,6 +29,7 @@ import { canAccessTeam } from '../utils/permissions';
 import { expandRecurrence } from '../utils/practice-recurrence';
 import { daysBetween, parseLocalDate } from '../utils/zoned-time';
 import { logger } from '../utils/logger';
+import { isForeignKeyViolation } from '../utils/prisma-errors';
 import { assertCanManagePractices } from './practice-service';
 
 const SERIES_SESSION_SELECT = {
@@ -47,9 +49,28 @@ export const PRACTICE_SERIES_INCLUDE = {
   sessions: { select: SERIES_SESSION_SELECT, orderBy: { startsAt: 'asc' } },
 } satisfies Prisma.PracticeSeriesInclude;
 
-export type PracticeSeriesView = Prisma.PracticeSeriesGetPayload<{
+type PracticeSeriesRow = Prisma.PracticeSeriesGetPayload<{
   include: typeof PRACTICE_SERIES_INCLUDE;
 }>;
+
+/**
+ * The series payload. `startDate` and `endDate` are local calendar dates and
+ * go out as "YYYY-MM-DD", the form the API accepts: the `@db.Date` value is
+ * UTC midnight, which a client formatting it in its own zone would show a day
+ * early anywhere west of UTC.
+ */
+export type PracticeSeriesView = Omit<PracticeSeriesRow, 'startDate' | 'endDate'> & {
+  startDate: string;
+  endDate: string | null;
+};
+
+function toSeriesView(row: PracticeSeriesRow): PracticeSeriesView {
+  return {
+    ...row,
+    startDate: row.startDate.toISOString().slice(0, 10),
+    endDate: row.endDate ? row.endDate.toISOString().slice(0, 10) : null,
+  };
+}
 
 export interface PracticeSeriesUpdate {
   series: PracticeSeriesView;
@@ -91,6 +112,11 @@ export class PracticeSeriesService {
       throw new NotFoundError('Team not found');
     }
     await assertCanManagePractices(userId, data.teamId);
+
+    const today = new Date().toISOString().slice(0, 10);
+    if (daysBetween(parseLocalDate(data.startDate), parseLocalDate(today)) > MAX_SERIES_BACKDATE_DAYS) {
+      throw new BadRequestError(`startDate must be within the last ${MAX_SERIES_BACKDATE_DAYS} days`);
+    }
 
     const occurrences = expandRecurrence(data, MAX_SERIES_OCCURRENCES);
     if (occurrences.length === 0) {
@@ -138,14 +164,16 @@ export class PracticeSeriesService {
         await tx.practiceSession.createMany({
           data: occurrences.map((o) => ({ ...shared, seriesId: created.id, startsAt: o.startsAt })),
         });
-        return tx.practiceSeries.findUniqueOrThrow({
-          where: { id: created.id },
-          include: PRACTICE_SERIES_INCLUDE,
-        });
+        return toSeriesView(
+          await tx.practiceSeries.findUniqueOrThrow({
+            where: { id: created.id },
+            include: PRACTICE_SERIES_INCLUDE,
+          })
+        );
       });
     } catch (err) {
       // The team was deleted between the check and the insert.
-      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2003') {
+      if (isForeignKeyViolation(err)) {
         throw new NotFoundError('Team not found');
       }
       throw err;
@@ -172,7 +200,7 @@ export class PracticeSeriesService {
     if (!(await canAccessTeam(userId, series.teamId))) {
       throw new ForbiddenError('You do not have access to this practice series');
     }
-    return series;
+    return toSeriesView(series);
   }
 
   /**
@@ -215,7 +243,7 @@ export class PracticeSeriesService {
         where: { id: seriesId },
         include: PRACTICE_SERIES_INCLUDE,
       });
-      return { series: updated, updatedSessions: sessions.count };
+      return { series: toSeriesView(updated), updatedSessions: sessions.count };
     });
 
     logger.info('Practice series updated', {
@@ -250,7 +278,7 @@ export class PracticeSeriesService {
         where: { id: seriesId },
         include: PRACTICE_SERIES_INCLUDE,
       });
-      return { series: updated, deletedSessions: deleted.count, cancelled: count > 0 };
+      return { series: toSeriesView(updated), deletedSessions: deleted.count, cancelled: count > 0 };
     });
 
     // A repeat (the series was already cancelled) changes nothing and logs nothing.

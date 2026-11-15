@@ -81,7 +81,8 @@ describe('zoned-time helpers', () => {
     expect(isValidTimeZone('')).toBe(false);
     expect(isValidTimeZone('-05:00')).toBe(false);
     expect(canonicalTimeZone('america/NEW_york')).toBe('America/New_York');
-    expect(canonicalTimeZone('Etc/GMT+5')).toBe('Etc/GMT+5');
+    expect(canonicalTimeZone('Etc/GMT+5')).toBeNull(); // a fixed offset, no DST
+    expect(canonicalTimeZone('Etc/UTC')).toBe('UTC');
     expect(canonicalTimeZone('+05:30')).toBeNull();
   });
 
