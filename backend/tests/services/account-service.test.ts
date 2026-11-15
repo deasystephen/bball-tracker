@@ -193,7 +193,9 @@ describe('AccountService.deleteAccount', () => {
     );
     expect(scrubSql[0]).toContain('UPDATE "GuardianInvitation"');
     expect(scrubSql[1]).toMatch(/UPDATE "StaffInvitation"\s+SET "status" = 'EXPIRED'/);
-    expect(scrubSql[2]).toMatch(/UPDATE "StaffInvitation"\s+SET "invitedEmail" = 'deleted-'/);
+    expect(scrubSql[2]).toMatch(/UPDATE "StaffInvitation"\s+SET "invitedEmail" = \? \|\| "id" \|\| \?/);
+    // The sentinel's parts come from utils/stripped-email.ts, one definition with the TypeScript writers.
+    expect((mockPrisma.$executeRaw as jest.Mock).mock.calls[2].slice(1, 3)).toEqual(['deleted-', '@invalid']);
     expect(mockPrisma.user.updateMany).toHaveBeenCalledWith({
       where: { managedById: USER_ID },
       data: { managedById: null },

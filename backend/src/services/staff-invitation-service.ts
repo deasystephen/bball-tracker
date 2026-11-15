@@ -41,6 +41,7 @@ import { emailEquals, isSameEmail } from '../utils/email-match';
 import { hashRecipient } from '../utils/hash-recipient';
 import { lockTeamRow } from '../utils/team-row-lock';
 import { lockUsers } from '../utils/user-row-lock';
+import { strippedEmailFor } from '../utils/stripped-email';
 import { logger } from '../utils/logger';
 import { formatEmailDate } from '../utils/format-date';
 import { withTimeout } from '../utils/promise-timeout';
@@ -143,9 +144,9 @@ function toPublic(row: PublicStaffInvitationSummary): PublicStaffInvitation {
   };
 }
 
-/** The per-row address that replaces `invitedEmail` when it is stripped (same shape as guardian D17). */
+/** The per-row address that replaces `invitedEmail` when it is stripped (`utils/stripped-email.ts`). */
 export function strippedStaffInvitationEmail(invitationId: string): string {
-  return `deleted-${invitationId}@invalid`;
+  return strippedEmailFor(invitationId);
 }
 
 export class StaffInvitationService {
@@ -585,10 +586,13 @@ export class StaffInvitationService {
       throw new BadRequestError(`Cannot accept invitation with status: ${invitation.status}`);
     }
     if (new Date() > invitation.expiresAt) {
-      await prisma.staffInvitation.updateMany({
+      const { count } = await prisma.staffInvitation.updateMany({
         where: { id: invitation.id, status: 'PENDING' },
         data: { status: 'EXPIRED' },
       });
+      if (count > 0) {
+        logger.info('Staff invitation expired', { invitationId: invitation.id, teamId: invitation.teamId });
+      }
       throw new BadRequestError('This invitation has expired');
     }
 
@@ -601,6 +605,19 @@ export class StaffInvitationService {
           const [locked] = await lockUsers(tx, [account.id]);
           if (!locked || locked.deletedAt !== null) {
             throw new NotFoundError('Account not found');
+          }
+          // The by-token refusal again, read after the lock: Add Player's
+          // adoption locks the same row before it marks it managed, so either
+          // it committed first (seen here, 409) or it waits and then sees this
+          // staff row and re-branches to case 3.
+          if (!verifiedUserId) {
+            const fresh = await tx.user.findUnique({
+              where: { id: account.id },
+              select: { workosUserId: true, isManaged: true },
+            });
+            if (fresh && fresh.workosUserId === null && fresh.isManaged) {
+              throw new SignInRequiredError();
+            }
           }
           if (!(await lockTeamRow(tx, invitation.teamId))) {
             throw new NotFoundError('Team not found');
@@ -626,7 +643,10 @@ export class StaffInvitationService {
           if (existing) {
             staff = existing;
           } else {
-            const role = await TeamService.findRoleByType(invitation.teamId, roleType, tx);
+            const role = await tx.teamRole.findFirst({ where: { teamId: invitation.teamId, type: roleType } });
+            if (!role) {
+              throw new BadRequestError('This team no longer has the role this invitation was for');
+            }
             staff = await tx.teamStaff.create({
               data: { teamId: invitation.teamId, userId: account.id, roleId: role.id },
               include: TEAM_STAFF_INCLUDE,

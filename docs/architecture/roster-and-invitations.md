@@ -250,8 +250,8 @@ for every address match and the address stored trimmed and lower-cased; the shar
   so the fall-through answers 404), then a team invitation. The public `GET /invitations/by-token/:token` falls through
   team → guardian → staff and returns the same `kind: 'staff'` view; `POST …/by-token/:token/accept`
   accepts it. Accept answers `{ kind: 'staff', invitation, staff, alreadyStaff }` (the by-token
-  answer trims `staff` to `{ teamId, roleType }`: an unauthenticated caller never gets the account's
-  id, name or email) and invalidates the account's usage cache. With `alreadyStaff` the web page and
+  answer trims `invitation` to `{ id, status }` and `staff` to `{ teamId, roleType }`: a forwarded
+  link never reveals the invited address, the inviter's id or the account's id, name or email) and invalidates the account's usage cache. With `alreadyStaff` the web page and
   the app say the role was not changed.
   - **Which account:** the verified caller on the authenticated path (never a second lookup by
     address); by token, the live account holding the address (`emailEquals`), else a new one,
@@ -261,23 +261,33 @@ for every address match and the address stored trimmed and lower-cased; the shar
     holding the address is refused 409 `sign_in_required`** (`SignInRequiredError`): its managing
     coach may still rewrite that email (`PATCH /players/:id`, B2.10), so a staff role on the row
     would be a grant the coach could take by pointing it at their own address. The invitee signs in
-    with the address (which claims the row) and accepts in the app.
+    with the address (which claims the row) and accepts in the app. The check runs again on the row
+    read **after** the transaction's row lock, and Add Player's adoption locks the same row before
+    its guarded update, so an adoption racing the accept either commits first (409 here) or waits
+    and then sees the staff row (case 3).
   - **The transaction** locks the account's `User` row, then the `Team` row (account deletion's
     order: user first, teams after), so a tombstone never gets a staff row (404) and the accept
     serialises with staff removal and re-role; **re-checks that the inviter is a live account that may
     still manage the team's staff** (`deletedAt` null and `canManageStaff(invitedById)` behind the
     lock; 400 otherwise; `isSystemAdmin` alone would pass a deleted ADMIN's tombstone), so a head coach
     who is removed, demoted or deleted after sending cannot come back through an invitation sent to
-    an address they control, and a club that changes head coach re-sends; flips PENDING → ACCEPTED
+    an address they control, and a club that changes head coach re-sends (removing or demoting a head
+    coach also cancels the PENDING staff invitations they sent on that team, in the same transaction,
+    unless they still manage staff as a league or system admin); a team that no longer has the invited
+    default role answers 400; flips PENDING → ACCEPTED
     guarded on the status (the loser of a race gets 400); and creates the `TeamStaff` row with the
     invited role **unless the account already holds one**, which is left unchanged
     (`alreadyStaff: true`). Accepting never re-roles, so it can never demote the last head coach.
     `POST /staff` takes no team lock, so a direct add racing the accept can hit
     `TeamStaff_teamId_userId_key`; that P2002 rolls the accept back and answers 400 (a retry finds
     the row and reports `alreadyStaff`).
+- `GET /invitations/:id` reads team invitations only (guardian and staff ids answer 404 there, as
+  before for guardians); the app never fetches a staff invitation by id.
+- A lazily expired staff invitation logs `Staff invitation expired`.
 - **Rejection strips the address** (the rejection-only strip of the player flow): the invitee's
   decline sets `invitedEmail` to the per-row sentinel `deleted-<id>@invalid` in the same guarded
-  update; `recipientHash` stays, so the cooldown still applies to a re-invite. Cancel and expiry
+  update (the sentinel and the raw-SQL scrub share `utils/stripped-email.ts`); `recipientHash`
+  stays, so the cooldown still applies to a re-invite. Cancel and expiry
   keep the address. With no `User` row created at invite time there is nothing else to strip.
 - **An accepted-but-unclaimed staff account stays unmanaged.** Add Player's case 2 never adopts a
   row that holds a `TeamStaff` row (`teamStaff: { none: {} }` on its claim-guarded `updateMany`):

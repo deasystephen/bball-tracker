@@ -1440,6 +1440,32 @@ export class TeamService {
     return user;
   }
 
+  /**
+   * A head coach who is removed or demoted can no longer manage the team's
+   * staff, so the PENDING staff invitations they sent on it are cancelled in
+   * the same transaction (#460); accept re-checks the inviter anyway, this
+   * keeps the pending lists honest. A league or system admin who sent them
+   * keeps them.
+   */
+  private static async cancelSentStaffInvitations(
+    tx: Prisma.TransactionClient,
+    teamId: string,
+    staffUserId: string
+  ): Promise<void> {
+    // Still able to manage staff without the head-coach row: keep them.
+    if (await isSystemAdmin(staffUserId, tx)) {
+      return;
+    }
+    const team = await tx.team.findUnique({ where: { id: teamId }, select: { season: { select: { leagueId: true } } } });
+    if (team?.season && (await isLeagueAdmin(staffUserId, team.season.leagueId, tx))) {
+      return;
+    }
+    await tx.staffInvitation.updateMany({
+      where: { teamId, invitedById: staffUserId, status: 'PENDING' },
+      data: { status: 'CANCELLED' },
+    });
+  }
+
   /** Find the team's default role row for a role type (e.g. HEAD_COACH). */
   static async findRoleByType(
     teamId: string,
@@ -1595,6 +1621,8 @@ export class TeamService {
       // Demoting the only head coach would leave the team unmanageable.
       if (current.role.type === 'HEAD_COACH') {
         await TeamService.assertNotLastHeadCoach(teamId, staffUserId, tx);
+        // Their pending staff invitations die with the right (#460).
+        await TeamService.cancelSentStaffInvitations(tx, teamId, staffUserId);
       }
 
       // Account deletion removes a non-head-coach's staff rows without this
@@ -1665,6 +1693,7 @@ export class TeamService {
 
       if (existing.role.type === 'HEAD_COACH') {
         await TeamService.assertNotLastHeadCoach(teamId, staffUserId, tx);
+        await TeamService.cancelSentStaffInvitations(tx, teamId, staffUserId);
       }
 
       // Account deletion removes a non-head-coach's staff rows without this

@@ -38,6 +38,7 @@ import { EMAIL_SUPPRESSION_CLEARED } from '../utils/email-suppression';
 import { emailEquals } from '../utils/email-match';
 import { USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
 import { createOrConflict, isUniqueViolation } from '../utils/prisma-errors';
+import { lockUsers } from '../utils/user-row-lock';
 import {
   assertOwnUploadUrl,
   checkAvatarUpload,
@@ -1327,6 +1328,10 @@ export class InvitationService {
         // signed in, #460) is never adopted as managed either: the managing
         // coach could then rewrite its email (B2.10) and claim the staff role.
         // It re-branches to case 3 like a claimed account.
+        // Lock the row first so the update below takes its snapshot after any
+        // staff accept holding it has committed (a NOT EXISTS read under a
+        // plain UPDATE would not see that commit).
+        await lockUsers(tx, [reuse.id]);
         const { count } = await tx.user.updateMany({
           where: { id: reuse.id, workosUserId: null, deletedAt: null, teamStaff: { none: {} } },
           data: {

@@ -731,6 +731,46 @@ describe('staff invitations (#460) through the real StaffInvitationService', () 
       );
     }
 
+    it('the public accept returns the invitation status only: no address, no inviter id', async () => {
+      givenAcceptable();
+      mockPrisma.user.findFirst.mockResolvedValue({ id: INVITEE_ID, workosUserId: 'wk-new', isManaged: false });
+
+      const res = await request(app).post(`/api/v1/invitations/by-token/${SECRET_TOKEN}/accept`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.invitation).toEqual({ id: INVITATION_ID, status: 'ACCEPTED' });
+      expect(JSON.stringify(res.body)).not.toContain(INVITEE_EMAIL);
+      expect(JSON.stringify(res.body)).not.toContain(HEAD_COACH_ID);
+      expect(JSON.stringify(res.body)).not.toContain(INVITEE_ID);
+    });
+
+    it('re-reads the managed flag after the row lock: an adoption that committed first is refused 409', async () => {
+      givenAcceptable();
+      // Unlocked read: not managed. Read under the lock: Add Player adopted it meanwhile.
+      mockPrisma.user.findFirst.mockResolvedValue({ id: INVITEE_ID, workosUserId: null, isManaged: false });
+      mockPrisma.user.findUnique.mockImplementation(async ({ where }: { where: { id: string } }) =>
+        where.id === INVITEE_ID ? { ...USERS[INVITEE_ID], workosUserId: null, isManaged: true } : USERS[where.id] ?? null
+      );
+
+      const res = await request(app).post(`/api/v1/invitations/by-token/${SECRET_TOKEN}/accept`);
+
+      expect(res.status).toBe(409);
+      expect(res.body.code).toBe('sign_in_required');
+      expect(mockPrisma.staffInvitation.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('a team that lost the invited role answers 400, not "invitation not found"', async () => {
+      givenAcceptable();
+      mockPrisma.user.findFirst.mockResolvedValue({ id: INVITEE_ID, workosUserId: 'wk-new', isManaged: false });
+      mockPrisma.teamRole.findFirst.mockResolvedValue(null);
+
+      const res = await request(app).post(`/api/v1/invitations/by-token/${SECRET_TOKEN}/accept`);
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('This team no longer has the role this invitation was for');
+      expect(mockPrisma.teamStaff.create).not.toHaveBeenCalled();
+    });
+
     it('accept with no account creates it inside the transaction (lower-cased, unverified, COACH) and the staff row', async () => {
       givenAcceptable();
       mockPrisma.user.findFirst

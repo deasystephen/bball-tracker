@@ -181,7 +181,9 @@ router.post('/by-token/:token/accept', inviteAcceptRateLimit, async (req, res) =
         await invalidateUsage(accepted.staff.userId);
         return {
           kind: 'staff' as const,
-          invitation: omitToken(accepted.invitation),
+          // The status only: a forwarded link must not reveal the invited
+          // address or the inviter's id (the authenticated accept has the row).
+          invitation: { id: accepted.invitation.id, status: accepted.invitation.status },
           // Only what the page shows: an unauthenticated caller never gets the
           // account's id, name or email (the authenticated accept returns the row).
           staff: { teamId: accepted.staff.teamId, roleType: accepted.staff.role.type },

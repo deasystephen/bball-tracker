@@ -20,6 +20,7 @@ import prisma from '../../src/models';
 import { StaffInvitationService } from '../../src/services/staff-invitation-service';
 import { AccountService } from '../../src/services/account-service';
 import { InvitationService } from '../../src/services/invitation-service';
+import { TeamService } from '../../src/services/team-service';
 import { BadRequestError, SignInRequiredError } from '../../src/utils/errors';
 import { DbFixtures, type Org } from '../support/db-fixtures';
 
@@ -270,6 +271,35 @@ describe('StaffInvitationService (real Postgres, #460)', () => {
       'the coach who sent it can no longer manage'
     );
     expect(await prisma.user.count({ where: { email } })).toBe(0);
+  });
+
+  it('removing or demoting a head coach cancels the staff invitations they sent on the team', async () => {
+    const secondHeadId = await fx.user('second-head', 'COACH');
+    await fx.staff(secondHeadId, org);
+    const removed = await StaffInvitationService.inviteStaff(
+      org.teamId,
+      { email: address('by-removed-head'), roleType: 'ASSISTANT_COACH' },
+      secondHeadId
+    );
+    await TeamService.removeStaffMember(org.teamId, secondHeadId, headCoachId);
+    expect((await prisma.staffInvitation.findUniqueOrThrow({ where: { id: removed.id } })).status).toBe('CANCELLED');
+
+    const thirdHeadId = await fx.user('third-head', 'COACH');
+    await fx.staff(thirdHeadId, org);
+    const demoted = await StaffInvitationService.inviteStaff(
+      org.teamId,
+      { email: address('by-demoted-head'), roleType: 'ASSISTANT_COACH' },
+      thirdHeadId
+    );
+    // The headCoach's own invitation survives the other head coach's demotion.
+    const kept = await StaffInvitationService.inviteStaff(
+      org.teamId,
+      { email: address('by-staying-head'), roleType: 'ASSISTANT_COACH' },
+      headCoachId
+    );
+    await TeamService.changeStaffRole(org.teamId, thirdHeadId, 'ASSISTANT_COACH', headCoachId);
+    expect((await prisma.staffInvitation.findUniqueOrThrow({ where: { id: demoted.id } })).status).toBe('CANCELLED');
+    expect((await prisma.staffInvitation.findUniqueOrThrow({ where: { id: kept.id } })).status).toBe('PENDING');
   });
 
   it('a team manager invitation creates a PLAYER account (the app asks the role step)', async () => {

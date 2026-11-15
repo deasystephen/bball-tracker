@@ -86,7 +86,7 @@ export function InviteClient({ invitation, token }: Props) {
               ? `You are now ${childRole}!`
               : staff
                 ? alreadyStaff
-                  ? `You're already on ${staff.teamName}'s staff. Your role was not changed.`
+                  ? `You're already on the ${staff.teamName} staff. Your role was not changed.`
                   : `You've joined ${staff.teamName} as ${staffRole}!`
                 : `You've joined ${invitation.teamName}!`}
           </p>

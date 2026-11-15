@@ -1800,6 +1800,7 @@ describe('InvitationService', () => {
         .mockResolvedValue(invitationRow(team.id, 'new-1', { id: 'new-1', name: 'Jane', email: 'jane@example.com' }));
       (mockPrisma.$transaction as jest.Mock).mockImplementation(async (cb) =>
         cb({
+          $queryRaw: jest.fn().mockResolvedValue([]), // lockUsers before the adoption (#460)
           user: { create: txUserCreate },
           teamMember: { findUnique: txMemberFind, create: txMemberCreate },
           teamInvitation: { findFirst: jest.fn().mockResolvedValue(null), updateMany: txInvUpdateMany, create: txInvCreate },
@@ -1846,6 +1847,7 @@ describe('InvitationService', () => {
       (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(null);
       (mockPrisma.$transaction as jest.Mock).mockImplementation(async (cb) =>
         cb({
+          $queryRaw: jest.fn().mockResolvedValue([]), // lockUsers before the adoption (#460)
           user: { create: jest.fn().mockResolvedValue({ id: 'new-1' }) },
           teamMember: {
             findUnique: jest.fn().mockResolvedValue(null),
@@ -1884,6 +1886,7 @@ describe('InvitationService', () => {
       const txUserUpdate = jest.fn().mockResolvedValue({ count: 1 });
       (mockPrisma.$transaction as jest.Mock).mockImplementation(async (cb) =>
         cb({
+          $queryRaw: jest.fn().mockResolvedValue([]), // lockUsers before the adoption (#460)
           user: { updateMany: txUserUpdate },
           teamMember: {
             findUnique: jest.fn().mockResolvedValue(null),
@@ -1927,6 +1930,7 @@ describe('InvitationService', () => {
       (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(unclaimed);
       (mockPrisma.$transaction as jest.Mock).mockImplementation(async (cb) =>
         cb({
+          $queryRaw: jest.fn().mockResolvedValue([]), // lockUsers before the adoption (#460)
           user: { updateMany: txUserUpdate },
           teamMember: {
             findUnique: jest.fn().mockResolvedValue(null),
@@ -2230,6 +2234,7 @@ describe('InvitationService', () => {
       const { coach, team } = setupCoachTeam();
       (mockPrisma.$transaction as jest.Mock).mockImplementation(async (cb) =>
         cb({
+          $queryRaw: jest.fn().mockResolvedValue([]), // lockUsers before the adoption (#460)
           user: { create: jest.fn().mockResolvedValue({ id: 'managed-1' }) },
           teamMember: {
             create: jest.fn().mockResolvedValue({
@@ -2265,6 +2270,7 @@ describe('InvitationService', () => {
       const { coach, team } = setupCoachTeam();
       (mockPrisma.$transaction as jest.Mock).mockImplementation(async (cb) =>
         cb({
+          $queryRaw: jest.fn().mockResolvedValue([]), // lockUsers before the adoption (#460)
           user: { create: jest.fn().mockResolvedValue({ id: 'managed-1' }) },
           teamMember: {
             create: jest.fn().mockResolvedValue({
@@ -2324,6 +2330,7 @@ describe('InvitationService', () => {
           throw uniqueViolation('User_email_key');
         }
         return cb({
+          $queryRaw: jest.fn().mockResolvedValue([]), // lockUsers before the adoption (#460)
           user: { updateMany: txUserUpdate },
           teamMember: {
             findUnique: jest.fn().mockResolvedValue(null),
@@ -2377,6 +2384,7 @@ describe('InvitationService', () => {
           throw p2002;
         }
         return cb({
+          $queryRaw: jest.fn().mockResolvedValue([]), // lockUsers before the adoption (#460)
           user: { updateMany: txUserUpdate },
           teamMember: {
             findUnique: jest.fn().mockResolvedValue(null),
@@ -2587,6 +2595,7 @@ describe('InvitationService', () => {
       });
       (mockPrisma.$transaction as jest.Mock).mockImplementation(async (cb) =>
         cb({
+          $queryRaw: jest.fn().mockResolvedValue([]), // lockUsers before the adoption (#460)
           teamInvitation: {
             findFirst: txFindFirst,
             updateMany: jest.fn().mockResolvedValue({ count: 1 }),
@@ -2628,6 +2637,7 @@ describe('InvitationService', () => {
       const txCreate = jest.fn();
       (mockPrisma.$transaction as jest.Mock).mockImplementation(async (cb) =>
         cb({
+          $queryRaw: jest.fn().mockResolvedValue([]), // lockUsers before the adoption (#460)
           teamInvitation: {
             // An ACCEPTED row landed between the guard and the transaction
             findFirst: jest.fn().mockResolvedValue({ id: 'accepted-1' }),
@@ -3074,6 +3084,7 @@ describe('InvitationService', () => {
       const txMemberCreate = jest.fn();
       (mockPrisma.$transaction as jest.Mock).mockImplementation(async (cb) =>
         cb({
+          $queryRaw: jest.fn().mockResolvedValue([]), // lockUsers before the adoption (#460)
           user: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
           teamMember: { findUnique: jest.fn().mockResolvedValue(null), create: txMemberCreate },
           teamInvitation: { findFirst: txFindFirst, updateMany: txInvUpdateMany, create: jest.fn() },
@@ -3108,6 +3119,7 @@ describe('InvitationService', () => {
       });
       (mockPrisma.$transaction as jest.Mock).mockImplementation(async (cb) =>
         cb({
+          $queryRaw: jest.fn().mockResolvedValue([]), // lockUsers before the adoption (#460)
           user: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
           teamMember: {
             findUnique: jest.fn().mockResolvedValue(null),
@@ -3180,6 +3192,7 @@ describe('InvitationService', () => {
       const txInvCreate = jest.fn();
       (mockPrisma.$transaction as jest.Mock).mockImplementation(async (cb) =>
         cb({
+          $queryRaw: jest.fn().mockResolvedValue([]), // lockUsers before the adoption (#460)
           user: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
           teamMember: {
             findUnique: jest.fn().mockResolvedValue(createTeamMember({ teamId: team.id, playerId: unclaimed.id })),
@@ -3260,6 +3273,7 @@ describe('InvitationService', () => {
         const txUserUpdateMany = jest.fn();
         (mockPrisma.$transaction as jest.Mock).mockImplementation(async (cb) =>
           cb({
+            $queryRaw: jest.fn().mockResolvedValue([]), // lockUsers before the adoption (#460)
             teamInvitation: {
               updateMany: jest.fn().mockResolvedValue({ count: 0 }),
               count: jest.fn().mockResolvedValue(0),
@@ -3294,6 +3308,7 @@ describe('InvitationService', () => {
       const reRead = jest.fn().mockResolvedValue({ deletedAt: null });
       (mockPrisma.$transaction as jest.Mock).mockImplementation(async (cb) =>
         cb({
+          $queryRaw: jest.fn().mockResolvedValue([]), // lockUsers before the adoption (#460)
           user: { updateMany: jest.fn().mockResolvedValue({ count: 0 }), findUnique: reRead },
           teamMember: { findUnique: jest.fn(), create: jest.fn() },
           teamInvitation: { findFirst: jest.fn().mockResolvedValue(null), updateMany: jest.fn(), create: jest.fn() },
@@ -3338,6 +3353,7 @@ describe('InvitationService', () => {
       const invitationCreate = jest.fn();
       (mockPrisma.$transaction as jest.Mock).mockImplementation(async (cb) =>
         cb({
+          $queryRaw: jest.fn().mockResolvedValue([]), // lockUsers before the adoption (#460)
           user: {
             updateMany: jest.fn().mockResolvedValue({ count: 0 }),
             findUnique: jest.fn().mockResolvedValue({ deletedAt: new Date() }),
@@ -3371,6 +3387,7 @@ describe('InvitationService', () => {
       const txInvUpdateMany = jest.fn().mockResolvedValue({ count: 1 });
       (mockPrisma.$transaction as jest.Mock).mockImplementation(async (cb) =>
         cb({
+          $queryRaw: jest.fn().mockResolvedValue([]), // lockUsers before the adoption (#460)
           user: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
           teamMember: {
             findUnique: jest.fn().mockResolvedValue(null),

@@ -66,6 +66,7 @@ import { lastHeadCoachTeams } from '../utils/permissions';
 import { lockTeamRows } from '../utils/team-row-lock';
 import { EMAIL_SUPPRESSION_CLEARED } from '../utils/email-suppression';
 import { emailEquals } from '../utils/email-match';
+import { STRIPPED_EMAIL_PREFIX, STRIPPED_EMAIL_SUFFIX } from '../utils/stripped-email';
 import { USER_SUMMARY_SELECT } from '../utils/user-select';
 import {
   type AvatarDeletion,
@@ -1322,7 +1323,7 @@ async function purgeLoginBindings(tx: Prisma.TransactionClient, userId: string):
 async function scrubInvitedEmail(tx: Prisma.TransactionClient, email: string): Promise<void> {
   await tx.$executeRaw`
     UPDATE "GuardianInvitation"
-    SET "invitedEmail" = 'deleted-' || "id" || '@invalid'
+    SET "invitedEmail" = ${STRIPPED_EMAIL_PREFIX} || "id" || ${STRIPPED_EMAIL_SUFFIX}
     WHERE lower("invitedEmail") = lower(${email})`;
   await tx.$executeRaw`
     UPDATE "StaffInvitation"
@@ -1330,7 +1331,7 @@ async function scrubInvitedEmail(tx: Prisma.TransactionClient, email: string): P
     WHERE lower("invitedEmail") = lower(${email}) AND "status" = 'PENDING'`;
   await tx.$executeRaw`
     UPDATE "StaffInvitation"
-    SET "invitedEmail" = 'deleted-' || "id" || '@invalid', "recipientHash" = ''
+    SET "invitedEmail" = ${STRIPPED_EMAIL_PREFIX} || "id" || ${STRIPPED_EMAIL_SUFFIX}, "recipientHash" = ''
     WHERE lower("invitedEmail") = lower(${email})`;
 }
 
