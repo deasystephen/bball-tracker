@@ -10,6 +10,7 @@
 import { expandRecurrence, type RecurrenceRule } from '../../src/utils/practice-recurrence';
 import {
   addDays,
+  canonicalTimeZone,
   daysBetween,
   formatLocalDate,
   isValidTimeZone,
@@ -73,11 +74,15 @@ describe('zonedTimeToUtc', () => {
 });
 
 describe('zoned-time helpers', () => {
-  it('validates zone names', () => {
+  it('validates zone names and resolves them to the canonical one', () => {
     expect(isValidTimeZone('America/New_York')).toBe(true);
     expect(isValidTimeZone('UTC')).toBe(true);
     expect(isValidTimeZone('Mars/Olympus_Mons')).toBe(false);
     expect(isValidTimeZone('')).toBe(false);
+    expect(isValidTimeZone('-05:00')).toBe(false);
+    expect(canonicalTimeZone('america/NEW_york')).toBe('America/New_York');
+    expect(canonicalTimeZone('Etc/GMT+5')).toBe('Etc/GMT+5');
+    expect(canonicalTimeZone('+05:30')).toBeNull();
   });
 
   it('does calendar arithmetic across month and year ends', () => {

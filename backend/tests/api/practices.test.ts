@@ -272,13 +272,14 @@ describe('availability', () => {
   });
 
   it('PUT answers 400 for a bad status and for a cancelled practice', async () => {
+    mockPrisma.teamMember.findUnique.mockResolvedValue({ id: 'm' });
     expect((await request(app).put(`/api/v1/practices/${SESSION_ID}/availability`).send({ status: 'LATE' })).status).toBe(400);
     mockPrisma.practiceSession.findUnique.mockResolvedValue({ id: SESSION_ID, teamId: TEAM_ID, status: 'CANCELLED' });
     expect((await request(app).put(`/api/v1/practices/${SESSION_ID}/availability`).send({ status: 'YES' })).status).toBe(400);
   });
 
-  it('PUT answers 403 to someone outside the team', async () => {
-    (canAccessTeam as jest.Mock).mockResolvedValue(false);
+  it('PUT answers 403 to anyone not on the roster', async () => {
+    mockPrisma.teamMember.findUnique.mockResolvedValue(null);
     expect((await request(app).put(`/api/v1/practices/${SESSION_ID}/availability`).send({ status: 'YES' })).status).toBe(403);
   });
 
@@ -296,7 +297,6 @@ describe('availability', () => {
         user: userSummary(CHILD_ID, 'kid@example.test'),
       },
     ]);
-    mockPrisma.practiceAvailability.groupBy.mockResolvedValue([{ status: 'YES', _count: { status: 1 } }]);
 
     const res = await request(app).get(`/api/v1/practices/${SESSION_ID}/availability`);
 

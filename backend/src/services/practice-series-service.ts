@@ -20,11 +20,13 @@ import prisma from '../models';
 import {
   CreatePracticeSeriesInput,
   MAX_SERIES_OCCURRENCES,
+  MAX_SERIES_SPAN_DAYS,
   UpdatePracticeSeriesInput,
 } from '../api/practices/schemas';
 import { BadRequestError, ForbiddenError, NotFoundError } from '../utils/errors';
 import { canAccessTeam } from '../utils/permissions';
 import { expandRecurrence } from '../utils/practice-recurrence';
+import { daysBetween, parseLocalDate } from '../utils/zoned-time';
 import { logger } from '../utils/logger';
 import { assertCanManagePractices } from './practice-service';
 
@@ -99,6 +101,14 @@ export class PracticeSeriesService {
         `This schedule would create more than ${MAX_SERIES_OCCURRENCES} practices; choose an earlier endDate or fewer weekdays`
       );
     }
+    // The schema bounds an endDate; a count-ended rule is bounded here, so a
+    // biweekly count of 100 cannot run four years past the team-season.
+    const lastDate = occurrences[occurrences.length - 1].localDate;
+    if (daysBetween(parseLocalDate(data.startDate), parseLocalDate(lastDate)) > MAX_SERIES_SPAN_DAYS) {
+      throw new BadRequestError(
+        `This schedule runs past ${MAX_SERIES_SPAN_DAYS} days from its start date; choose a smaller occurrenceCount`
+      );
+    }
 
     const shared = {
       teamId: data.teamId,
@@ -110,27 +120,36 @@ export class PracticeSeriesService {
       timezone: data.timezone,
     };
 
-    const series = await prisma.$transaction(async (tx) => {
-      const created = await tx.practiceSeries.create({
-        data: {
-          ...shared,
-          frequency: data.frequency,
-          weekdays: [...data.weekdays].sort((a, b) => a - b),
-          startDate: dateColumn(data.startDate),
-          startTime: data.startTime,
-          endDate: data.endDate ? dateColumn(data.endDate) : null,
-          occurrenceCount: data.occurrenceCount ?? null,
-        },
-        select: { id: true },
+    let series: PracticeSeriesView;
+    try {
+      series = await prisma.$transaction(async (tx) => {
+        const created = await tx.practiceSeries.create({
+          data: {
+            ...shared,
+            frequency: data.frequency,
+            weekdays: [...data.weekdays].sort((a, b) => a - b),
+            startDate: dateColumn(data.startDate),
+            startTime: data.startTime,
+            endDate: data.endDate ? dateColumn(data.endDate) : null,
+            occurrenceCount: data.occurrenceCount ?? null,
+          },
+          select: { id: true },
+        });
+        await tx.practiceSession.createMany({
+          data: occurrences.map((o) => ({ ...shared, seriesId: created.id, startsAt: o.startsAt })),
+        });
+        return tx.practiceSeries.findUniqueOrThrow({
+          where: { id: created.id },
+          include: PRACTICE_SERIES_INCLUDE,
+        });
       });
-      await tx.practiceSession.createMany({
-        data: occurrences.map((o) => ({ ...shared, seriesId: created.id, startsAt: o.startsAt })),
-      });
-      return tx.practiceSeries.findUniqueOrThrow({
-        where: { id: created.id },
-        include: PRACTICE_SERIES_INCLUDE,
-      });
-    });
+    } catch (err) {
+      // The team was deleted between the check and the insert.
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2003') {
+        throw new NotFoundError('Team not found');
+      }
+      throw err;
+    }
 
     logger.info('Practice series created', {
       seriesId: series.id,
@@ -218,7 +237,7 @@ export class PracticeSeriesService {
     const existing = await findSeriesForWrite(seriesId, userId);
     const now = new Date();
 
-    const { series, deletedSessions } = await prisma.$transaction(async (tx) => {
+    const { series, deletedSessions, cancelled } = await prisma.$transaction(async (tx) => {
       const { count } = await tx.practiceSeries.updateMany({
         where: { id: seriesId, cancelledAt: null },
         data: { cancelledAt: now },
@@ -231,15 +250,18 @@ export class PracticeSeriesService {
         where: { id: seriesId },
         include: PRACTICE_SERIES_INCLUDE,
       });
-      return { series: updated, deletedSessions: deleted.count };
+      return { series: updated, deletedSessions: deleted.count, cancelled: count > 0 };
     });
 
-    logger.info('Practice series cancelled', {
-      seriesId,
-      teamId: existing.teamId,
-      deletedSessions,
-      userId,
-    });
+    // A repeat (the series was already cancelled) changes nothing and logs nothing.
+    if (cancelled) {
+      logger.info('Practice series cancelled', {
+        seriesId,
+        teamId: existing.teamId,
+        deletedSessions,
+        userId,
+      });
+    }
     return { series, deletedSessions };
   }
 }

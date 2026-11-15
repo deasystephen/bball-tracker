@@ -143,6 +143,14 @@ describe('AccountService.convertToManaged', () => {
     await prisma.announcementReply.create({ data: { announcementId: announcement.id, authorId: parent, body: 'Thanks' } });
     const game = await fx.game(org);
     await prisma.gameRsvp.create({ data: { gameId: game, userId: kid, status: 'YES' } });
+    // Practice availability (#33): the answer stays, the child's free-text comment goes.
+    const practice = await prisma.practiceSession.create({
+      data: { teamId: org.teamId, startsAt: new Date('2030-01-15T23:00:00Z'), durationMinutes: 60, timezone: 'UTC' },
+      select: { id: true },
+    });
+    await prisma.practiceAvailability.create({
+      data: { sessionId: practice.id, userId: kid, status: 'NO', comment: 'at my dad’s on 5th St' },
+    });
     await prisma.pushToken.create({ data: { userId: kid, token: `ExponentPushToken[${fx.run}]`, platform: 'ios' } });
     await prisma.calendarFeedToken.create({ data: { userId: kid, teamId: org.teamId, token: `cal-${fx.run}` } });
     const invite = await prisma.teamInvitation.create({
@@ -194,6 +202,9 @@ describe('AccountService.convertToManaged', () => {
     expect(await prisma.calendarFeedToken.count({ where: { userId: kid } })).toBe(0);
     expect(await prisma.teamMember.count({ where: { playerId: kid, teamId: org.teamId } })).toBe(1);
     expect(await prisma.gameRsvp.count({ where: { userId: kid } })).toBe(1);
+    expect(
+      await prisma.practiceAvailability.findMany({ where: { userId: kid }, select: { status: true, comment: true } })
+    ).toEqual([{ status: 'NO', comment: null }]);
     expect(
       await prisma.teamInvitation.findUniqueOrThrow({
         where: { id: invite.id },

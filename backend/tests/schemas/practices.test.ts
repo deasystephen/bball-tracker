@@ -55,7 +55,18 @@ describe('createPracticeSchema', () => {
     expect(result.data?.location).toBeNull();
   });
 
+  it('stores the canonical zone name', () => {
+    expect(createPracticeSchema.safeParse({ ...validPractice, timezone: 'america/new_york' }).data?.timezone).toBe(
+      'America/New_York'
+    );
+    expect(createPracticeSchema.safeParse({ ...validPractice, timezone: 'US/Eastern' }).data?.timezone).toBe(
+      'America/New_York'
+    );
+    expect(createPracticeSchema.safeParse({ ...validPractice, timezone: 'utc' }).data?.timezone).toBe('UTC');
+  });
+
   it.each([
+    ['a fixed offset zone, which ignores DST', { timezone: '+05:30' }],
     ['a missing teamId', { teamId: undefined }],
     ['a non-uuid teamId', { teamId: 'team-1' }],
     ['a floating local startsAt', { startsAt: '2026-11-17T18:00:00' }],

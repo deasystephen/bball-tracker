@@ -17,6 +17,12 @@ export interface LocalDate {
   day: number;
 }
 
+/**
+ * One formatter per zone, keyed by the CANONICAL name only: every name that
+ * reaches here went through `canonicalTimeZone` at the API boundary, so the
+ * map holds at most one entry per real zone (a few hundred), never one per
+ * spelling a client sends.
+ */
 const formatters = new Map<string, Intl.DateTimeFormat>();
 
 function formatterFor(timeZone: string): Intl.DateTimeFormat {
@@ -37,15 +43,29 @@ function formatterFor(timeZone: string): Intl.DateTimeFormat {
   return formatter;
 }
 
-/** True when `timeZone` is an IANA zone (or alias such as "UTC") this runtime knows. */
-export function isValidTimeZone(timeZone: string): boolean {
-  if (!timeZone) return false;
+/** A region zone ("America/New_York", "Etc/GMT+5") or UTC; never a bare offset such as "+05:30". */
+const REGION_ZONE_RE = /^(?:UTC|[A-Za-z]+(?:\/[A-Za-z0-9_+-]+)+)$/;
+
+/**
+ * The runtime's canonical name for `timeZone` ("america/new_york" and
+ * "US/Eastern" both give "America/New_York"), or null when it is unknown or is
+ * a fixed UTC offset, which would silently ignore daylight saving. Builds an
+ * uncached formatter, so arbitrary client input never grows the cache.
+ */
+export function canonicalTimeZone(timeZone: string): string | null {
+  if (!timeZone) return null;
+  let resolved: string;
   try {
-    formatterFor(timeZone);
-    return true;
+    resolved = new Intl.DateTimeFormat('en-US', { timeZone }).resolvedOptions().timeZone;
   } catch {
-    return false;
+    return null;
   }
+  return REGION_ZONE_RE.test(resolved) ? resolved : null;
+}
+
+/** True when `canonicalTimeZone` accepts `timeZone`. */
+export function isValidTimeZone(timeZone: string): boolean {
+  return canonicalTimeZone(timeZone) !== null;
 }
 
 /** The local wall-clock fields of `instant` in `timeZone`, as a UTC epoch (ms). */

@@ -6,7 +6,7 @@
 
 import { z } from 'zod';
 import { PracticeFrequency, PracticeStatus, PracticeType, RsvpStatus } from '@prisma/client';
-import { isValidTimeZone, parseLocalDate, daysBetween } from '../../utils/zoned-time';
+import { canonicalTimeZone, isValidTimeZone, parseLocalDate, daysBetween } from '../../utils/zoned-time';
 
 /** Most sessions one series may materialize. */
 export const MAX_SERIES_OCCURRENCES = 100;
@@ -37,11 +37,15 @@ function optionalText(max: number, label: string): OptionalTextSchema {
     .optional();
 }
 
+const TIMEZONE_MESSAGE = 'timezone must be an IANA zone name, e.g. America/New_York';
+
+/** An IANA zone, stored under its canonical name (see `canonicalTimeZone`). */
 const timezoneSchema = z
   .string()
   .min(1, 'timezone is required')
-  .max(64, 'timezone must be an IANA zone name')
-  .refine(isValidTimeZone, { message: 'timezone must be an IANA zone name, e.g. America/New_York' });
+  .max(64, TIMEZONE_MESSAGE)
+  .refine(isValidTimeZone, { message: TIMEZONE_MESSAGE })
+  .transform((value) => canonicalTimeZone(value) ?? value);
 
 const durationSchema = z
   .number()

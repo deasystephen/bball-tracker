@@ -115,6 +115,14 @@ describe('PracticeService.createPractice', () => {
     expect(domainEvent(spy, 'Practice created')).toEqual({ practiceId: SESSION, teamId: TEAM, userId: USER });
   });
 
+  it('maps a team deleted mid-request (P2003) to 404 and rethrows anything else', async () => {
+    mockPrisma.team.findUnique.mockResolvedValue({ id: TEAM });
+    mockPrisma.practiceSession.create.mockRejectedValueOnce(knownError('P2003'));
+    await expect(PracticeService.createPractice(input, USER)).rejects.toThrow('Team not found');
+    mockPrisma.practiceSession.create.mockRejectedValueOnce(new Error('db down'));
+    await expect(PracticeService.createPractice(input, USER)).rejects.toThrow('db down');
+  });
+
   it('404s an unknown team and 403s a caller without canManageTeam', async () => {
     mockPrisma.team.findUnique.mockResolvedValue(null);
     await expect(PracticeService.createPractice(input, USER)).rejects.toBeInstanceOf(NotFoundError);
@@ -192,14 +200,12 @@ describe('PracticeService.listPractices', () => {
     );
   });
 
-  it('leaves a system admin unscoped, with or without a teamId', async () => {
+  it('leaves a system admin unscoped', async () => {
     mocked(isSystemAdmin).mockResolvedValue(true);
     await PracticeService.listPractices({ ...page, to: '2030-01-01T00:00:00Z' }, USER);
     expect(mockPrisma.practiceSession.findMany.mock.calls[0][0].where).toEqual({
       startsAt: { lte: new Date('2030-01-01T00:00:00Z') },
     });
-    await PracticeService.listPractices({ ...page, teamId: TEAM }, USER);
-    expect(mockPrisma.practiceSession.findMany.mock.calls[1][0].where).toEqual({ teamId: TEAM });
     expect(mocked(readableTeamsWhere)).not.toHaveBeenCalled();
   });
 });
@@ -312,6 +318,16 @@ describe('PracticeService.cancelPractice', () => {
     });
   });
 
+  it('logs nothing on a repeat', async () => {
+    const spy = spyOnInfo();
+    mockPrisma.practiceSession.findUnique
+      .mockResolvedValueOnce({ id: SESSION, teamId: TEAM, seriesId: null, status: 'CANCELLED' })
+      .mockResolvedValueOnce(practiceRow({ status: 'CANCELLED' }));
+    mockPrisma.practiceSession.updateMany.mockResolvedValue({ count: 0 });
+    await PracticeService.cancelPractice(SESSION, {}, USER);
+    expect(spy.mock.calls.filter(([msg]) => msg === 'Practice cancelled')).toHaveLength(0);
+  });
+
   it('404s when the row is gone after the write', async () => {
     mockPrisma.practiceSession.findUnique
       .mockResolvedValueOnce({ id: SESSION, teamId: TEAM, seriesId: null, status: 'SCHEDULED' })
@@ -346,6 +362,8 @@ describe('PracticeService.deletePractice', () => {
 describe('PracticeService.upsertAvailability', () => {
   beforeEach(() => {
     mockPrisma.practiceSession.findUnique.mockResolvedValue({ id: SESSION, teamId: TEAM, status: 'SCHEDULED' });
+    // The subject (the caller, or the guardian's child) is on the roster.
+    mockPrisma.teamMember.findUnique.mockResolvedValue({ id: 'm' });
   });
 
   it('writes the caller’s own row and returns it with their email', async () => {
@@ -381,7 +399,6 @@ describe('PracticeService.upsertAvailability', () => {
   it('lets a guardian answer for a rostered child, keyed on the child, without the child’s email', async () => {
     mocked(isGuardianOf).mockResolvedValue(true);
     mocked(hasTeamPermission).mockResolvedValue(false);
-    mockPrisma.teamMember.findUnique.mockResolvedValue({ id: 'm' });
     mockPrisma.practiceAvailability.upsert.mockResolvedValue(availabilityRow(CHILD, 'kid@example.test'));
 
     const row = await PracticeService.upsertAvailability(SESSION, USER, { status: 'MAYBE', playerId: CHILD });
@@ -390,7 +407,9 @@ describe('PracticeService.upsertAvailability', () => {
       sessionId_userId: { sessionId: SESSION, userId: CHILD },
     });
     expect(row.user).not.toHaveProperty('email');
-    expect(mocked(canAccessTeam)).not.toHaveBeenCalled();
+    expect(mockPrisma.teamMember.findUnique.mock.calls[0][0].where).toEqual({
+      teamId_playerId: { teamId: TEAM, playerId: CHILD },
+    });
   });
 
   it('refuses a non-guardian and a child who is not on the team', async () => {
@@ -406,13 +425,19 @@ describe('PracticeService.upsertAvailability', () => {
     expect(mockPrisma.practiceAvailability.upsert).not.toHaveBeenCalled();
   });
 
-  it('refuses a caller without access, a missing session and a cancelled one', async () => {
-    mocked(canAccessTeam).mockResolvedValue(false);
-    await expect(PracticeService.upsertAvailability(SESSION, USER, { status: 'YES' })).rejects.toBeInstanceOf(
-      ForbiddenError
+  it('refuses anyone not on the roster (a coach, a guardian without playerId, an outsider)', async () => {
+    mockPrisma.teamMember.findUnique.mockResolvedValue(null);
+    await expect(PracticeService.upsertAvailability(SESSION, USER, { status: 'YES' })).rejects.toThrow(
+      'Only players on the roster answer availability; a guardian answers for their child'
     );
+    expect(mockPrisma.teamMember.findUnique).toHaveBeenCalledWith({
+      where: { teamId_playerId: { teamId: TEAM, playerId: USER } },
+      select: { id: true },
+    });
+    expect(mockPrisma.practiceAvailability.upsert).not.toHaveBeenCalled();
+  });
 
-    mocked(canAccessTeam).mockResolvedValue(true);
+  it('refuses a missing session and a cancelled one', async () => {
     mockPrisma.practiceSession.findUnique.mockResolvedValue(null);
     await expect(PracticeService.upsertAvailability(SESSION, USER, { status: 'YES' })).rejects.toBeInstanceOf(
       NotFoundError
@@ -443,10 +468,9 @@ describe('PracticeService.getAvailability', () => {
       availabilityRow(USER, 'me@example.test'),
       availabilityRow(CHILD, 'other@example.test'),
     ]);
-    mockPrisma.practiceAvailability.groupBy.mockResolvedValue([{ status: 'YES', _count: { status: 2 } }]);
   });
 
-  it('shows other people’s email only to roster managers', async () => {
+  it('shows other people’s email only to roster managers, and counts the listed rows', async () => {
     mocked(hasTeamPermission).mockResolvedValue(false);
     const asPlayer = await PracticeService.getAvailability(SESSION, USER);
     expect(asPlayer.summary).toEqual({ yes: 2, no: 0, maybe: 0 });
@@ -569,6 +593,28 @@ describe('PracticeSeriesService.createSeries', () => {
     expect(mockPrisma.$transaction).not.toHaveBeenCalled();
   });
 
+  it('refuses a count rule that runs past 366 days', async () => {
+    mockPrisma.team.findUnique.mockResolvedValue({ id: TEAM });
+    // Biweekly, one weekday: 27 occurrences span 52 weeks (364 days), 28 span 378.
+    const biweekly = { ...seriesInput, frequency: 'BIWEEKLY' as const, weekdays: [2], endDate: undefined };
+    await expect(PracticeSeriesService.createSeries({ ...biweekly, occurrenceCount: 28 }, USER)).rejects.toThrow(
+      'runs past 366 days'
+    );
+    mockPrisma.practiceSeries.create.mockResolvedValue({ id: SERIES });
+    mockPrisma.practiceSession.createMany.mockResolvedValue({ count: 27 });
+    mockPrisma.practiceSeries.findUniqueOrThrow.mockResolvedValue(seriesRow());
+    await PracticeSeriesService.createSeries({ ...biweekly, occurrenceCount: 27 }, USER);
+    expect(mockPrisma.practiceSession.createMany.mock.calls[0][0].data).toHaveLength(27);
+  });
+
+  it('maps a team deleted mid-request (P2003) to 404 and rethrows anything else', async () => {
+    mockPrisma.team.findUnique.mockResolvedValue({ id: TEAM });
+    mockPrisma.practiceSeries.create.mockRejectedValueOnce(knownError('P2003'));
+    await expect(PracticeSeriesService.createSeries(seriesInput, USER)).rejects.toThrow('Team not found');
+    mockPrisma.practiceSeries.create.mockRejectedValueOnce(new Error('db down'));
+    await expect(PracticeSeriesService.createSeries(seriesInput, USER)).rejects.toThrow('db down');
+  });
+
   it('404s an unknown team and 403s a non-manager', async () => {
     mockPrisma.team.findUnique.mockResolvedValue(null);
     await expect(PracticeSeriesService.createSeries(seriesInput, USER)).rejects.toBeInstanceOf(NotFoundError);
@@ -672,13 +718,15 @@ describe('PracticeSeriesService.cancelSeries', () => {
     });
   });
 
-  it('is idempotent: a repeat deletes nothing', async () => {
+  it('is idempotent: a repeat deletes nothing and logs nothing', async () => {
+    const spy = spyOnInfo();
     mockPrisma.practiceSeries.findUnique.mockResolvedValue(seriesRow({ cancelledAt: new Date() }));
     mockPrisma.practiceSeries.updateMany.mockResolvedValue({ count: 0 });
     mockPrisma.practiceSeries.findUniqueOrThrow.mockResolvedValue(seriesRow({ cancelledAt: new Date() }));
     const result = await PracticeSeriesService.cancelSeries(SERIES, USER);
     expect(result.deletedSessions).toBe(0);
     expect(mockPrisma.practiceSession.deleteMany).not.toHaveBeenCalled();
+    expect(spy.mock.calls.filter(([msg]) => msg === 'Practice series cancelled')).toHaveLength(0);
   });
 
   it('403s a non-manager', async () => {

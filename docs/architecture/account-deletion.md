@@ -60,8 +60,9 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
      branch (#981).
      - **Deleted** (what identifies or reaches the child, or what the child wrote):
        `workosUserId`, `email` (with `EMAIL_SUPPRESSION_CLEARED`) and `emailVerified`;
-       announcement replies the child wrote (the only free text a player authors; the schema
-       holds no chat or messages); `purgeLoginBindings` (push and calendar-feed tokens, pending
+       announcement replies the child wrote and the `comment` on the child's practice availability
+       answers (#33; the answers stay, like RSVPs) — the only free text a player authors; the schema
+       holds no chat or messages; `purgeLoginBindings` (push and calendar-feed tokens, pending
        team invitations `CANCELLED`, `recipientHash` cleared); the photo unless it is an upload
        under the `avatars/<id>/` prefix of the coach or another live staff member of the player's
        active-season teams (external URLs are cleared too, since the identity provider's photo is

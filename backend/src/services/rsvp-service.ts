@@ -62,6 +62,15 @@ export interface RsvpSummary {
   maybe: number;
 }
 
+/** Zero-filled counts from `{ status, count }` pairs (repeats add up). */
+export function toRsvpSummary(counts: Array<{ status: RsvpStatus; count: number }>): RsvpSummary {
+  const summary: RsvpSummary = { yes: 0, no: 0, maybe: 0 };
+  for (const { status, count } of counts) {
+    summary[status.toLowerCase() as keyof RsvpSummary] += count;
+  }
+  return summary;
+}
+
 export interface GameRsvps {
   rsvps: RsvpView[];
   summary: RsvpSummary;
@@ -237,16 +246,7 @@ export class RsvpService {
     // Roster managers see everyone's email; other team members only their own.
     const rsvps: RsvpView[] = rows.map((row) => toRsvpView(row, userId, canManageRoster));
 
-    const summary: RsvpSummary = {
-      yes: 0,
-      no: 0,
-      maybe: 0,
-    };
-
-    for (const count of counts) {
-      const key = count.status.toLowerCase() as keyof RsvpSummary;
-      summary[key] = count._count.status;
-    }
+    const summary = toRsvpSummary(counts.map((c) => ({ status: c.status, count: c._count.status })));
 
     return { rsvps, summary };
   }

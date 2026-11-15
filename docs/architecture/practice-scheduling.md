@@ -40,6 +40,10 @@ export carries it as `practiceAvailability`.
 
 No team or league stores a time zone, and ECS runs in UTC, so a series carries its own IANA
 `timezone` (the client sends the device zone, `Intl.DateTimeFormat().resolvedOptions().timeZone`).
+The schema stores the runtime's canonical name (`zoned-time.ts#canonicalTimeZone`:
+`america/new_york` and `US/Eastern` become `America/New_York`) and refuses a bare UTC offset such as
+`-05:00`, which would ignore daylight saving. Only canonical names reach the formatter cache, so a
+client cannot grow it by sending spellings.
 `utils/practice-recurrence.ts#expandRecurrence` walks the local calendar from `startDate`, keeps the
 chosen weekdays (BIWEEKLY: every other Sunday-to-Saturday week, counting the week that holds
 `startDate` as "on"), stops at `endDate` or `occurrenceCount`, and turns each local date plus
@@ -51,8 +55,9 @@ takes the first.
 
 **Materialization is eager and bounded.** `createSeries` writes the series and every session in one
 `$transaction`. A series must end: `endDate` at most 366 days after `startDate`, or
-`occurrenceCount` 1 to 100, and the expansion may produce at most `MAX_SERIES_OCCURRENCES` (100)
-sessions (400 otherwise; 400 too when no chosen weekday falls in the range). Nothing regenerates a
+`occurrenceCount` 1 to 100 whose last session also falls within 366 days of `startDate`, and the
+expansion may produce at most `MAX_SERIES_OCCURRENCES` (100) sessions (400 otherwise; 400 too when
+no chosen weekday falls in the range). A team deleted between the check and the insert answers 404. Nothing regenerates a
 series later, so there is no job and no horizon to extend, and a session edited or deleted on its
 own stays as the coach left it. A season-long weekly practice is ~40 rows.
 
@@ -82,11 +87,14 @@ All through `utils/permissions.ts`, never a copy:
   Denial 403 (as for games), unknown id 404.
 - **Write** (create, edit, cancel, delete; single or series): `hasTeamPermission(…, 'canManageTeam')`,
   the same gate as game create. Staff whose role lacks `canManageTeam` get 403.
-- **Availability** (`PUT /practices/:id/availability { status, comment?, playerId? }`): the game-RSVP
-  rule. A reader answers for themself; with `playerId`, a guardian (`isGuardianOf`) answers for a
-  child rostered on the team and the row is keyed on the child. A cancelled session refuses answers
-  (400). Rows are projected with `rsvp-service.ts#toRsvpView` (now generic): `user.email` only for
-  callers with `canManageRoster` and on the caller's own row.
+- **Availability** (`PUT /practices/:id/availability { status, comment?, playerId? }`): only a
+  player **rostered on the team** has an answer, because the summary is the coach's headcount. A
+  rostered player answers for themself; with `playerId`, a guardian (`isGuardianOf`) answers for a
+  rostered child and the row is keyed on the child. A coach, a league admin, or a guardian who omits
+  `playerId` gets 403 (game RSVPs, by contrast, accept any reader). A cancelled session refuses
+  answers (400). Rows are projected with `rsvp-service.ts#toRsvpView` (now generic): `user.email`
+  only for callers with `canManageRoster` and on the caller's own row. `GET …/availability` derives
+  its summary from the rows it returns (`toRsvpSummary`, shared with game RSVPs).
 
 ## Entitlement
 
@@ -126,7 +134,11 @@ Every practice payload carries `team { id, name }` and, for a series occurrence,
 `series { id, frequency, weekdays, startTime, cancelledAt }` (`PRACTICE_INCLUDE`). Empty strings in
 the optional text fields clear them (`null`). Domain events: `Practice created` / `updated` /
 `cancelled` / `deleted`, `Practice availability upserted`, `Practice series created`
-(`sessionCount`) / `updated` (`updatedSessions`) / `cancelled` (`deletedSessions`), ids only.
+(`sessionCount`) / `updated` (`updatedSessions`) / `cancelled` (`deletedSessions`), ids only. A
+repeated cancel changes nothing and logs nothing.
+
+The age screen's un-claim (`unclaimManagedRow`, `docs/architecture/children-and-age.md`) keeps a
+child's availability answers but clears their free-text `comment`.
 
 ## Not built yet
 

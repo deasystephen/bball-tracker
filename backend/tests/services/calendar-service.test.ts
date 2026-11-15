@@ -519,7 +519,7 @@ describe('CalendarService', () => {
       expect(ics).toContain('Reason: Snow');
       expect(ics).toContain('STATUS:CANCELLED');
       expect(mockPrisma.practiceSession.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { teamId: team.id } })
+        expect.objectContaining({ where: { teamId: team.id }, select: expect.any(Object) })
       );
     });
 

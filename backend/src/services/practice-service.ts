@@ -33,7 +33,7 @@ import {
 import { isRecordNotFound } from '../utils/prisma-errors';
 import { USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
 import { logger } from '../utils/logger';
-import { toRsvpView, type EmailProjected, type RsvpSummary } from './rsvp-service';
+import { toRsvpSummary, toRsvpView, type EmailProjected, type RsvpSummary } from './rsvp-service';
 
 /** The team and series context every session payload carries. */
 export const PRACTICE_INCLUDE = {
@@ -76,11 +76,12 @@ export async function summarizeAvailability(sessionId: string): Promise<RsvpSumm
     where: { sessionId },
     _count: { status: true },
   });
-  const summary: RsvpSummary = { yes: 0, no: 0, maybe: 0 };
-  for (const count of counts) {
-    summary[count.status.toLowerCase() as keyof RsvpSummary] = count._count.status;
-  }
-  return summary;
+  return toRsvpSummary(counts.map((c) => ({ status: c.status, count: c._count.status })));
+}
+
+/** True for a foreign-key failure (P2003): the parent row was deleted mid-request. */
+function isForeignKeyViolation(err: unknown): boolean {
+  return err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2003';
 }
 
 /** 403 unless the caller may manage `teamId` (create, edit, cancel, delete practices). */
@@ -115,19 +116,28 @@ export class PracticeService {
     }
     await assertCanManagePractices(userId, data.teamId);
 
-    const practice = await prisma.practiceSession.create({
-      data: {
-        teamId: data.teamId,
-        type: data.type,
-        title: data.title ?? null,
-        location: data.location ?? null,
-        notes: data.notes ?? null,
-        startsAt: new Date(data.startsAt),
-        durationMinutes: data.durationMinutes,
-        timezone: data.timezone,
-      },
-      include: PRACTICE_INCLUDE,
-    });
+    let practice: PracticeView;
+    try {
+      practice = await prisma.practiceSession.create({
+        data: {
+          teamId: data.teamId,
+          type: data.type,
+          title: data.title ?? null,
+          location: data.location ?? null,
+          notes: data.notes ?? null,
+          startsAt: new Date(data.startsAt),
+          durationMinutes: data.durationMinutes,
+          timezone: data.timezone,
+        },
+        include: PRACTICE_INCLUDE,
+      });
+    } catch (err) {
+      // The team was deleted between the check and the insert.
+      if (isForeignKeyViolation(err)) {
+        throw new NotFoundError('Team not found');
+      }
+      throw err;
+    }
 
     logger.info('Practice created', { practiceId: practice.id, teamId: practice.teamId, userId });
     return practice;
@@ -164,14 +174,13 @@ export class PracticeService {
       };
     }
 
-    if (await isSystemAdmin(userId)) {
-      if (query.teamId) where.teamId = query.teamId;
-    } else if (query.teamId) {
+    if (query.teamId) {
+      // canAccessTeam already answers true for a system ADMIN.
       if (!(await canAccessTeam(userId, query.teamId))) {
         throw new ForbiddenError('You do not have access to this team');
       }
       where.teamId = query.teamId;
-    } else {
+    } else if (!(await isSystemAdmin(userId))) {
       where.team = await readableTeamsWhere(userId);
     }
 
@@ -243,7 +252,7 @@ export class PracticeService {
     const session = await findSessionForWrite(sessionId, userId);
 
     // Status-guarded so a repeat keeps the first cancellation's time and reason.
-    await prisma.practiceSession.updateMany({
+    const { count } = await prisma.practiceSession.updateMany({
       where: { id: sessionId, status: 'SCHEDULED' },
       data: { status: 'CANCELLED', cancelledAt: new Date(), cancelReason: data.reason ?? null },
     });
@@ -255,12 +264,15 @@ export class PracticeService {
       throw new NotFoundError('Practice not found');
     }
 
-    logger.info('Practice cancelled', {
-      practiceId: sessionId,
-      teamId: session.teamId,
-      seriesId: session.seriesId,
-      userId,
-    });
+    // A repeat changes nothing and logs nothing.
+    if (count > 0) {
+      logger.info('Practice cancelled', {
+        practiceId: sessionId,
+        teamId: session.teamId,
+        seriesId: session.seriesId,
+        userId,
+      });
+    }
     return practice;
   }
 
@@ -280,9 +292,12 @@ export class PracticeService {
   }
 
   /**
-   * PUT /practices/:id/availability. Any reader of the team answers for
-   * themself; a guardian answers for a child rostered on the team, and the row
-   * is keyed on the child (the game-RSVP rule, `RsvpService.upsertRsvp`).
+   * PUT /practices/:id/availability. A player rostered on the team answers for
+   * themself; a guardian answers for a rostered child, and the row is keyed on
+   * the child (the game-RSVP rule, `RsvpService.upsertRsvp`). Unlike game
+   * RSVPs, only roster members can have an answer: the summary is the coach's
+   * headcount, so a coach or a guardian answering for themself would inflate
+   * it (403).
    */
   static async upsertAvailability(
     sessionId: string,
@@ -299,29 +314,29 @@ export class PracticeService {
 
     const playerId = data.playerId;
     const onBehalfOfChild = playerId !== undefined && playerId !== userId;
-    if (onBehalfOfChild) {
-      const [isGuardian, member] = await Promise.all([
-        isGuardianOf(userId, playerId),
-        prisma.teamMember.findUnique({
-          where: { teamId_playerId: { teamId: session.teamId, playerId } },
-          select: { id: true },
-        }),
-      ]);
-      if (!isGuardian) {
-        throw new ForbiddenError('You can only answer for players you are a guardian of');
-      }
-      if (!member) {
-        throw new ForbiddenError('This player is not on the team for this practice');
-      }
-    } else if (!(await canAccessTeam(userId, session.teamId))) {
-      throw new ForbiddenError('You do not have access to this practice');
+    const subjectId = onBehalfOfChild ? playerId : userId;
+    const [isGuardian, member] = await Promise.all([
+      onBehalfOfChild ? isGuardianOf(userId, playerId) : Promise.resolve(true),
+      prisma.teamMember.findUnique({
+        where: { teamId_playerId: { teamId: session.teamId, playerId: subjectId } },
+        select: { id: true },
+      }),
+    ]);
+    if (!isGuardian) {
+      throw new ForbiddenError('You can only answer for players you are a guardian of');
+    }
+    if (!member) {
+      throw new ForbiddenError(
+        onBehalfOfChild
+          ? 'This player is not on the team for this practice'
+          : 'Only players on the roster answer availability; a guardian answers for their child'
+      );
     }
 
     if (session.status === 'CANCELLED') {
       throw new BadRequestError('This practice was cancelled');
     }
 
-    const subjectId = onBehalfOfChild ? playerId : userId;
     let row: AvailabilityWithUser;
     try {
       row = await prisma.practiceAvailability.upsert({
@@ -335,7 +350,7 @@ export class PracticeService {
       });
     } catch (err) {
       // The session was deleted (series cancel, coach delete) after the read.
-      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2003') {
+      if (isForeignKeyViolation(err)) {
         throw new NotFoundError('Practice not found');
       }
       throw err;
@@ -370,19 +385,19 @@ export class PracticeService {
       throw new ForbiddenError('You do not have access to this practice');
     }
 
-    const [rows, summary, canManageRoster] = await Promise.all([
+    const [rows, canManageRoster] = await Promise.all([
       prisma.practiceAvailability.findMany({
         where: { sessionId },
         include: AVAILABILITY_INCLUDE,
         orderBy: { createdAt: 'asc' },
       }),
-      summarizeAvailability(sessionId),
       hasTeamPermission(userId, session.teamId, 'canManageRoster'),
     ]);
 
     return {
       availability: rows.map((row) => toRsvpView(row, userId, canManageRoster)),
-      summary,
+      // From the rows themselves, so the counts always match the list.
+      summary: toRsvpSummary(rows.map((row) => ({ status: row.status, count: 1 }))),
     };
   }
 }

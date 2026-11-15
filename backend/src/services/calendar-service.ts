@@ -5,6 +5,7 @@
 
 import { randomBytes } from 'crypto';
 import { createEvents, EventAttributes, DateArray } from 'ics';
+import { Prisma } from '@prisma/client';
 import prisma from '../models';
 import { NotFoundError, ForbiddenError, BadRequestError } from '../utils/errors';
 import { canAccessTeam } from '../utils/permissions';
@@ -29,6 +30,19 @@ export const ICAL_PRODUCT_ID = 'hooplings/ical';
 // `/api/v1/...` (`https://api.hooplings.com` in production via the ECS task
 // definition) — not `publicAppUrl()`, the web apex, which serves no API
 // (audit #24). Both live in `utils/urls.ts`.
+
+/** The practice-session columns a feed entry is built from (#33). */
+const FEED_PRACTICE_SELECT = {
+  id: true,
+  type: true,
+  title: true,
+  location: true,
+  notes: true,
+  startsAt: true,
+  durationMinutes: true,
+  status: true,
+  cancelReason: true,
+} satisfies Prisma.PracticeSessionSelect;
 
 function dateToDateArray(d: Date): DateArray {
   return [
@@ -212,10 +226,17 @@ export class CalendarService {
       throw new NotFoundError('Team not found');
     }
 
-    const games = await prisma.game.findMany({
-      where: { teamId },
-      orderBy: { date: 'asc' },
-    });
+    const [games, practices] = await Promise.all([
+      prisma.game.findMany({
+        where: { teamId },
+        orderBy: { date: 'asc' },
+      }),
+      prisma.practiceSession.findMany({
+        where: { teamId },
+        select: FEED_PRACTICE_SELECT,
+        orderBy: { startsAt: 'asc' },
+      }),
+    ]);
 
     const base = publicAppUrl();
 
@@ -251,10 +272,6 @@ export class CalendarService {
     // Practices and other non-game events (#33). Every session is listed,
     // past ones included, as games are; a cancelled one is STATUS:CANCELLED so
     // subscribers see it drop off. The UID prefix keeps them apart from games.
-    const practices = await prisma.practiceSession.findMany({
-      where: { teamId },
-      orderBy: { startsAt: 'asc' },
-    });
     for (const practice of practices) {
       const start = new Date(practice.startsAt);
       const end = new Date(start.getTime() + practice.durationMinutes * 60 * 1000);

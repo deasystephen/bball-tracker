@@ -156,6 +156,15 @@ describe('practice scheduling (real Postgres)', () => {
       `kid.${fx.run}@example.test`
     );
 
+    // Only roster members have an answer: the coach, and the parent without
+    // playerId, would inflate the headcount.
+    await expect(
+      PracticeService.upsertAvailability(futureSessionIds[0], users.coach, { status: 'YES' })
+    ).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(
+      PracticeService.upsertAvailability(futureSessionIds[0], users.parent, { status: 'YES' })
+    ).rejects.toBeInstanceOf(ForbiddenError);
+
     // The parent is a guardian, but not of the player.
     await expect(
       PracticeService.upsertAvailability(futureSessionIds[0], users.parent, { status: 'YES', playerId: users.player })

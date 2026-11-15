@@ -304,7 +304,7 @@ age in writing from the account's address; the next sign-in asks the question ag
 
      **Kept:** the **name** (a roster record needs one, and it is what the coach entered or sees on
      the roster; the coach can edit it), roster memberships, game events, statistics, RSVPs, practice
-     availability answers,
+     availability answers (their free-text comments are cleared),
      guardian links (an accepted link survives the scrub of its invitation's address), and
      guardian invitations for the child at other addresses. The coach's roster looks the same.
 

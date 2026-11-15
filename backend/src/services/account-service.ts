@@ -1158,8 +1158,10 @@ export type UnclaimTarget = Pick<LockedUserRow, 'id' | 'email' | 'workosUserId' 
  *   too: the identity provider's photo is copied at claim time and cannot be
  *   told apart. A cleared photo in our bucket is returned as `removedAvatar`
  *   for deletion, whoever uploaded it, unless another user row still shows it;
- * - announcement replies the child wrote (the only free text a player can
- *   author; announcements themselves are an adult signal the caller refused);
+ * - announcement replies the child wrote (announcements themselves are an
+ *   adult signal the caller refused), and the free-text `comment` on the
+ *   child's practice availability answers (#33; the answer itself stays, like
+ *   an RSVP);
  * - `purgeLoginBindings`: push tokens, calendar feed tokens, pending team
  *   invitations (→ CANCELLED) and their recipient hash;
  * - the child's address on every guardian invitation that carries it, any
@@ -1233,6 +1235,10 @@ export async function unclaimManagedRow(
   }
 
   const replies = await tx.announcementReply.deleteMany({ where: { authorId: userId } });
+  await tx.practiceAvailability.updateMany({
+    where: { userId, comment: { not: null } },
+    data: { comment: null },
+  });
   await purgeLoginBindings(tx, userId);
 
   let expiredGuardianInvitations: ExpiredGuardianInvitation[] = [];
