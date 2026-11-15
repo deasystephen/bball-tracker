@@ -24,9 +24,7 @@ export type RsvpWithUser = Prisma.GameRsvpGetPayload<{ include: typeof RSVP_INCL
  * the caller's own row); everyone else gets the user summary without `email`
  * (`id, name, isManaged, deletedAt`; role matrix B2.5).
  */
-export type RsvpView = Omit<RsvpWithUser, 'user'> & {
-  user: Omit<RsvpWithUser['user'], 'email'> & { email?: string | null };
-};
+export type RsvpView = EmailProjected<RsvpWithUser>;
 
 /** A row carrying a user summary whose `email` is visible only to some readers. */
 type WithUserEmail = { user: { id: string; email: string | null } };

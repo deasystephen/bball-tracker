@@ -33,7 +33,7 @@ import {
   isSystemAdmin,
   readableTeamsWhere,
 } from '../utils/permissions';
-import { isForeignKeyViolation, isUniqueViolation } from '../utils/prisma-errors';
+import { isForeignKeyViolation } from '../utils/prisma-errors';
 import { USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
 import { logger } from '../utils/logger';
 import { toRsvpSummary, toRsvpView, type EmailProjected, type RsvpSummary } from './rsvp-service';
@@ -78,10 +78,12 @@ const DAY_MS = 86_400_000;
 /** 400 unless `startsAt` is within the single-practice window around now (a mistyped year). */
 function assertPracticeStartInRange(startsAt: Date): void {
   const now = Date.now();
-  if (startsAt.getTime() < now - MAX_PRACTICE_PAST_DAYS * DAY_MS) {
+  // One day of slack each way: the series bounds count local calendar days at
+  // any start time, this check counts milliseconds from now.
+  if (startsAt.getTime() < now - (MAX_PRACTICE_PAST_DAYS + 1) * DAY_MS) {
     throw new BadRequestError(`startsAt must be within the last ${MAX_PRACTICE_PAST_DAYS} days`);
   }
-  if (startsAt.getTime() > now + MAX_PRACTICE_FUTURE_DAYS * DAY_MS) {
+  if (startsAt.getTime() > now + (MAX_PRACTICE_FUTURE_DAYS + 1) * DAY_MS) {
     throw new BadRequestError(`startsAt must be within the next ${MAX_PRACTICE_FUTURE_DAYS} days`);
   }
 }
@@ -431,11 +433,12 @@ export class PracticeService {
       throw new BadRequestError('This practice was cancelled');
     }
 
-    const write = (): Promise<{ id: string }> =>
+    let written: { id: string };
+    try {
       // No `include`: a plain upsert compiles to INSERT … ON CONFLICT, so two
       // first answers at once (a double tap, a guardian and the player) both
-      // land instead of one failing on the unique key.
-      prisma.practiceAvailability.upsert({
+      // land instead of one failing on the unique key. No P2002 retry.
+      written = await prisma.practiceAvailability.upsert({
         where: { sessionId_userId: { sessionId, userId: subjectId } },
         create: { sessionId, userId: subjectId, status: data.status, comment: data.comment ?? null },
         update: {
@@ -444,13 +447,6 @@ export class PracticeService {
         },
         select: { id: true },
       });
-    let written: { id: string };
-    try {
-      written = await write().catch((err: unknown) => {
-        // A client that does not run the native path: the loser retries once as an update.
-        if (isUniqueViolation(err)) return write();
-        throw err;
-      });
     } catch (err) {
       // The session was deleted (series cancel, coach delete) after the read.
       if (isForeignKeyViolation(err)) {
@@ -458,10 +454,14 @@ export class PracticeService {
       }
       throw err;
     }
-    const row: AvailabilityWithUser = await prisma.practiceAvailability.findUniqueOrThrow({
+    const row = await prisma.practiceAvailability.findUnique({
       where: { id: written.id },
       include: AVAILABILITY_INCLUDE,
     });
+    if (!row) {
+      // The session (and the answer with it) was deleted right after the write.
+      throw new NotFoundError('Practice not found');
+    }
 
     logger.info('Practice availability upserted', {
       practiceId: sessionId,

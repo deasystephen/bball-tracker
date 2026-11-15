@@ -88,7 +88,7 @@ row (the order the series writes take), merges `exceptionFields` from the locked
 session of a cancelled series (400), so history cannot be moved back into the schedule. The series
 edit also re-checks `exceptionFields` in each write's `WHERE`. Availability upserts carry no
 `include`, so Prisma compiles them to `INSERT … ON CONFLICT` and two first answers at once both land
-(a `P2002` from a non-native path is retried once).
+(verified against Postgres in the real-database suite; there is no P2002 retry).
 
 ## Access
 

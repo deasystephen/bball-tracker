@@ -200,15 +200,20 @@ export class PracticeSeriesService {
 
   /** GET /practice-series/:id: the rule and all of its sessions. */
   static async getSeries(seriesId: string, userId: string): Promise<PracticeSeriesView> {
+    // Access first, on the bare row: a denied caller never loads the sessions.
+    const head = await prisma.practiceSeries.findUnique({ where: { id: seriesId }, select: SERIES_WRITE_SELECT });
+    if (!head) {
+      throw new NotFoundError('Practice series not found');
+    }
+    if (!(await canAccessTeam(userId, head.teamId))) {
+      throw new ForbiddenError('You do not have access to this practice series');
+    }
     const series = await prisma.practiceSeries.findUnique({
       where: { id: seriesId },
       include: PRACTICE_SERIES_INCLUDE,
     });
     if (!series) {
       throw new NotFoundError('Practice series not found');
-    }
-    if (!(await canAccessTeam(userId, series.teamId))) {
-      throw new ForbiddenError('You do not have access to this practice series');
     }
     return toSeriesView(series);
   }

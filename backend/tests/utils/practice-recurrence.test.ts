@@ -13,7 +13,6 @@ import {
   canonicalTimeZone,
   daysBetween,
   formatLocalDate,
-  isValidTimeZone,
   localDateOf,
   parseLocalDate,
   weekdayOf,
@@ -76,17 +75,17 @@ describe('zonedTimeToUtc', () => {
 
 describe('zoned-time helpers', () => {
   it('validates zone names and resolves them to the canonical one', () => {
-    expect(isValidTimeZone('America/New_York')).toBe(true);
-    expect(isValidTimeZone('UTC')).toBe(true);
-    expect(isValidTimeZone('Mars/Olympus_Mons')).toBe(false);
-    expect(isValidTimeZone('')).toBe(false);
-    expect(isValidTimeZone('-05:00')).toBe(false);
+    expect(canonicalTimeZone('America/New_York')).not.toBeNull();
+    expect(canonicalTimeZone('UTC')).not.toBeNull();
+    expect(canonicalTimeZone('Mars/Olympus_Mons')).toBeNull();
+    expect(canonicalTimeZone('')).toBeNull();
+    expect(canonicalTimeZone('-05:00')).toBeNull();
     expect(canonicalTimeZone('america/NEW_york')).toBe('America/New_York');
     expect(canonicalTimeZone('Etc/GMT+5')).toBeNull(); // a fixed offset, no DST
-    expect(isValidTimeZone('Etc/UTC')).toBe(true);
+    expect(canonicalTimeZone('Etc/UTC')).not.toBeNull();
     // Single-segment names that observe DST pass whether or not the runtime folds them.
-    expect(isValidTimeZone('EST5EDT')).toBe(true);
-    expect(isValidTimeZone('Japan')).toBe(true);
+    expect(canonicalTimeZone('EST5EDT')).not.toBeNull();
+    expect(canonicalTimeZone('Japan')).not.toBeNull();
     expect(canonicalTimeZone('+05:30')).toBeNull();
   });
 
@@ -190,6 +189,11 @@ describe('expandRecurrence', () => {
     };
     expect(expandRecurrence(daily, 100)).toHaveLength(101);
     expect(expandRecurrence({ ...daily, endDate: null, occurrenceCount: 100 }, 100)).toHaveLength(100);
+  });
+
+  it('returns nothing, without looping, for a rule with no weekday in 0–6', () => {
+    expect(expandRecurrence({ ...tuesdays, weekdays: [] }, 100)).toEqual([]);
+    expect(expandRecurrence({ ...tuesdays, weekdays: [7] }, 100)).toEqual([]);
   });
 
   it('returns nothing when no chosen weekday falls in the range', () => {

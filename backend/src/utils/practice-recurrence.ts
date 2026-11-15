@@ -63,7 +63,8 @@ export function expandRecurrence(rule: RecurrenceRule, max: number): Occurrence[
   const step = rule.frequency === 'BIWEEKLY' ? 2 : 1;
   // Monday of the week holding the first matching date: weeks count from here.
   let first = start;
-  while (!days.has(weekdayOf(first))) first = addDays(first, 1);
+  for (let i = 0; i < 7 && !days.has(weekdayOf(first)); i++) first = addDays(first, 1);
+  if (!days.has(weekdayOf(first))) return []; // no weekday in 0–6 at all
   const anchor = addDays(first, -((weekdayOf(first) + 6) % 7));
 
   const occurrences: Occurrence[] = [];

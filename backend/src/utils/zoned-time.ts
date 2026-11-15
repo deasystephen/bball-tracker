@@ -69,10 +69,6 @@ export function canonicalTimeZone(timeZone: string): string | null {
   return FIXED_OFFSET_RE.test(resolved) ? null : resolved;
 }
 
-/** True when `canonicalTimeZone` accepts `timeZone`. */
-export function isValidTimeZone(timeZone: string): boolean {
-  return canonicalTimeZone(timeZone) !== null;
-}
 
 /** The local wall-clock fields of `instant` in `timeZone`, as a UTC epoch (ms). */
 function wallClockMs(instant: number, timeZone: string): number {

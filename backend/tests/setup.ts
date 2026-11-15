@@ -282,7 +282,6 @@ export const mockPrisma = {
   },
   practiceAvailability: {
     findUnique: jest.fn(),
-    findUniqueOrThrow: jest.fn(),
     findMany: jest.fn(),
     upsert: jest.fn(),
     updateMany: jest.fn(),

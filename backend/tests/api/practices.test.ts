@@ -264,7 +264,7 @@ describe('availability', () => {
     (hasTeamPermission as jest.Mock).mockResolvedValue(false);
     mockPrisma.teamMember.findUnique.mockResolvedValue({ id: 'm' });
     mockPrisma.practiceAvailability.upsert.mockResolvedValue({ id: 'av' });
-    mockPrisma.practiceAvailability.findUniqueOrThrow.mockResolvedValue({
+    mockPrisma.practiceAvailability.findUnique.mockResolvedValue({
       id: 'av',
       sessionId: SESSION_ID,
       userId: CHILD_ID,

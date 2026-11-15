@@ -146,6 +146,13 @@ describe('practice scheduling (real Postgres)', () => {
     });
     expect(forKid.userId).toBe(users.kid);
     expect(forKid.user).not.toHaveProperty('email');
+    // Two first answers at once (a double tap) both land: the upsert is a
+    // native INSERT … ON CONFLICT, so neither fails on the unique key.
+    await Promise.all(
+      [1, 2, 3, 4].map(() => PracticeService.upsertAvailability(futureSessionIds[3], users.player, { status: 'YES' }))
+    );
+    expect(await prisma.practiceAvailability.count({ where: { sessionId: futureSessionIds[3] } })).toBe(1);
+
     // A repeat updates the same row.
     await PracticeService.upsertAvailability(futureSessionIds[0], users.player, { status: 'MAYBE' });
     await PracticeService.upsertAvailability(pastSessionId, users.player, { status: 'YES' });

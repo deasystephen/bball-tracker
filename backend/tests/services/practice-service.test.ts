@@ -428,7 +428,7 @@ describe('PracticeService.upsertAvailability', () => {
   it('writes the caller’s own row and returns it with their email', async () => {
     const spy = spyOnInfo();
     mockPrisma.practiceAvailability.upsert.mockResolvedValue({ id: 'av' });
-    mockPrisma.practiceAvailability.findUniqueOrThrow.mockResolvedValue(availabilityRow(USER, 'me@example.test'));
+    mockPrisma.practiceAvailability.findUnique.mockResolvedValue(availabilityRow(USER, 'me@example.test'));
 
     const row = await PracticeService.upsertAvailability(SESSION, USER, { status: 'YES', comment: 'Late' });
 
@@ -452,7 +452,7 @@ describe('PracticeService.upsertAvailability', () => {
 
   it('keeps an existing comment when none is sent', async () => {
     mockPrisma.practiceAvailability.upsert.mockResolvedValue({ id: 'av' });
-    mockPrisma.practiceAvailability.findUniqueOrThrow.mockResolvedValue(availabilityRow(USER, null));
+    mockPrisma.practiceAvailability.findUnique.mockResolvedValue(availabilityRow(USER, null));
     await PracticeService.upsertAvailability(SESSION, USER, { status: 'NO' });
     expect(mockPrisma.practiceAvailability.upsert.mock.calls[0][0].update).toEqual({ status: 'NO' });
   });
@@ -461,7 +461,7 @@ describe('PracticeService.upsertAvailability', () => {
     mocked(isGuardianOf).mockResolvedValue(true);
     mocked(hasTeamPermission).mockResolvedValue(false);
     mockPrisma.practiceAvailability.upsert.mockResolvedValue({ id: 'av' });
-    mockPrisma.practiceAvailability.findUniqueOrThrow.mockResolvedValue(availabilityRow(CHILD, 'kid@example.test'));
+    mockPrisma.practiceAvailability.findUnique.mockResolvedValue(availabilityRow(CHILD, 'kid@example.test'));
 
     const row = await PracticeService.upsertAvailability(SESSION, USER, { status: 'MAYBE', playerId: CHILD });
 
@@ -511,25 +511,25 @@ describe('PracticeService.upsertAvailability', () => {
     );
   });
 
-  it('maps a session deleted mid-request (P2003) to 404, retries a lost insert race once, rethrows the rest', async () => {
+  it('maps a session deleted mid-request (P2003, or gone before the re-read) to 404 and rethrows the rest', async () => {
     mockPrisma.practiceAvailability.upsert.mockReset();
-    mockPrisma.practiceAvailability.findUniqueOrThrow.mockResolvedValue(availabilityRow(USER, null));
-
     mockPrisma.practiceAvailability.upsert.mockRejectedValueOnce(knownError('P2003'));
     await expect(PracticeService.upsertAvailability(SESSION, USER, { status: 'YES' })).rejects.toBeInstanceOf(
       NotFoundError
     );
 
-    mockPrisma.practiceAvailability.upsert.mockRejectedValueOnce(knownError('P2002')).mockResolvedValueOnce({ id: 'av' });
-    await PracticeService.upsertAvailability(SESSION, USER, { status: 'YES' });
-    expect(mockPrisma.practiceAvailability.findUniqueOrThrow).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: 'av' } })
+    mockPrisma.practiceAvailability.upsert.mockResolvedValueOnce({ id: 'av' });
+    mockPrisma.practiceAvailability.findUnique.mockResolvedValueOnce(null);
+    await expect(PracticeService.upsertAvailability(SESSION, USER, { status: 'YES' })).rejects.toBeInstanceOf(
+      NotFoundError
     );
 
-    mockPrisma.practiceAvailability.upsert.mockRejectedValueOnce(knownError('P2010'));
+    // No P2002 retry (CLAUDE.md): the upsert is native INSERT … ON CONFLICT.
+    mockPrisma.practiceAvailability.upsert.mockRejectedValueOnce(knownError('P2002'));
     await expect(PracticeService.upsertAvailability(SESSION, USER, { status: 'YES' })).rejects.toBeInstanceOf(
       Prisma.PrismaClientKnownRequestError
     );
+    expect(mockPrisma.practiceAvailability.upsert).toHaveBeenCalledTimes(3);
   });
 });
 
