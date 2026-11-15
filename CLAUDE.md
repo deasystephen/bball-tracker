@@ -18,6 +18,7 @@ Hooplings (formerly "Basketball Tracker"; the repo, the `bball-tracker` EAS slug
 | Entitlements, usage metering, comped tiers | `docs/architecture/entitlements-and-usage.md` |
 | Socket.io broadcast, server-derived score, tracker undo | `docs/architecture/live-games.md` |
 | Stats finalization, ties, team lineage | `docs/architecture/stats-and-lineage.md` |
+| Practices: sessions, recurring series, availability, DST-correct materialization | `docs/architecture/practice-scheduling.md` |
 | Account deletion (as built) | `docs/architecture/account-deletion.md` |
 | Children, age and COPPA: adults-only accounts, the age screen and gate, state age laws | `docs/architecture/children-and-age.md` |
 | Email: SES events, bounces, complaints, audiences (invite funnel: `docs/architecture/web-funnel.md`) | `docs/architecture/email.md` |
@@ -166,9 +167,8 @@ The API is **single-replica**: autoscaling `max_capacity` is validated to 1, `MA
 ## Documentation Hygiene
 
 - **Keep docs in sync with code, in the same change.** Behaviour, API, schema, env-var, command and operational changes update the matching `docs/` file.
-- **This file stays small.** Add at most a one-line rule plus a pointer here; the explanation, history and test names go in the `docs/architecture/`, `docs/deployment/` or `docs/testing/` file for that subsystem (create one if none fits). Issue and audit numbers, "before this fix" history and incident narratives belong in those files or in the issue, not here. The docs-check Stop hook warns when this file exceeds 200 lines or 40K characters.
+- **This file stays small.** Add at most a one-line rule plus a pointer here; the explanation, history and test names go in the `docs/architecture/`, `docs/deployment/` or `docs/testing/` file for that subsystem (create one if none fits). Issue and audit numbers, "before this fix" history and incident narratives belong in those files or in the issue, not here. The docs-check Stop hook warns when this file exceeds 200 lines or 40K characters. The Stop hook `.claude/hooks/check-docs-updated.sh` also reminds (advisory) when code changed without any docs update.
 - Forward references go stale: once referenced work lands, reword to past tense and distinguish "merged to `main`" from "deployed".
-- The Stop hook `.claude/hooks/check-docs-updated.sh` reminds when code changed without any docs update. It is advisory.
 
 ## Git Workflow
 

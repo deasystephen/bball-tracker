@@ -26,6 +26,7 @@
  *   │    non-empty ──────────────────► LastHeadCoachError 400      │
  *   │ 3  purge: pushToken, calendarFeedToken, teamStaff,           │
  *   │    leagueAdmin (log admin-less leagues), gameRsvp,           │
+ *   │    practiceAvailability (#33),                               │
  *   │    guardian links both ways (+ promote next primary),        │
  *   │    PENDING team invitations → CANCELLED,                     │
  *   │    PENDING guardian invitations → EXPIRED,                   │
@@ -110,6 +111,7 @@ export const USER_REFERENCE_COUNT_SELECT = {
   announcements: true,
   announcementReplies: true,
   calendarFeedTokens: true,
+  practiceAvailability: true,
 } satisfies Prisma.UserCountOutputTypeSelect;
 
 /** The erasure check's select: the list-relation counts plus every one-to-one relation that points at the row. */
@@ -238,6 +240,7 @@ export class AccountService {
       // 3. Purge what only serves the person.
       await tx.teamStaff.deleteMany({ where: { userId } });
       await tx.gameRsvp.deleteMany({ where: { userId } });
+      await tx.practiceAvailability.deleteMany({ where: { userId } });
 
       const adminOf = await tx.leagueAdmin.findMany({ where: { userId }, select: { leagueId: true } });
       await tx.leagueAdmin.deleteMany({ where: { userId } });
@@ -591,6 +594,7 @@ export class AccountService {
       guardianInvitations,
       sentGuardianInvitations,
       gameRsvps,
+      practiceAvailability,
       gameEvents,
       playerStats,
       pushTokens,
@@ -612,6 +616,7 @@ export class AccountService {
       }),
       prisma.guardianInvitation.findMany({ where: { invitedById: userId }, select: SENT_GUARDIAN_INVITATION_SELECT }),
       prisma.gameRsvp.findMany({ where: { userId } }),
+      prisma.practiceAvailability.findMany({ where: { userId } }),
       prisma.gameEvent.findMany({ where: { playerId: userId }, orderBy: { createdAt: 'asc' } }),
       prisma.playerStats.findMany({ where: { playerId: userId } }),
       prisma.pushToken.findMany({ where: { userId }, select: { platform: true, createdAt: true, updatedAt: true } }),
@@ -635,6 +640,7 @@ export class AccountService {
       guardianInvitations,
       sentGuardianInvitations,
       gameRsvps,
+      practiceAvailability,
       gameEvents,
       playerStats,
       pushTokens,
@@ -1393,6 +1399,7 @@ export interface UserDataExport {
   guardianInvitations: Prisma.GuardianInvitationGetPayload<{ select: typeof GUARDIAN_INVITATION_EXPORT_SELECT }>[];
   sentGuardianInvitations: Prisma.GuardianInvitationGetPayload<{ select: typeof SENT_GUARDIAN_INVITATION_SELECT }>[];
   gameRsvps: Prisma.GameRsvpGetPayload<Record<string, never>>[];
+  practiceAvailability: Prisma.PracticeAvailabilityGetPayload<Record<string, never>>[];
   gameEvents: Prisma.GameEventGetPayload<Record<string, never>>[];
   playerStats: Prisma.PlayerStatsGetPayload<Record<string, never>>[];
   pushTokens: { platform: string; createdAt: Date; updatedAt: Date }[];

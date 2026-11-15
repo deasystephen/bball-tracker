@@ -67,7 +67,8 @@ export default function PrivacyPolicyPage() {
             <strong>Team information:</strong> teams, leagues and seasons you create, including a team’s name, age
             group and gender category; staff roles; games (opponent, date, scores); the game events recorded during a
             game (shots, rebounds, assists and similar) and the box scores and season statistics calculated from them;
-            RSVPs; and team announcements and replies.
+            practices and other team events (date, time, time zone, place and notes); RSVPs and practice availability
+            answers (with an optional comment); and team announcements and replies.
           </li>
           <li>
             <strong>Information you enter about other people:</strong> a coach or other team staff member with roster
@@ -359,7 +360,7 @@ export default function PrivacyPolicyPage() {
         <ul>
           <li>your sign-in, email address, name and current photo (we also try to delete the photo file);</li>
           <li>your push notification tokens;</li>
-          <li>your staff roles and league administrator roles, and your RSVPs;</li>
+          <li>your staff roles and league administrator roles, your RSVPs and your practice availability answers;</li>
           <li>your guardian links, in both directions;</li>
           <li>
             pending invitations addressed to you, and your email address from every guardian invitation that carried

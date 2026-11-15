@@ -1,6 +1,6 @@
 /**
  * Calendar feed service — generates iCalendar (RFC 5545) feeds for a team's
- * games and manages per-user, per-team opaque feed tokens.
+ * games and practices (#33) and manages per-user, per-team opaque feed tokens.
  */
 
 import { randomBytes } from 'crypto';
@@ -198,7 +198,7 @@ export class CalendarService {
   }
 
   /**
-   * Build the iCalendar text for the given team's games.
+   * Build the iCalendar text for the given team's games and practices.
    * Includes SCHEDULED, IN_PROGRESS, and FINISHED games (and CANCELLED ones
    * marked STATUS:CANCELLED so subscribers see cancellations).
    */
@@ -247,6 +247,38 @@ export class CalendarService {
         categories: ['Basketball', team.name],
       };
     });
+
+    // Practices and other non-game events (#33). Every session is listed,
+    // past ones included, as games are; a cancelled one is STATUS:CANCELLED so
+    // subscribers see it drop off. The UID prefix keeps them apart from games.
+    const practices = await prisma.practiceSession.findMany({
+      where: { teamId },
+      orderBy: { startsAt: 'asc' },
+    });
+    for (const practice of practices) {
+      const start = new Date(practice.startsAt);
+      const end = new Date(start.getTime() + practice.durationMinutes * 60 * 1000);
+      const label = practice.type === 'PRACTICE' ? 'Practice' : 'Team event';
+      const title = practice.title ? `${team.name}: ${practice.title}` : `${team.name} ${label.toLowerCase()}`;
+      const descriptionLines = [
+        practice.status === 'CANCELLED' ? 'Cancelled' : null,
+        practice.status === 'CANCELLED' && practice.cancelReason ? `Reason: ${practice.cancelReason}` : null,
+        practice.notes,
+      ].filter((l): l is string => !!l);
+
+      events.push({
+        uid: `practice-${practice.id}@${ICAL_UID_DOMAIN}`,
+        start: dateToDateArray(start),
+        startInputType: 'utc',
+        end: dateToDateArray(end),
+        endInputType: 'utc',
+        title,
+        ...(descriptionLines.length > 0 ? { description: descriptionLines.join('\n') } : {}),
+        ...(practice.location ? { location: practice.location } : {}),
+        status: practice.status === 'CANCELLED' ? 'CANCELLED' : 'CONFIRMED',
+        categories: [label, team.name],
+      });
+    }
 
     const { error, value } = createEvents(events, {
       calName: `${team.name} — Basketball Schedule`,

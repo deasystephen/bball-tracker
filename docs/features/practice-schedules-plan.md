@@ -1,6 +1,10 @@
 # Team Practice Schedules — Feature Plan
 
-> Status: **Proposed** — product/architecture plan; not yet implemented.
+> Status: **Phase 1 backend built for #33** (separate practice tables, recurring series with
+> eager bounded materialization, single-session exceptions, series cancel, availability, ICS). The
+> as-built reference is `docs/architecture/practice-scheduling.md`, which supersedes §4, §5 and §9
+> here where they differ (no RRULE string: weekdays + WEEKLY/BIWEEKLY; no `minAttendance` yet).
+> Mobile, the differentiators and notifications are not built.
 >
 > **Tracking issues.** Phase 1 (practice sessions, recurring series, per-session
 > availability, ICS) is scoped and buildable as **#33**. The three differentiators

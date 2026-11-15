@@ -428,6 +428,7 @@ describe('CalendarService', () => {
         name: team.name,
       });
       (mockPrisma.game.findMany as jest.Mock).mockResolvedValue(games);
+      (mockPrisma.practiceSession.findMany as jest.Mock).mockResolvedValue([]);
 
       const ics = await CalendarService.buildFeed(team.id);
 
@@ -456,11 +457,70 @@ describe('CalendarService', () => {
         name: team.name,
       });
       (mockPrisma.game.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.practiceSession.findMany as jest.Mock).mockResolvedValue([]);
 
       const ics = await CalendarService.buildFeed(team.id);
       expect(ics).toContain('BEGIN:VCALENDAR');
       expect(ics).toContain('END:VCALENDAR');
       expect(ics).not.toContain('BEGIN:VEVENT');
+    });
+
+    it('lists practices next to games, with their own UID, duration, location and cancellation (#33)', async () => {
+      const team = createTeam({ name: 'Lakers' });
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({ id: team.id, name: team.name });
+      (mockPrisma.game.findMany as jest.Mock).mockResolvedValue([
+        createGame({ teamId: team.id, status: 'SCHEDULED', opponent: 'Celtics' }),
+      ]);
+      const base = {
+        teamId: team.id,
+        seriesId: null,
+        notes: null,
+        timezone: 'America/New_York',
+        isException: false,
+        cancelledAt: null,
+        cancelReason: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      (mockPrisma.practiceSession.findMany as jest.Mock).mockResolvedValue([
+        {
+          ...base,
+          id: '11111111-1111-4111-8111-111111111111',
+          type: 'PRACTICE',
+          title: null,
+          location: 'Main gym',
+          startsAt: new Date('2030-01-15T23:00:00Z'),
+          durationMinutes: 90,
+          status: 'SCHEDULED',
+        },
+        {
+          ...base,
+          id: '22222222-2222-4222-8222-222222222222',
+          type: 'OTHER',
+          title: 'Team dinner',
+          location: null,
+          startsAt: new Date('2030-01-17T23:00:00Z'),
+          durationMinutes: 60,
+          status: 'CANCELLED',
+          cancelReason: 'Snow',
+        },
+      ]);
+
+      const ics = await CalendarService.buildFeed(team.id);
+
+      expect((ics.match(/BEGIN:VEVENT/g) || []).length).toBe(3);
+      expect(ics).toContain(`UID:practice-11111111-1111-4111-8111-111111111111@${ICAL_UID_DOMAIN}`);
+      expect(ics).toContain('SUMMARY:Lakers practice');
+      expect(ics).toContain('LOCATION:Main gym');
+      // 23:00Z + 90 minutes, in UTC.
+      expect(ics).toContain('DTSTART:20300115T230000Z');
+      expect(ics).toContain('DTEND:20300116T003000Z');
+      expect(ics).toContain('SUMMARY:Lakers: Team dinner');
+      expect(ics).toContain('Reason: Snow');
+      expect(ics).toContain('STATUS:CANCELLED');
+      expect(mockPrisma.practiceSession.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { teamId: team.id } })
+      );
     });
 
     it('throws NotFoundError if team does not exist', async () => {

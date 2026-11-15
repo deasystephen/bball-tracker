@@ -12,6 +12,7 @@ import statsRoutes from './stats/routes';
 import uploadRoutes from './uploads/routes';
 import adminRoutes from './admin/routes';
 import announcementRoutes from './announcements/routes';
+import { practiceRouter, practiceSeriesRouter } from './practices/routes';
 
 const router = Router();
 
@@ -34,6 +35,8 @@ router.use('/stats', statsRoutes);
 router.use('/uploads', uploadRoutes);
 router.use('/admin', adminRoutes);
 router.use('/announcements', announcementRoutes);
+router.use('/practices', practiceRouter);
+router.use('/practice-series', practiceSeriesRouter);
 
 router.get('/', (_req, res) => {
   res.json({ message: 'API v1' });

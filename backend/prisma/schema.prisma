@@ -163,6 +163,7 @@ model User {
   announcements              Announcement[]
   announcementReplies        AnnouncementReply[]
   calendarFeedTokens         CalendarFeedToken[]
+  practiceAvailability       PracticeAvailability[]
 
   @@index([email])
   @@index([role])
@@ -317,6 +318,8 @@ model Team {
   teamStats           TeamStats[]
   announcements       Announcement[]
   calendarFeedTokens  CalendarFeedToken[]
+  practiceSeries      PracticeSeries[]
+  practiceSessions    PracticeSession[]
 
   // A lineage appears at most once per season; `updateTeam`'s season move
   // pre-checks this and maps a lost race (P2002) to 400.
@@ -666,4 +669,121 @@ model AnnouncementReply {
 
   @@index([announcementId, createdAt])
   @@index([authorId])
+}
+
+// =============================================================================
+// PRACTICE SCHEDULING (#33)
+// =============================================================================
+// Practices and other team events live in their own tables, never in `Game`:
+// a Game row carries a SHOT-derived score, stats finalization, live Socket.io
+// rooms and usage that a practice must never trip, and every existing game
+// reader (lists, stats, the tracker, app builds already in the field) assumes
+// each row is a game. Detail: docs/architecture/practice-scheduling.md.
+
+/// What kind of non-game event a session is. Games stay in `Game`.
+enum PracticeType {
+  PRACTICE
+  OTHER
+}
+
+enum PracticeStatus {
+  SCHEDULED
+  CANCELLED
+}
+
+/// The simplified recurrence rule: every week, or every other week counted
+/// from the week (Sunday to Saturday) that holds the series' startDate.
+enum PracticeFrequency {
+  WEEKLY
+  BIWEEKLY
+}
+
+/// A recurring practice rule. Its occurrences are materialized as
+/// `PracticeSession` rows in the same transaction that creates the series, so
+/// availability attaches per session and a single session can be edited on
+/// its own. A series always has an end (endDate or occurrenceCount) and is
+/// never regenerated, so an edited or deleted session stays as the coach left
+/// it. Times are local wall-clock in `timezone` (IANA); each session's UTC
+/// `startsAt` is computed per occurrence so 18:00 stays 18:00 across DST.
+model PracticeSeries {
+  id              String            @id @default(uuid())
+  teamId          String
+  type            PracticeType      @default(PRACTICE)
+  title           String?
+  location        String?
+  notes           String?
+  frequency       PracticeFrequency
+  /// Days of the week, 0 = Sunday … 6 = Saturday, in `timezone`.
+  weekdays        Int[]
+  /// Local calendar date of the first possible occurrence.
+  startDate       DateTime          @db.Date
+  /// Local wall-clock start, "HH:MM" (24-hour).
+  startTime       String
+  durationMinutes Int
+  /// IANA zone name, e.g. "America/New_York".
+  timezone        String
+  /// Local calendar date of the last possible occurrence (inclusive). Exactly
+  /// one of endDate / occurrenceCount is set.
+  endDate         DateTime?         @db.Date
+  occurrenceCount Int?
+  /// Set when the series is cancelled: its future sessions are deleted, its
+  /// past ones stay.
+  cancelledAt     DateTime?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  team     Team              @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  sessions PracticeSession[]
+
+  @@index([teamId])
+}
+
+/// One dated practice: standalone (seriesId null) or a series occurrence.
+model PracticeSession {
+  id              String         @id @default(uuid())
+  teamId          String
+  seriesId        String?
+  type            PracticeType   @default(PRACTICE)
+  title           String?
+  location        String?
+  notes           String?
+  startsAt        DateTime
+  durationMinutes Int
+  /// IANA zone the session was scheduled in (display and email formatting).
+  timezone        String
+  status          PracticeStatus @default(SCHEDULED)
+  /// True once a series occurrence was edited on its own; a series-wide edit
+  /// skips it from then on.
+  isException     Boolean        @default(false)
+  cancelledAt     DateTime?
+  cancelReason    String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  team         Team                   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  series       PracticeSeries?        @relation(fields: [seriesId], references: [id], onDelete: SetNull)
+  availability PracticeAvailability[]
+
+  @@index([teamId, startsAt])
+  @@index([seriesId, startsAt])
+  @@index([startsAt])
+}
+
+/// A player's availability for one session (the practice counterpart of
+/// GameRsvp). Keyed on the player: a guardian answering for a child writes the
+/// child's row.
+model PracticeAvailability {
+  id        String     @id @default(uuid())
+  sessionId String
+  userId    String
+  status    RsvpStatus
+  comment   String?
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  session PracticeSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  user    User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, userId])
+  @@index([userId])
 }

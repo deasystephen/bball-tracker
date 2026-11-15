@@ -28,17 +28,32 @@ export type RsvpView = Omit<RsvpWithUser, 'user'> & {
   user: Omit<RsvpWithUser['user'], 'email'> & { email?: string | null };
 };
 
+/** A row carrying a user summary whose `email` is visible only to some readers. */
+type WithUserEmail = { user: { id: string; email: string | null } };
+
+/** `T` with `user.email` optional: what `toRsvpView` returns. */
+export type EmailProjected<T extends WithUserEmail> = Omit<T, 'user'> & {
+  user: Omit<T['user'], 'email'> & { email?: string | null };
+};
+
 /**
  * The B2.5 projection, shared by the read and the write path so they cannot
  * drift (#661): roster managers and the row's own user keep `user.email`.
+ * Generic so practice availability (#33) projects its rows with the same rule.
  */
-export function toRsvpView(row: RsvpWithUser, callerId: string, canManageRoster: boolean): RsvpView {
-  if (canManageRoster || row.user.id === callerId) return row;
-  const { user, ...rest } = row;
+export function toRsvpView<T extends WithUserEmail>(
+  row: T,
+  callerId: string,
+  canManageRoster: boolean
+): EmailProjected<T> {
+  // `T` is wider than `EmailProjected<T>` (email only becomes optional), so
+  // the unprojected row is returned as is; TypeScript cannot see that through
+  // the generic Omit, hence the casts.
+  if (canManageRoster || row.user.id === callerId) return row as unknown as EmailProjected<T>;
   // Every other field of the shared user summary (deletedAt, #813) stays.
-  const publicUser: RsvpView['user'] = { ...user };
+  const publicUser: Partial<T['user']> = { ...row.user };
   delete publicUser.email;
-  return { ...rest, user: publicUser };
+  return { ...row, user: publicUser } as unknown as EmailProjected<T>;
 }
 
 export interface RsvpSummary {

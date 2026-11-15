@@ -1,0 +1,132 @@
+/**
+ * Wall-clock time in an IANA zone <-> UTC instants, without a date library
+ * (#33, practice series).
+ *
+ * ECS runs in UTC, so "every Tuesday at 18:00" cannot be stored as one UTC
+ * time: it is 23:00Z in New York winter and 22:00Z in summer. A series keeps
+ * the local date, the local "HH:MM" and the zone, and `zonedTimeToUtc` turns
+ * each occurrence into its own instant using the zone's offset on that day.
+ *
+ * Built on `Intl.DateTimeFormat`, whose zone data ships with Node's ICU.
+ */
+
+/** A local calendar date. `month` is 1-12. */
+export interface LocalDate {
+  year: number;
+  month: number;
+  day: number;
+}
+
+const formatters = new Map<string, Intl.DateTimeFormat>();
+
+function formatterFor(timeZone: string): Intl.DateTimeFormat {
+  let formatter = formatters.get(timeZone);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      hourCycle: 'h23',
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: 'numeric',
+      second: 'numeric',
+    });
+    formatters.set(timeZone, formatter);
+  }
+  return formatter;
+}
+
+/** True when `timeZone` is an IANA zone (or alias such as "UTC") this runtime knows. */
+export function isValidTimeZone(timeZone: string): boolean {
+  if (!timeZone) return false;
+  try {
+    formatterFor(timeZone);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The local wall-clock fields of `instant` in `timeZone`, as a UTC epoch (ms). */
+function wallClockMs(instant: number, timeZone: string): number {
+  const parts = formatterFor(timeZone).formatToParts(new Date(instant));
+  const field = (type: Intl.DateTimeFormatPartTypes): number =>
+    Number(parts.find((p) => p.type === type)?.value ?? 0);
+  return Date.UTC(
+    field('year'),
+    field('month') - 1,
+    field('day'),
+    field('hour'),
+    field('minute'),
+    field('second')
+  );
+}
+
+/** The zone's offset from UTC at `instant`, in ms (New York winter: -5h). */
+function offsetMs(instant: number, timeZone: string): number {
+  const whole = Math.floor(instant / 1000) * 1000;
+  return wallClockMs(whole, timeZone) - whole;
+}
+
+/**
+ * The UTC instant at which the wall clock in `timeZone` reads `date` at
+ * `hour:minute`.
+ *
+ * - A time that happens twice (the hour repeated when clocks go back) resolves
+ *   to the EARLIER instant.
+ * - A time that never happens (the hour skipped when clocks go forward)
+ *   resolves to the instant the same number of minutes after the jump, so
+ *   02:30 on a spring-forward night becomes 03:30 local.
+ */
+export function zonedTimeToUtc(date: LocalDate, hour: number, minute: number, timeZone: string): Date {
+  const naive = Date.UTC(date.year, date.month - 1, date.day, hour, minute);
+  // The offset just before and just after the wall-clock time cover both
+  // sides of any transition that day.
+  const offsets = [offsetMs(naive - 86_400_000, timeZone), offsetMs(naive + 86_400_000, timeZone)];
+  const candidates = [...new Set(offsets.map((o) => naive - o))].sort((a, b) => a - b);
+
+  const exact = candidates.filter((c) => wallClockMs(c, timeZone) === naive);
+  if (exact.length > 0) {
+    return new Date(exact[0]);
+  }
+  // The time falls in a gap: the later candidate is the time shifted forward
+  // by the jump.
+  return new Date(candidates[candidates.length - 1]);
+}
+
+/** Parses "YYYY-MM-DD" (already validated) into a LocalDate. */
+export function parseLocalDate(value: string): LocalDate {
+  const [year, month, day] = value.split('-').map(Number);
+  return { year, month, day };
+}
+
+/** Parses "HH:MM" (already validated) into hour and minute. */
+export function parseLocalTime(value: string): { hour: number; minute: number } {
+  const [hour, minute] = value.split(':').map(Number);
+  return { hour, minute };
+}
+
+/** "YYYY-MM-DD" for a LocalDate. */
+export function formatLocalDate(date: LocalDate): string {
+  const pad = (n: number, width = 2): string => String(n).padStart(width, '0');
+  return `${pad(date.year, 4)}-${pad(date.month)}-${pad(date.day)}`;
+}
+
+/** `date` plus `days` calendar days (pure calendar arithmetic, no zone). */
+export function addDays(date: LocalDate, days: number): LocalDate {
+  const d = new Date(Date.UTC(date.year, date.month - 1, date.day + days));
+  return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() };
+}
+
+/** Day of the week of a calendar date, 0 = Sunday … 6 = Saturday. */
+export function weekdayOf(date: LocalDate): number {
+  return new Date(Date.UTC(date.year, date.month - 1, date.day)).getUTCDay();
+}
+
+/** Whole days from `a` to `b` (negative when `b` is earlier). */
+export function daysBetween(a: LocalDate, b: LocalDate): number {
+  return Math.round(
+    (Date.UTC(b.year, b.month - 1, b.day) - Date.UTC(a.year, a.month - 1, a.day)) / 86_400_000
+  );
+}
