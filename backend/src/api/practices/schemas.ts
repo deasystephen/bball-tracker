@@ -12,6 +12,8 @@ import { canonicalTimeZone, isValidTimeZone, parseLocalDate, daysBetween } from 
 export const MAX_SERIES_OCCURRENCES = 100;
 /** Furthest a series' endDate may be from its startDate, in days. */
 export const MAX_SERIES_SPAN_DAYS = 366;
+/** Furthest in the future a series may start, in days. */
+export const MAX_SERIES_LEAD_DAYS = 366;
 /**
  * Furthest in the past a series may start, in days: room to record the last
  * few weeks, but not a year of past sessions that a series cancel (which
@@ -116,6 +118,11 @@ export const updatePracticeSchema = z
   .strict()
   .refine((data) => Object.values(data).some((value) => value !== undefined), {
     message: 'At least one field must be provided',
+  })
+  // `startsAt` is an instant; a new zone alone would move the local time.
+  .refine((data) => data.timezone === undefined || data.startsAt !== undefined, {
+    message: 'Send startsAt together with timezone',
+    path: ['startsAt'],
   });
 
 /** POST /practices/:id/cancel. */

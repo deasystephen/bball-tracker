@@ -59,9 +59,6 @@ describe('createPracticeSchema', () => {
     expect(createPracticeSchema.safeParse({ ...validPractice, timezone: 'america/new_york' }).data?.timezone).toBe(
       'America/New_York'
     );
-    expect(createPracticeSchema.safeParse({ ...validPractice, timezone: 'US/Eastern' }).data?.timezone).toBe(
-      'America/New_York'
-    );
     expect(createPracticeSchema.safeParse({ ...validPractice, timezone: 'utc' }).data?.timezone).toBe('UTC');
   });
 
@@ -89,6 +86,13 @@ describe('updatePracticeSchema', () => {
   it('accepts a single field, and null to clear text', () => {
     expect(updatePracticeSchema.safeParse({ location: 'Gym B' }).success).toBe(true);
     expect(updatePracticeSchema.safeParse({ notes: null }).data).toEqual({ notes: null });
+  });
+
+  it('needs startsAt with a new timezone, since startsAt is an instant', () => {
+    expect(updatePracticeSchema.safeParse({ timezone: 'America/Chicago' }).success).toBe(false);
+    expect(
+      updatePracticeSchema.safeParse({ timezone: 'America/Chicago', startsAt: '2030-01-15T18:00:00-06:00' }).success
+    ).toBe(true);
   });
 
   it('rejects an empty body, an unknown key and a bad value', () => {

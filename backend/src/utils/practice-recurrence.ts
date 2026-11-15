@@ -6,8 +6,9 @@
  * The rule is the simplified subset the issue scoped (no RFC 5545 RRULE):
  * one or more weekdays, every week (WEEKLY) or every other week (BIWEEKLY),
  * from a local start date until a local end date or a number of occurrences.
- * BIWEEKLY weeks are counted from the Sunday-to-Saturday week that holds the
- * start date: that week is "on", the next is "off", and so on.
+ * BIWEEKLY weeks are counted from the Monday-to-Sunday week that holds the
+ * start date (RFC 5545's default WKST=MO, so a Saturday and the Sunday after
+ * it are one weekend): that week is "on", the next is "off", and so on.
  *
  * Every occurrence is computed in the series' zone (`zonedTimeToUtc`), so a
  * 18:00 practice in America/New_York is 22:00Z in October and 23:00Z in
@@ -58,8 +59,8 @@ export function expandRecurrence(rule: RecurrenceRule, max: number): Occurrence[
   const { hour, minute } = parseLocalTime(rule.startTime);
   const days = new Set(rule.weekdays);
   const step = rule.frequency === 'BIWEEKLY' ? 2 : 1;
-  // Sunday of the start date's week: week numbers count from here.
-  const anchor = addDays(start, -weekdayOf(start));
+  // Monday of the start date's week: week numbers count from here.
+  const anchor = addDays(start, -((weekdayOf(start) + 6) % 7));
 
   const occurrences: Occurrence[] = [];
   // A count-ended rule needs at most `limit` matching weeks; every week has at

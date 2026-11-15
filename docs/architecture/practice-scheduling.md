@@ -41,11 +41,12 @@ export carries it as `practiceAvailability`.
 No team or league stores a time zone, and ECS runs in UTC, so a series carries its own IANA
 `timezone` (the client sends the device zone, `Intl.DateTimeFormat().resolvedOptions().timeZone`).
 The schema stores the runtime's canonical name (`zoned-time.ts#canonicalTimeZone`:
-`america/new_york` and `US/Eastern` become `America/New_York`, `Etc/UTC` becomes `UTC`) and refuses
+`america/new_york` becomes `America/New_York`; Node 22 also folds aliases such as `US/Eastern`) and refuses
 a fixed offset (`-05:00`, `Etc/GMT+5`), which would ignore daylight saving. Only canonical names reach the formatter cache, so a
 client cannot grow it by sending spellings.
 `utils/practice-recurrence.ts#expandRecurrence` walks the local calendar from `startDate`, keeps the
-chosen weekdays (BIWEEKLY: every other Sunday-to-Saturday week, counting the week that holds
+chosen weekdays (BIWEEKLY: every other Monday-to-Sunday week, RFC 5545's default `WKST=MO`, so a
+Saturday and the next Sunday are one weekend; counting the week that holds
 `startDate` as "on"), stops at `endDate` or `occurrenceCount`, and turns each local date plus
 `startTime` into a UTC instant with `utils/zoned-time.ts#zonedTimeToUtc`, using the zone's offset on
 that day. "Tuesdays at 18:00 New York" is 22:00Z in October and 23:00Z in November.
@@ -58,7 +59,8 @@ takes the first.
 `occurrenceCount` 1 to 100 whose last session also falls within 366 days of `startDate`, and the
 expansion may produce at most `MAX_SERIES_OCCURRENCES` (100) sessions (400 otherwise; 400 too when
 no chosen weekday falls in the range). `startDate` may be at most 31 days in the past
-(`MAX_SERIES_BACKDATE_DAYS`): a series cancel deletes only future sessions, so a mistyped year would
+(`MAX_SERIES_BACKDATE_DAYS`, counted from today in the series' zone) and at most 366 days ahead
+(`MAX_SERIES_LEAD_DAYS`): a series cancel deletes only future sessions, so a mistyped year would
 otherwise leave a year of past sessions to delete one by one. A team deleted between the check and
 the insert answers 404. The series payload returns `startDate` / `endDate` as `"YYYY-MM-DD"` (the
 `@db.Date` value is UTC midnight, which a client would render a day early west of UTC). Nothing regenerates a
@@ -129,7 +131,7 @@ Deleted sessions (a cancelled series' future) simply leave the feed.
 | POST | `/api/v1/practices` | `{ teamId, startsAt (ISO with Z/offset), durationMinutes 5–720, timezone, type?, title? ≤100, location? ≤200, notes? ≤1000 }` | 201 `{ practice }` |
 | GET | `/api/v1/practices` | `?teamId&status&from&to&limit (1–200, 50)&offset` | `{ practices, total, limit, offset }`, ascending `startsAt`; there is no default `from`, so an "upcoming" view passes `from=<now>` |
 | GET | `/api/v1/practices/:id` | | `{ practice }` incl. `availabilitySummary { yes, no, maybe }` |
-| PATCH | `/api/v1/practices/:id` | any of the create fields but `teamId` | `{ practice }`; 400 when the practice is (or was just) cancelled |
+| PATCH | `/api/v1/practices/:id` | any of the create fields but `teamId`; `timezone` only together with `startsAt` (an instant: a new zone alone would move the local time) | `{ practice }`; 400 when the practice is (or was just) cancelled |
 | POST | `/api/v1/practices/:id/cancel` | `{ reason? ≤500 }` | `{ practice }` |
 | DELETE | `/api/v1/practices/:id` | | `{ success, message }` |
 | PUT | `/api/v1/practices/:id/availability` | `{ status, comment? ≤500, playerId? }` | `{ availability }` |

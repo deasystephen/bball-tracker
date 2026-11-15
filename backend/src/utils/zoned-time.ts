@@ -47,12 +47,13 @@ function formatterFor(timeZone: string): Intl.DateTimeFormat {
  * A region zone ("America/New_York") or UTC. Never a fixed offset: a bare
  * "+05:30" or an "Etc/GMT+5" would silently ignore daylight saving.
  */
-const REGION_ZONE_RE = /^(?:UTC|(?!Etc\/)[A-Za-z]+(?:\/[A-Za-z0-9_+-]+)+)$/;
+const REGION_ZONE_RE = /^(?:UTC|(?!Etc\/GMT[+-])[A-Za-z]+(?:\/[A-Za-z0-9_+-]+)+)$/;
 
 /**
- * The runtime's canonical name for `timeZone` ("america/new_york" and
- * "US/Eastern" both give "America/New_York"; "Etc/UTC" and "GMT" give "UTC"),
- * or null when it is unknown or a fixed offset. Builds an
+ * The runtime's name for `timeZone`, case-normalized ("america/new_york" gives
+ * "America/New_York"; Node 22 also folds aliases such as "US/Eastern", newer
+ * ECMA-402 runtimes may keep them), or null when it is unknown or a fixed
+ * offset. Builds an
  * uncached formatter, so arbitrary client input never grows the cache.
  */
 export function canonicalTimeZone(timeZone: string): string | null {
@@ -152,4 +153,10 @@ export function daysBetween(a: LocalDate, b: LocalDate): number {
   return Math.round(
     (Date.UTC(b.year, b.month - 1, b.day) - Date.UTC(a.year, a.month - 1, a.day)) / 86_400_000
   );
+}
+
+/** The local calendar date of `instant` in `timeZone` (a canonical name). */
+export function localDateOf(instant: Date, timeZone: string): LocalDate {
+  const d = new Date(wallClockMs(instant.getTime(), timeZone));
+  return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() };
 }

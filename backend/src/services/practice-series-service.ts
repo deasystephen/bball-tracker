@@ -20,6 +20,7 @@ import prisma from '../models';
 import {
   CreatePracticeSeriesInput,
   MAX_SERIES_BACKDATE_DAYS,
+  MAX_SERIES_LEAD_DAYS,
   MAX_SERIES_OCCURRENCES,
   MAX_SERIES_SPAN_DAYS,
   UpdatePracticeSeriesInput,
@@ -27,7 +28,7 @@ import {
 import { BadRequestError, ForbiddenError, NotFoundError } from '../utils/errors';
 import { canAccessTeam } from '../utils/permissions';
 import { expandRecurrence } from '../utils/practice-recurrence';
-import { daysBetween, parseLocalDate } from '../utils/zoned-time';
+import { daysBetween, localDateOf, parseLocalDate } from '../utils/zoned-time';
 import { logger } from '../utils/logger';
 import { isForeignKeyViolation } from '../utils/prisma-errors';
 import { assertCanManagePractices } from './practice-service';
@@ -113,9 +114,13 @@ export class PracticeSeriesService {
     }
     await assertCanManagePractices(userId, data.teamId);
 
-    const today = new Date().toISOString().slice(0, 10);
-    if (daysBetween(parseLocalDate(data.startDate), parseLocalDate(today)) > MAX_SERIES_BACKDATE_DAYS) {
+    // "Today" in the series' own zone, not the server's (UTC).
+    const daysAhead = daysBetween(localDateOf(new Date(), data.timezone), parseLocalDate(data.startDate));
+    if (daysAhead < -MAX_SERIES_BACKDATE_DAYS) {
       throw new BadRequestError(`startDate must be within the last ${MAX_SERIES_BACKDATE_DAYS} days`);
+    }
+    if (daysAhead > MAX_SERIES_LEAD_DAYS) {
+      throw new BadRequestError(`startDate must be within the next ${MAX_SERIES_LEAD_DAYS} days`);
     }
 
     const occurrences = expandRecurrence(data, MAX_SERIES_OCCURRENCES);

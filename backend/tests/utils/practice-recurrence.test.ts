@@ -14,6 +14,7 @@ import {
   daysBetween,
   formatLocalDate,
   isValidTimeZone,
+  localDateOf,
   parseLocalDate,
   weekdayOf,
   zonedTimeToUtc,
@@ -82,8 +83,14 @@ describe('zoned-time helpers', () => {
     expect(isValidTimeZone('-05:00')).toBe(false);
     expect(canonicalTimeZone('america/NEW_york')).toBe('America/New_York');
     expect(canonicalTimeZone('Etc/GMT+5')).toBeNull(); // a fixed offset, no DST
-    expect(canonicalTimeZone('Etc/UTC')).toBe('UTC');
+    expect(isValidTimeZone('Etc/UTC')).toBe(true);
     expect(canonicalTimeZone('+05:30')).toBeNull();
+  });
+
+  it('gives the local date of an instant', () => {
+    // 2026-11-16T01:30Z is still the 15th in Los Angeles.
+    expect(localDateOf(new Date('2026-11-16T01:30:00Z'), 'America/Los_Angeles')).toEqual({ year: 2026, month: 11, day: 15 });
+    expect(localDateOf(new Date('2026-11-16T01:30:00Z'), 'Asia/Tokyo')).toEqual({ year: 2026, month: 11, day: 16 });
   });
 
   it('does calendar arithmetic across month and year ends', () => {
@@ -144,6 +151,15 @@ describe('expandRecurrence', () => {
       100
     );
     expect(occurrences.map((o) => o.localDate)).toEqual(['2026-10-22', '2026-11-03', '2026-11-05', '2026-11-17', '2026-11-19']);
+  });
+
+  it('BIWEEKLY keeps a Saturday and the following Sunday in the same "on" week (Monday weeks)', () => {
+    // 2026-10-24 is a Saturday.
+    const occurrences = expandRecurrence(
+      { ...tuesdays, frequency: 'BIWEEKLY', weekdays: [6, 0], startDate: '2026-10-24', endDate: '2026-11-22' },
+      100
+    );
+    expect(occurrences.map((o) => o.localDate)).toEqual(['2026-10-24', '2026-10-25', '2026-11-07', '2026-11-08', '2026-11-21', '2026-11-22']);
   });
 
   it('stops after occurrenceCount', () => {

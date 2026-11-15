@@ -597,6 +597,27 @@ describe('PracticeSeriesService.createSeries', () => {
     expect(mockPrisma.$transaction).not.toHaveBeenCalled();
   });
 
+  it('counts the 31 days from today in the series zone, not the server’s UTC date', async () => {
+    // 2026-10-26T02:00Z is still Oct 25 in Los Angeles: Sep 24 is 31 days back there, 32 in UTC.
+    freezeDate('2026-10-26T02:00:00Z');
+    mockPrisma.team.findUnique.mockResolvedValue({ id: TEAM });
+    mockPrisma.practiceSeries.create.mockResolvedValue({ id: SERIES });
+    mockPrisma.practiceSession.createMany.mockResolvedValue({ count: 1 });
+    mockPrisma.practiceSeries.findUniqueOrThrow.mockResolvedValue(seriesRow());
+    const la = { ...seriesInput, timezone: 'America/Los_Angeles', startDate: '2026-09-24', endDate: '2026-10-01' };
+    await PracticeSeriesService.createSeries(la, USER);
+    await expect(
+      PracticeSeriesService.createSeries({ ...la, timezone: 'Asia/Tokyo' }, USER)
+    ).rejects.toThrow('startDate must be within the last 31 days');
+  });
+
+  it('refuses a start date more than 366 days ahead', async () => {
+    mockPrisma.team.findUnique.mockResolvedValue({ id: TEAM });
+    await expect(
+      PracticeSeriesService.createSeries({ ...seriesInput, startDate: '2027-10-27', endDate: '2027-11-10' }, USER)
+    ).rejects.toThrow('startDate must be within the next 366 days');
+  });
+
   it('writes the series and one session per occurrence in one transaction, at DST-correct instants', async () => {
     const spy = spyOnInfo();
     mockPrisma.team.findUnique.mockResolvedValue({ id: TEAM });

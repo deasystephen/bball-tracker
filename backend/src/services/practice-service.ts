@@ -180,15 +180,20 @@ export class PracticeService {
     if (!practice) {
       throw new NotFoundError('Practice not found');
     }
-    if (!(await canAccessTeam(userId, practice.teamId))) {
+    const [hasAccess, availabilitySummary] = await Promise.all([
+      canAccessTeam(userId, practice.teamId),
+      summarizeAvailability(sessionId, practice.teamId),
+    ]);
+    if (!hasAccess) {
       throw new ForbiddenError('You do not have access to this practice');
     }
-    return { ...practice, availabilitySummary: await summarizeAvailability(sessionId, practice.teamId) };
+    return { ...practice, availabilitySummary };
   }
 
   /**
    * GET /practices: sessions on every team the caller may read (or one team),
-   * soonest first. The access clause is `readableTeamsWhere`, never a copy.
+   * in ascending `startsAt` (no default `from`: an "upcoming" view passes
+   * one). The access clause is `readableTeamsWhere`, never a copy.
    */
   static async listPractices(query: PracticeQueryParams, userId: string): Promise<PracticeList> {
     const where: Prisma.PracticeSessionWhereInput = {};

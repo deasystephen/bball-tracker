@@ -692,7 +692,7 @@ enum PracticeStatus {
 }
 
 /// The simplified recurrence rule: every week, or every other week counted
-/// from the week (Sunday to Saturday) that holds the series' startDate.
+/// from the week (Monday to Sunday) that holds the series' startDate.
 enum PracticeFrequency {
   WEEKLY
   BIWEEKLY
