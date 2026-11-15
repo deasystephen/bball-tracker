@@ -1327,11 +1327,9 @@ async function scrubInvitedEmail(tx: Prisma.TransactionClient, email: string): P
     WHERE lower("invitedEmail") = lower(${email})`;
   await tx.$executeRaw`
     UPDATE "StaffInvitation"
-    SET "status" = 'EXPIRED'
-    WHERE lower("invitedEmail") = lower(${email}) AND "status" = 'PENDING'`;
-  await tx.$executeRaw`
-    UPDATE "StaffInvitation"
-    SET "invitedEmail" = ${STRIPPED_EMAIL_PREFIX} || "id" || ${STRIPPED_EMAIL_SUFFIX}, "recipientHash" = ''
+    SET "status" = CASE WHEN "status" = 'PENDING' THEN 'EXPIRED'::"InvitationStatus" ELSE "status" END,
+        "invitedEmail" = ${STRIPPED_EMAIL_PREFIX} || "id" || ${STRIPPED_EMAIL_SUFFIX},
+        "recipientHash" = ''
     WHERE lower("invitedEmail") = lower(${email})`;
 }
 

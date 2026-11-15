@@ -465,16 +465,17 @@ describe('staff invitations (#460) through the real StaffInvitationService', () 
       expect(mockPrisma.staffInvitation.create).not.toHaveBeenCalled();
     });
 
-    it('a plain invite after a cancel is not held by the cooldown (Resend only)', async () => {
+    it('a plain invite right after a cancel or decline is held by the cooldown too', async () => {
       givenTeam();
-      mockPrisma.staffInvitation.findFirst.mockResolvedValue(null);
+      mockPrisma.staffInvitation.findFirst
+        .mockResolvedValueOnce(null) // no live PENDING row (it was cancelled)
+        .mockResolvedValueOnce({ createdAt: new Date(Date.now() - 20 * 1000) });
       const res = await request(app)
         .post(`/api/v1/teams/${TEAM_ID}/staff-invitations`)
         .send({ email: INVITEE_EMAIL, roleType: 'HEAD_COACH' });
-      expect(res.status).toBe(201);
-      expect(mockPrisma.staffInvitation.findFirst).not.toHaveBeenCalledWith(
-        expect.objectContaining({ where: { teamId: TEAM_ID, recipientHash: hashRecipient(INVITEE_EMAIL) } })
-      );
+      expect(res.status).toBe(429);
+      expect(res.body.code).toBe('resend_cooldown');
+      expect(mockPrisma.staffInvitation.create).not.toHaveBeenCalled();
     });
 
     it('answers 400 when a concurrent accept wins the cancel (P2025 on the guarded update)', async () => {
@@ -968,15 +969,14 @@ describe('staff invitations (#460) through the real StaffInvitationService', () 
       mockPrisma.user.findFirst.mockResolvedValue({ id: INVITEE_ID, workosUserId: 'wk-new', isManaged: false });
       await request(app).post(`/api/v1/invitations/by-token/${SECRET_TOKEN}/accept`);
       expect(mockPrisma.user.updateMany).toHaveBeenCalledWith({
-        where: { id: INVITEE_ID, role: 'PLAYER', deletedAt: null },
+        where: { id: INVITEE_ID, role: { in: ['PLAYER', 'PARENT'] }, deletedAt: null },
         data: { role: 'COACH' },
       });
 
+      // The role follows the staff row that exists: a team manager row (a new
+      // one, or an existing one kept by alreadyStaff) promotes nothing.
       mockPrisma.user.updateMany.mockClear();
-      mockPrisma.staffInvitation.findUnique.mockImplementation(
-        async ({ select }: { select: Record<string, unknown> }) =>
-          applySelect(invitationRow({ roleType: 'TEAM_MANAGER' }), select)
-      );
+      mockPrisma.teamStaff.findUnique.mockResolvedValue(staffRow(INVITEE_ID, 'TEAM_MANAGER'));
       await request(app).post(`/api/v1/invitations/by-token/${SECRET_TOKEN}/accept`);
       expect(mockPrisma.user.updateMany).not.toHaveBeenCalled();
     });
