@@ -35,7 +35,26 @@ export interface GuardianInvitationByToken {
   expiresAt: string;
 }
 
-export type InvitationByToken = TeamInvitationByToken | GuardianInvitationByToken;
+/** Staff invitation (#460): a head coach invited this address to a staff role. */
+export interface StaffInvitationByToken {
+  kind: 'staff';
+  id: string;
+  status: InvitationByTokenStatus;
+  teamName: string;
+  roleType: 'HEAD_COACH' | 'ASSISTANT_COACH' | 'TEAM_MANAGER';
+  inviterName: string;
+  /** Inviter's tombstone state; render via `inviterDisplayName`. */
+  inviterDeletedAt: string | null;
+  expiresAt: string;
+}
+
+export type InvitationByToken = TeamInvitationByToken | GuardianInvitationByToken | StaffInvitationByToken;
+
+export function isStaffInvitation(
+  invitation: InvitationByToken | null | undefined
+): invitation is StaffInvitationByToken {
+  return invitation?.kind === 'staff';
+}
 
 export function isGuardianInvitation(
   invitation: InvitationByToken | null | undefined

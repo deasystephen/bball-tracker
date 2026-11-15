@@ -6,17 +6,22 @@
  * removed.
  */
 
+import { Alert } from 'react-native';
 import { render, fireEvent, waitFor } from '@testing-library/react-native';
 
 import TeamStaffScreen from '../../app/teams/[id]/staff';
 import { useAuthStore } from '../../store/auth-store';
 import type { Team, TeamStaff } from '../../hooks/useTeams';
-import type { TeamStaffRow } from '../../hooks/useTeamStaff';
+import type { StaffInvitationRow, TeamStaffRow } from '../../hooks/useTeamStaff';
 
 const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn(), canGoBack: jest.fn(() => true) };
 const mockShowToast = jest.fn();
 const mockAddStaff = { mutateAsync: jest.fn(), isPending: false };
 const mockUpdateRole = { mutateAsync: jest.fn(), isPending: false };
+const mockInviteStaff = { mutateAsync: jest.fn(), isPending: false };
+const mockCancelInvitation = { mutateAsync: jest.fn(), isPending: false };
+let mockInvitations: StaffInvitationRow[] = [];
+let mockInvitationsEnabled: boolean | undefined;
 let mockTeam: Team | undefined;
 let mockStaff: TeamStaffRow[] = [];
 
@@ -45,6 +50,12 @@ jest.mock('../../hooks/useTeamStaff', () => ({
   useAddStaff: () => mockAddStaff,
   useUpdateStaffRole: () => mockUpdateRole,
   useRemoveStaff: () => ({ mutateAsync: jest.fn(), isPending: false }),
+  useStaffInvitations: (_teamId: string, enabled: boolean) => {
+    mockInvitationsEnabled = enabled;
+    return { data: enabled ? mockInvitations : undefined, error: null, refetch: jest.fn() };
+  },
+  useInviteStaff: () => mockInviteStaff,
+  useCancelStaffInvitation: () => mockCancelInvitation,
 }));
 
 const headRole: TeamStaff['role'] = {
@@ -98,6 +109,8 @@ describe('TeamStaffScreen permission gating', () => {
     jest.clearAllMocks();
     mockTeam = baseTeam;
     mockStaff = [headRow, assistantRow];
+    mockInvitations = [];
+    mockInvitationsEnabled = undefined;
   });
 
   it('renders every staff row with name and role for any reader', () => {
@@ -170,7 +183,7 @@ describe('TeamStaffScreen permission gating', () => {
     expect(getByLabelText('Change role: Frank Vogel')).toBeTruthy();
   });
 
-  it('Add staff form: validates the email, posts by email + role, and maps a 404 to the "no account" hint', async () => {
+  it('Add staff form: validates the email, posts by email + role, and offers an invitation on a 404 (#460)', async () => {
     signIn({ id: 'coach-1', role: 'COACH' });
     const { getByText, getByTestId, findByText, queryByText } = render(<TeamStaffScreen />);
 
@@ -184,18 +197,24 @@ describe('TeamStaffScreen permission gating', () => {
     expect(await findByText('Enter a valid email address')).toBeTruthy();
     expect(mockAddStaff.mutateAsync).not.toHaveBeenCalled();
 
-    // 404 → "no account" hint inline.
+    // 404 → the form offers an invitation instead of a dead end (#460).
     mockAddStaff.mutateAsync.mockRejectedValueOnce(
       Object.assign(new Error('User not found'), { apiError: { status: 404, error: 'User not found' } })
     );
     fireEvent.changeText(input, 'nobody@example.com');
     submit();
-    expect(await findByText(/No account with that email/)).toBeTruthy();
+    expect(await findByText(/No account uses that email yet/)).toBeTruthy();
     expect(mockAddStaff.mutateAsync).toHaveBeenCalledWith({
       teamId: 't1',
       data: { email: 'nobody@example.com', roleType: 'ASSISTANT_COACH' },
     });
     expect(mockShowToast).not.toHaveBeenCalled();
+    expect(queryByText('Add staff', { exact: true })).toBeTruthy(); // the form title stays
+
+    // Editing the address withdraws the offer; the add button comes back.
+    fireEvent.changeText(input, 'nobody2@example.com');
+    expect(queryByText(/No account uses that email yet/)).toBeNull();
+    expect(getByTestId('staff-add-submit')).toBeTruthy();
 
     // Success → toast, form closes.
     mockAddStaff.mutateAsync.mockResolvedValueOnce(assistantRow);
@@ -279,5 +298,77 @@ describe('TeamStaffScreen permission gating', () => {
     signIn({ id: 'admin-1', role: 'ADMIN' });
     const { getByText } = render(<TeamStaffScreen />);
     expect(getByText('No staff yet')).toBeTruthy();
+  });
+
+  it('Send invitation (after a 404) invites the address with the chosen role; a failed email is an error toast', async () => {
+    signIn({ id: 'coach-1', role: 'COACH' });
+    const { getByText, getByTestId, findByTestId, queryByTestId } = render(<TeamStaffScreen />);
+
+    fireEvent.press(getByText('Add staff'));
+    fireEvent.changeText(getByTestId('staff-email-input'), 'new.coach@example.com');
+    fireEvent.press(getByText('Team Manager'));
+    mockAddStaff.mutateAsync.mockRejectedValueOnce(
+      Object.assign(new Error('User not found'), { apiError: { status: 404, error: 'User not found' } })
+    );
+    fireEvent.press(getByTestId('staff-add-submit'));
+
+    mockInviteStaff.mutateAsync.mockResolvedValueOnce({ invitation: { id: 'si-1' }, emailSent: false });
+    fireEvent.press(await findByTestId('staff-invite-submit'));
+
+    await waitFor(() =>
+      expect(mockShowToast).toHaveBeenCalledWith(
+        'The invitation was saved but the email failed to send. Use Resend to try again in a couple of minutes.',
+        'error'
+      )
+    );
+    expect(mockInviteStaff.mutateAsync).toHaveBeenCalledWith({
+      teamId: 't1',
+      data: { email: 'new.coach@example.com', roleType: 'TEAM_MANAGER', supersede: false },
+    });
+    expect(queryByTestId('staff-email-input')).toBeNull();
+  });
+
+  it('pending invitations: listed to a staff manager with Resend (supersede) and Cancel', async () => {
+    signIn({ id: 'coach-1', role: 'COACH' });
+    mockInvitations = [
+      {
+        id: 'si-1',
+        teamId: 't1',
+        invitedEmail: 'pending.coach@example.com',
+        roleType: 'ASSISTANT_COACH',
+        status: 'PENDING',
+        expiresAt: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(),
+        createdAt: '2026-11-01T00:00:00Z',
+        invitedBy: { id: 'coach-1', name: 'Frank Vogel', deletedAt: null },
+      },
+    ];
+    const { getByText, getByLabelText } = render(<TeamStaffScreen />);
+
+    expect(mockInvitationsEnabled).toBe(true);
+    expect(getByText('Pending invitations')).toBeTruthy();
+    expect(getByText('pending.coach@example.com')).toBeTruthy();
+
+    mockInviteStaff.mutateAsync.mockResolvedValueOnce({ invitation: { id: 'si-2' }, emailSent: true });
+    fireEvent.press(getByLabelText('Resend invitation: pending.coach@example.com'));
+    await waitFor(() => expect(mockShowToast).toHaveBeenCalledWith('Invitation sent', 'success'));
+    expect(mockInviteStaff.mutateAsync).toHaveBeenCalledWith({
+      teamId: 't1',
+      data: { email: 'pending.coach@example.com', roleType: 'ASSISTANT_COACH', supersede: true },
+    });
+
+    const alertSpy = jest.spyOn(Alert, 'alert');
+    fireEvent.press(getByLabelText('Cancel invitation: pending.coach@example.com'));
+    const buttons = alertSpy.mock.calls[0][2] as { text: string; onPress?: () => Promise<void> }[];
+    await buttons.find((b) => b.text === 'Cancel invitation')!.onPress!();
+    expect(mockCancelInvitation.mutateAsync).toHaveBeenCalledWith({ teamId: 't1', invitationId: 'si-1' });
+    expect(mockShowToast).toHaveBeenCalledWith('Invitation cancelled', 'success');
+  });
+
+  it('pending invitations are never requested for a reader who cannot manage staff', () => {
+    signIn({ id: 'asst-1', role: 'COACH' });
+    mockInvitations = [];
+    const { queryByText } = render(<TeamStaffScreen />);
+    expect(mockInvitationsEnabled).toBe(false);
+    expect(queryByText('Pending invitations')).toBeNull();
   });
 });

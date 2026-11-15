@@ -7,6 +7,8 @@ import { apiClient } from '../services/api-client';
 import { trackEvent, AnalyticsEvents } from '../services/analytics';
 import { gameKeys, teamKeys, invitationKeys, type InvitationsQueryParams } from './query-keys';
 import type { GuardianRelationship } from '../../shared/types';
+import { teamStaffKeys } from './useTeamStaff';
+import { usageKeys } from './useUsage';
 
 export type InvitationStatus = 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED' | 'CANCELLED';
 
@@ -61,7 +63,25 @@ export interface TeamInvitation {
   };
 }
 
-export type InvitationKind = 'team' | 'guardian';
+export type InvitationKind = 'team' | 'guardian' | 'staff';
+
+/**
+ * A pending staff invitation addressed to the signed-in account (#460): a
+ * head coach invited this address to a staff role. Surfaced on the
+ * unfiltered / PENDING `GET /invitations` as `staffInvitations`; accepted
+ * through `POST /invitations/:id/accept`.
+ */
+export interface StaffInvitationView {
+  kind: 'staff';
+  id: string;
+  status: InvitationStatus;
+  teamName: string;
+  roleType: 'HEAD_COACH' | 'ASSISTANT_COACH' | 'TEAM_MANAGER';
+  inviterName: string;
+  /** Inviter's tombstone state; render via `inviterDisplayName`. */
+  inviterDeletedAt: string | null;
+  expiresAt: string;
+}
 
 /**
  * A pending guardian invitation addressed to the signed-in adult (PARENT
@@ -88,6 +108,8 @@ export interface InvitationsResponse {
   invitations: TeamInvitation[];
   /** Optional: older API builds omit it. */
   guardianInvitations?: GuardianInvitationView[];
+  /** Optional: API builds before #460 omit it. */
+  staffInvitations?: StaffInvitationView[];
   pagination: {
     total: number;
     limit: number;
@@ -116,6 +138,10 @@ export interface InvitationResponse {
     jerseyNumber?: number | null;
     position?: string | null;
   };
+  /** Present on `kind: 'staff'` accepts (#460): the caller's staff row on the team. */
+  staff?: { id: string; teamId: string; userId: string };
+  /** `kind: 'staff'`: the caller already held a staff row, left unchanged. */
+  alreadyStaff?: boolean;
   message?: string;
   /**
    * Whether the invitation email was delivered to the mailer. `false` = the
@@ -243,7 +269,7 @@ export function useAcceptInvitation({ source = 'in_app' }: { source?: Invitation
     },
     onSuccess: (data) => {
       trackEvent(AnalyticsEvents.INVITATION_ACCEPTED, {
-        kind: data.kind === 'guardian' ? 'guardian' : 'team',
+        kind: data.kind === 'guardian' || data.kind === 'staff' ? data.kind : 'team',
         source,
       });
       // Invalidate all invitation queries
@@ -252,9 +278,15 @@ export function useAcceptInvitation({ source = 'in_app' }: { source?: Invitation
       // teams, PARENT role) changes membership, and GET /games is
       // membership-scoped, so teams and games move. gameKeys.all also refreshes
       // a game detail cached (e.g. as a 403) before the accept (#729).
-      if (data.teamMember || data.kind === 'guardian') {
+      // A staff accept (#460) adds the team to the caller's lists the same way,
+      // and the usage meter counts staff teams.
+      if (data.teamMember || data.kind === 'guardian' || data.kind === 'staff') {
         queryClient.invalidateQueries({ queryKey: teamKeys.all });
         queryClient.invalidateQueries({ queryKey: gameKeys.all });
+      }
+      if (data.kind === 'staff') {
+        queryClient.invalidateQueries({ queryKey: teamStaffKeys.all });
+        queryClient.invalidateQueries({ queryKey: usageKeys.all });
       }
     },
   });

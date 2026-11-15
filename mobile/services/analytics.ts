@@ -41,6 +41,8 @@ export const AnalyticsEvents = {
   STAFF_ADDED: 'staff_added',
   STAFF_ROLE_UPDATED: 'staff_role_updated',
   STAFF_REMOVED: 'staff_removed',
+  STAFF_INVITED: 'staff_invited',
+  STAFF_INVITATION_CANCELLED: 'staff_invitation_cancelled',
   INVITATION_SENT: 'invitation_sent',
   INVITE_LINK_VIEWED: 'invite_link_viewed',
   INVITATION_ACCEPTED: 'invitation_accepted',
@@ -152,6 +154,8 @@ export interface AnalyticsEventProps {
   staff_added: { team_id: string; role_type: string; by: 'user_id' | 'email' };
   staff_role_updated: { team_id: string; role_type: string };
   staff_removed: { team_id: string };
+  staff_invited: { team_id: string; invitation_id: string; role_type: string; resend: boolean; email_sent: boolean };
+  staff_invitation_cancelled: { team_id: string; invitation_id: string };
   invitation_sent: { team_id: string; invitation_id: string; resend: boolean; email_sent: boolean | null };
   /**
    * What the invitee saw on `/invite/[token]` (#967), once per token per
@@ -162,11 +166,11 @@ export interface AnalyticsEventProps {
    */
   invite_link_viewed: {
     state: InviteLinkState;
-    kind?: 'team' | 'guardian';
+    kind?: 'team' | 'guardian' | 'staff';
     authenticated: boolean;
     source: 'web' | 'link';
   };
-  invitation_accepted: { kind: 'team' | 'guardian'; source: 'in_app' | 'link' };
+  invitation_accepted: { kind: 'team' | 'guardian' | 'staff'; source: 'in_app' | 'link' };
   invitation_declined: { invitation_id: string };
   invitation_cancelled: { team_id: string; invitation_id: string };
   guardian_invited: { team_id: string; relationship: string; resend: boolean; email_sent: boolean };

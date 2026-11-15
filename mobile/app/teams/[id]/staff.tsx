@@ -1,6 +1,8 @@
 /**
  * Team staff screen — list coaches / managers, add by email, change role,
- * remove (role matrix decision 2, B2.3).
+ * remove (role matrix decision 2, B2.3), and invite an address that has no
+ * account yet (#460): the add answers 404, the form offers "Send invitation",
+ * and pending invitations are listed with Resend and Cancel.
  *
  * Readable by anyone with team access; the mutating controls render only
  * when `canManageStaff` (ADMIN, league admin or head coach). Self-removal
@@ -32,10 +34,16 @@ import {
   useAddStaff,
   useUpdateStaffRole,
   useRemoveStaff,
+  useStaffInvitations,
+  useInviteStaff,
+  useCancelStaffInvitation,
   STAFF_ROLE_TYPES,
   type StaffRoleType,
   type TeamStaffRow,
+  type StaffInvitationRow,
 } from '../../../hooks/useTeamStaff';
+import { formatInvitationExpiry } from '../../../utils/invitation-expiry';
+import { staffRoleLabel } from '../../../utils/staff-role';
 import { useTheme } from '../../../hooks/useTheme';
 import { useTranslation } from '../../../i18n';
 import { spacing, borderRadius } from '../../../theme';
@@ -74,14 +82,23 @@ export default function TeamStaffScreen() {
   const addStaff = useAddStaff();
   const updateRole = useUpdateStaffRole();
   const removeStaff = useRemoveStaff();
+  const inviteStaff = useInviteStaff();
+  const cancelInvitation = useCancelStaffInvitation();
 
   const [showAddForm, setShowAddForm] = useState(false);
   const [email, setEmail] = useState('');
   const [emailError, setEmailError] = useState<string | undefined>();
   const [roleType, setRoleType] = useState<StaffRoleType>('ASSISTANT_COACH');
   const [roleMenuRow, setRoleMenuRow] = useState<TeamStaffRow | null>(null);
+  // The address the add just answered 404 for: the form then offers an invitation (#460).
+  const [inviteOffer, setInviteOffer] = useState<string | null>(null);
 
   const canManage = canManageStaff(team, user?.id, user?.role, user?.leagueAdminOf);
+  const {
+    data: pendingInvitations,
+    error: invitationsError,
+    refetch: refetchInvitations,
+  } = useStaffInvitations(id, canManage);
 
   const headCoachCount = useMemo(
     () => (staff ?? []).filter((s) => s.role.type === 'HEAD_COACH').length,
@@ -106,11 +123,53 @@ export default function TeamStaffScreen() {
     } catch (err) {
       const status = (err as { apiError?: { status?: number } }).apiError?.status;
       if (status === 404) {
-        setEmailError(t('teams.staffNoAccount'));
+        setInviteOffer(trimmed);
         return;
       }
       toast.showToast(getApiErrorMessage(err, t('teams.staffAddFailed')), 'error');
     }
+  };
+
+  const resetForm = () => {
+    setShowAddForm(false);
+    setEmail('');
+    setEmailError(undefined);
+    setInviteOffer(null);
+  };
+
+  /** Send (or, with `supersede`, re-send) a staff invitation; a failed email is never silent. */
+  const sendInvitation = async (address: string, type: StaffRoleType, supersede = false) => {
+    try {
+      const result = await inviteStaff.mutateAsync({
+        teamId: id,
+        data: { email: address, roleType: type, supersede },
+      });
+      if (!supersede) resetForm();
+      toast.showToast(
+        result.emailSent ? t('teams.staffInvitationSent') : t('teams.staffInvitationEmailFailed'),
+        result.emailSent ? 'success' : 'error'
+      );
+    } catch (err) {
+      toast.showToast(getApiErrorMessage(err, t('teams.staffInviteFailed')), 'error');
+    }
+  };
+
+  const handleCancelInvitation = (row: StaffInvitationRow) => {
+    Alert.alert(t('teams.cancelStaffInvitationTitle'), t('teams.cancelStaffInvitationMessage', { email: row.invitedEmail }), [
+      { text: t('roster.keepInvitation'), style: 'cancel' },
+      {
+        text: t('roster.cancelInvitation'),
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await cancelInvitation.mutateAsync({ teamId: id, invitationId: row.id });
+            toast.showToast(t('teams.staffInvitationCancelled'), 'success');
+          } catch (err) {
+            toast.showToast(getApiErrorMessage(err, t('teams.staffInvitationCancelFailed')), 'error');
+          }
+        },
+      },
+    ]);
   };
 
   const changeRole = async (row: TeamStaffRow, type: StaffRoleType) => {
@@ -215,6 +274,7 @@ export default function TeamStaffScreen() {
                   onChangeText={(text) => {
                     setEmail(text);
                     if (emailError) setEmailError(undefined);
+                    if (inviteOffer) setInviteOffer(null);
                   }}
                   error={emailError}
                   keyboardType="email-address"
@@ -253,25 +313,37 @@ export default function TeamStaffScreen() {
                     );
                   })}
                 </View>
+                {inviteOffer !== null && (
+                  <ThemedText variant="caption" color="textSecondary" style={styles.inviteHint}>
+                    {t('teams.staffNoAccountInvite')}
+                  </ThemedText>
+                )}
                 <View style={styles.actionButtons}>
                   <Button
                     title={t('common.cancel')}
-                    onPress={() => {
-                      setShowAddForm(false);
-                      setEmail('');
-                      setEmailError(undefined);
-                    }}
+                    onPress={resetForm}
                     variant="outline"
                     style={styles.actionButton}
                   />
-                  <Button
-                    title={t('teams.addStaff')}
-                    onPress={handleAdd}
-                    loading={addStaff.isPending}
-                    disabled={addStaff.isPending}
-                    style={styles.actionButton}
-                    testID="staff-add-submit"
-                  />
+                  {inviteOffer !== null ? (
+                    <Button
+                      title={t('teams.sendStaffInvitation')}
+                      onPress={() => void sendInvitation(inviteOffer, roleType)}
+                      loading={inviteStaff.isPending}
+                      disabled={inviteStaff.isPending}
+                      style={styles.actionButton}
+                      testID="staff-invite-submit"
+                    />
+                  ) : (
+                    <Button
+                      title={t('teams.addStaff')}
+                      onPress={handleAdd}
+                      loading={addStaff.isPending}
+                      disabled={addStaff.isPending}
+                      style={styles.actionButton}
+                      testID="staff-add-submit"
+                    />
+                  )}
                 </View>
               </>
             ) : (
@@ -343,6 +415,57 @@ export default function TeamStaffScreen() {
           })
         )}
 
+        {canManage && invitationsError != null && (
+          <View style={styles.invitationsError}>
+            <ThemedText variant="caption" color="error">
+              {t('teams.staffInvitationsLoadFailed')}
+            </ThemedText>
+            <Button title={t('common.tryAgain')} variant="outline" size="small" onPress={() => refetchInvitations()} />
+          </View>
+        )}
+
+        {canManage && pendingInvitations != null && pendingInvitations.length > 0 && (
+          <>
+            <View style={[styles.sectionHeader, styles.invitationsHeader]}>
+              <ThemedText variant="h3" heading>{t('teams.pendingStaffInvitations')}</ThemedText>
+            </View>
+            {pendingInvitations.map((row) => (
+              <ListItem
+                key={row.id}
+                title={row.invitedEmail}
+                subtitle={`${staffRoleLabel(t, row.roleType)} · ${formatInvitationExpiry(row.expiresAt)}`}
+                accessibilityLabel={t('teams.pendingStaffInvitationLabel', {
+                  email: row.invitedEmail,
+                  role: staffRoleLabel(t, row.roleType),
+                })}
+                testID={`staff-invitation-row-${row.id}`}
+                rightElement={
+                  <View style={styles.rowActions}>
+                    <TouchableOpacity
+                      onPress={() => void sendInvitation(row.invitedEmail, row.roleType, true)}
+                      style={styles.rowButton}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${t('teams.resendStaffInvitation')}: ${row.invitedEmail}`}
+                      disabled={inviteStaff.isPending}
+                    >
+                      <Ionicons name="refresh-outline" size={22} color={colors.primary} />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => handleCancelInvitation(row)}
+                      style={styles.rowButton}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${t('roster.cancelInvitation')}: ${row.invitedEmail}`}
+                      disabled={cancelInvitation.isPending}
+                    >
+                      <Ionicons name="close-circle-outline" size={22} color={colors.error} />
+                    </TouchableOpacity>
+                  </View>
+                }
+              />
+            ))}
+          </>
+        )}
+
         {canManage && headCoachCount === 1 && (
           <ThemedText variant="footnote" color="textTertiary" style={styles.hint}>
             {t('teams.lastHeadCoach')}
@@ -400,4 +523,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   hint: { marginTop: spacing.md },
+  inviteHint: { marginBottom: spacing.md },
+  invitationsHeader: { marginTop: spacing.lg },
+  invitationsError: { marginTop: spacing.lg, gap: spacing.sm },
 });

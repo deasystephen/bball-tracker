@@ -668,6 +668,15 @@ async function main() {
     console.log(`    Assigned ${coachFrank.name} as Head Coach`);
   }
 
+  // .maestro/staff-invitation.yaml invites (and cancels) an address on the
+  // Lakers (#460). Clear every staff invitation on the team, so each run starts
+  // with none pending and no resend cooldown; the flow never accepts, so no
+  // account is created to clean up.
+  const clearedStaffInvitations = await prisma.staffInvitation.deleteMany({ where: { teamId: lakers.id } });
+  if (clearedStaffInvitations.count > 0) {
+    console.log(`    Cleared ${clearedStaffInvitations.count} staff invitation(s) from a previous E2E run`);
+  }
+
   // Lakers players
   const lakersPlayers = [
     { email: 'lebron.james@example.com', jersey: 23, position: 'SF' },

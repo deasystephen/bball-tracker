@@ -43,10 +43,41 @@ export type AddStaffInput =
   | { userId: string; roleType: StaffRoleType }
   | { email: string; roleType: StaffRoleType };
 
+/**
+ * A pending staff invitation on the team (#460), as `GET
+ * /teams/:teamId/staff-invitations` lists it to callers who may manage staff.
+ * The address may have no account yet; none exists until the invitee accepts.
+ * Never carries the token.
+ */
+export interface StaffInvitationRow {
+  id: string;
+  teamId: string;
+  invitedEmail: string;
+  roleType: StaffRoleType;
+  status: 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED' | 'CANCELLED';
+  expiresAt: string;
+  createdAt: string;
+  invitedBy: { id: string; name: string; deletedAt: string | null };
+}
+
+export interface InviteStaffInput {
+  email: string;
+  roleType: StaffRoleType;
+  /** Resend: expire the live invitation and send a fresh link (the old one dies). */
+  supersede?: boolean;
+}
+
+export interface InviteStaffResult {
+  invitation: StaffInvitationRow;
+  /** `false`: the invitation exists but the email failed; warn the coach. */
+  emailSent: boolean;
+}
+
 export const teamStaffKeys = {
   all: ['team-staff'] as const,
   list: (teamId: string) => [...teamStaffKeys.all, 'list', teamId] as const,
   roles: (teamId: string) => [...teamStaffKeys.all, 'roles', teamId] as const,
+  invitations: (teamId: string) => [...teamStaffKeys.all, 'invitations', teamId] as const,
 };
 
 export function useTeamStaff(teamId: string) {
@@ -104,6 +135,67 @@ export function useAddStaff() {
         by: 'userId' in variables.data ? 'user_id' : 'email',
       });
       invalidate(variables.teamId);
+    },
+  });
+}
+
+/**
+ * Pending staff invitations of a team. Only callers who may manage staff can
+ * read them (the API answers 403 otherwise), so pass `enabled` from the same
+ * `canManageStaff` that renders the controls.
+ */
+export function useStaffInvitations(teamId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: teamStaffKeys.invitations(teamId),
+    queryFn: async () => {
+      const response = await apiClient.get<{ success: boolean; invitations: StaffInvitationRow[] }>(
+        `/teams/${teamId}/staff-invitations`
+      );
+      return response.data.invitations ?? [];
+    },
+    enabled: !!teamId && enabled,
+  });
+}
+
+/** Invite an address (with or without an account) to a staff role (#460). */
+export function useInviteStaff() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ teamId, data }: { teamId: string; data: InviteStaffInput }): Promise<InviteStaffResult> => {
+      const response = await apiClient.post<{ success: boolean } & InviteStaffResult>(
+        `/teams/${teamId}/staff-invitations`,
+        data
+      );
+      return { invitation: response.data.invitation, emailSent: response.data.emailSent };
+    },
+    onSuccess: (result, variables) => {
+      trackEvent(AnalyticsEvents.STAFF_INVITED, {
+        team_id: variables.teamId,
+        invitation_id: result.invitation.id,
+        role_type: variables.data.roleType,
+        resend: !!variables.data.supersede,
+        email_sent: result.emailSent,
+      });
+      queryClient.invalidateQueries({ queryKey: teamStaffKeys.invitations(variables.teamId) });
+    },
+  });
+}
+
+/** Cancel a pending staff invitation; its link stops working. */
+export function useCancelStaffInvitation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ teamId, invitationId }: { teamId: string; invitationId: string }) => {
+      await apiClient.delete(`/teams/${teamId}/staff-invitations/${invitationId}`);
+    },
+    onSuccess: (_, variables) => {
+      trackEvent(AnalyticsEvents.STAFF_INVITATION_CANCELLED, {
+        team_id: variables.teamId,
+        invitation_id: variables.invitationId,
+      });
+      queryClient.invalidateQueries({ queryKey: teamStaffKeys.invitations(variables.teamId) });
     },
   });
 }
