@@ -144,7 +144,11 @@ export function InviteClient({ invitation, token }: Props) {
           <div className="logo">🚫</div>
           <span className="status-badge status-cancelled">Cancelled</span>
           <h1>Invitation Cancelled</h1>
-          <p>This invitation {preposition} {subject} has been cancelled by the team coach.</p>
+          <p>
+            {staff
+              ? <>This invitation {preposition} {subject} was cancelled. Ask the head coach for a new one.</>
+              : <>This invitation {preposition} {subject} has been cancelled by the team coach.</>}
+          </p>
         </div>
       </main>
     );

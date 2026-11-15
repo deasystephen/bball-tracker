@@ -232,6 +232,31 @@ describe('staff invitations (#460) through the real StaffInvitationService', () 
       });
     });
 
+    it('tells an address that already has a signed-in account to accept in the app', async () => {
+      givenTeam();
+      mockPrisma.user.findFirst.mockResolvedValue({ id: INVITEE_ID, workosUserId: 'wk-new', isManaged: false });
+      mockPrisma.teamStaff.findUnique.mockResolvedValue(null);
+
+      const res = await request(app).post(url).send({ email: INVITEE_EMAIL, roleType: 'ASSISTANT_COACH' });
+
+      expect(res.status).toBe(201);
+      expect(sendSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ variables: expect.objectContaining({ acceptInApp: 'true' }) })
+      );
+    });
+
+    it('re-checks the gate behind the team lock (a head coach removed meanwhile gets 403)', async () => {
+      givenTeam();
+      // First canManageStaff (before the transaction) passes, the one under the lock does not.
+      mockPrisma.teamStaff.findFirst.mockResolvedValueOnce({ id: 'head-row' }).mockResolvedValue(null);
+
+      const res = await request(app).post(url).send({ email: INVITEE_EMAIL, roleType: 'ASSISTANT_COACH' });
+
+      expect(res.status).toBe(403);
+      expect(mockPrisma.staffInvitation.create).not.toHaveBeenCalled();
+      expect(sendSpy).not.toHaveBeenCalled();
+    });
+
     it('reports a failed send as emailSent: false, never a 5xx', async () => {
       givenTeam();
       sendSpy.mockRejectedValue(new Error('SES down'));
@@ -333,7 +358,8 @@ describe('staff invitations (#460) through the real StaffInvitationService', () 
       expect(res.status).toBe(429);
       expect(res.body.code).toBe('resend_cooldown');
       expect(mockPrisma.staffInvitation.findFirst).toHaveBeenLastCalledWith({
-        where: { teamId: TEAM_ID, recipientHash: hashRecipient(INVITEE_EMAIL) },
+        // The club across seasons, so a rollover does not reset the window.
+        where: { recipientHash: hashRecipient(INVITEE_EMAIL), team: { lineageId: 'lineage-1' } },
         orderBy: { createdAt: 'desc' },
         select: { createdAt: true },
       });

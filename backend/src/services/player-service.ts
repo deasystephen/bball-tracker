@@ -458,6 +458,12 @@ export class PlayerService {
             : 'You cannot change the email of a player who has signed in'
         );
       }
+      // A staff role is not the managing coach's to re-address (#460): with
+      // the email rewritten to their own address, signing in would claim the
+      // row and its role. The update below repeats this as a guard.
+      if (currentUser.role !== 'ADMIN' && (await prisma.teamStaff.count({ where: { userId: playerId } })) > 0) {
+        throw new ForbiddenError('This person holds a staff role, so their email cannot be changed here');
+      }
 
       const existingUser = await prisma.user.findFirst({
         where: { email: emailEquals(data.email) },
@@ -483,7 +489,13 @@ export class PlayerService {
     const updatedPlayer: Player = await withCheckedAvatar(uploadKey, async () => {
       try {
         return await prisma.user.update({
-          where: { id: playerId, deletedAt: null },
+          where: {
+            id: playerId,
+            deletedAt: null,
+            // The staff check above, again in the write (a staff row added in
+            // between makes this a P2025, answered 404, never a rewrite).
+            ...(data.email && emailChanged && currentUser.role !== 'ADMIN' && { teamStaff: { none: {} } }),
+          },
           data: {
             ...(data.name && { name: data.name }),
             // A corrected address starts clean: the bounce belonged to the old one (#449).

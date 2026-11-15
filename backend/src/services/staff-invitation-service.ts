@@ -194,7 +194,10 @@ export class StaffInvitationService {
     data: InviteStaffInput,
     userId: string
   ): Promise<StaffInvitationSummary & { emailSent: boolean }> {
-    const team = await prisma.team.findUnique({ where: { id: teamId }, select: { id: true, name: true } });
+    const team = await prisma.team.findUnique({
+      where: { id: teamId },
+      select: { id: true, name: true, lineageId: true },
+    });
     if (!team) {
       throw new NotFoundError('Team not found');
     }
@@ -209,8 +212,11 @@ export class StaffInvitationService {
 
     const existingAccount = await prisma.user.findFirst({
       where: { email: emailEquals(email), deletedAt: null },
-      select: { id: true },
+      select: { id: true, workosUserId: true, isManaged: true },
     });
+    // A claimed account or a managed record cannot accept from the public
+    // link (409 sign_in_required): the email says to accept in the app.
+    const acceptInApp = !!existingAccount && (existingAccount.workosUserId !== null || existingAccount.isManaged);
     if (existingAccount) {
       const staffRow = await prisma.teamStaff.findUnique({
         where: { teamId_userId: { teamId, userId: existingAccount.id } },
@@ -238,6 +244,12 @@ export class StaffInvitationService {
           if (!(await lockTeamRow(tx, teamId))) {
             throw new NotFoundError('Team not found');
           }
+          // The gate again behind the lock: a head coach removed or demoted
+          // meanwhile (which cancels their invitations under this same lock)
+          // cannot slip one in after the cancel.
+          if (!(await canManageStaff(userId, teamId, tx))) {
+            throw new ForbiddenError('You do not have permission to manage team staff');
+          }
           if (!(await isLatestTeamSeason(tx, teamId))) {
             throw new BadRequestError(PAST_SEASON);
           }
@@ -258,8 +270,10 @@ export class StaffInvitationService {
           // (Team invitations hold the same cap through supersede alone,
           // because a player's address lives on the User row; here only the
           // invitation rows know it.) A role correction waits the 2 minutes.
+          // Keyed on the lineage (the club across seasons), so a rollover,
+          // which moves only PENDING rows, does not reset the window.
           const latest = await tx.staffInvitation.findFirst({
-            where: { teamId, recipientHash },
+            where: { recipientHash, team: { lineageId: team.lineageId } },
             orderBy: { createdAt: 'desc' },
             select: { createdAt: true },
           });
@@ -314,6 +328,7 @@ export class StaffInvitationService {
             inviterName: inviter?.name ?? '',
             expiresAt: formatEmailDate(invitation.expiresAt),
             acceptUrl: `${publicAppUrl()}/invite/${token}`,
+            acceptInApp: acceptInApp ? 'true' : '',
           },
           metadata: {
             event_type: 'staff_invitation.created',
