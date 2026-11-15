@@ -364,6 +364,19 @@ describe('TeamStaffScreen permission gating', () => {
     expect(mockShowToast).toHaveBeenCalledWith('Invitation cancelled', 'success');
   });
 
+  it('a 404 that is not "User not found" (a gone team) is an error toast, not an invitation offer', async () => {
+    signIn({ id: 'coach-1', role: 'COACH' });
+    const { getByText, getByTestId, queryByTestId } = render(<TeamStaffScreen />);
+    fireEvent.press(getByText('Add staff'));
+    fireEvent.changeText(getByTestId('staff-email-input'), 'someone@example.com');
+    mockAddStaff.mutateAsync.mockRejectedValueOnce(
+      Object.assign(new Error('Team not found'), { apiError: { status: 404, error: 'Team not found' } })
+    );
+    fireEvent.press(getByTestId('staff-add-submit'));
+    await waitFor(() => expect(mockShowToast).toHaveBeenCalledWith(expect.any(String), 'error'));
+    expect(queryByTestId('staff-invite-submit')).toBeNull();
+  });
+
   it('pending invitations are never requested for a reader who cannot manage staff', () => {
     signIn({ id: 'asst-1', role: 'COACH' });
     mockInvitations = [];

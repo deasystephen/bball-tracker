@@ -22,7 +22,7 @@ import {
 } from '../../hooks/useInvitations';
 import { staffRoleLabel } from '../../utils/staff-role';
 import { relationshipNoun } from '../../utils/guardian';
-import { apiClient } from '../../services/api-client';
+import { apiClient, getApiErrorMessage } from '../../services/api-client';
 import { useQueryErrorState } from '../../hooks/useQueryErrorState';
 import type { User } from '../../../shared/types';
 import { useTheme } from '../../hooks/useTheme';
@@ -252,31 +252,29 @@ export default function InvitationsScreen() {
         'success'
       );
     } catch (error) {
-      toast.showToast(
-        error instanceof Error ? error.message : t('invitations.acceptFailed'),
-        'error'
-      );
+      // Through getApiErrorMessage, so `error_shown` fires (#967).
+      toast.showToast(getApiErrorMessage(error, t('invitations.acceptFailed')), 'error');
     }
   };
 
   const handleRejectStaff = (invitation: StaffInvitationView) => {
     Alert.alert(
-      t('invitations.rejectTitle'),
-      t('invitations.rejectBody', { team: invitation.teamName }),
+      t('invitations.declineTitle'),
+      t('invitations.declineStaffBody', {
+        team: invitation.teamName,
+        role: staffRoleLabel(t, invitation.roleType),
+      }),
       [
         { text: t('common.cancel'), style: 'cancel' },
         {
-          text: t('invitations.reject'),
+          text: t('invitations.decline'),
           style: 'destructive',
           onPress: async () => {
             try {
               await rejectInvitation.mutateAsync(invitation.id);
-              toast.showToast(t('invitations.rejected'), 'success');
+              toast.showToast(t('invitations.declined'), 'success');
             } catch (error) {
-              toast.showToast(
-                error instanceof Error ? error.message : t('invitations.rejectFailed'),
-                'error'
-              );
+              toast.showToast(getApiErrorMessage(error, t('invitations.declineFailed')), 'error');
             }
           },
         },

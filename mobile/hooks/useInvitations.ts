@@ -7,7 +7,7 @@ import { apiClient } from '../services/api-client';
 import { trackEvent, AnalyticsEvents } from '../services/analytics';
 import { gameKeys, teamKeys, invitationKeys, type InvitationsQueryParams } from './query-keys';
 import type { GuardianRelationship } from '../../shared/types';
-import { teamStaffKeys } from './useTeamStaff';
+import { teamStaffKeys, type StaffRoleType } from './useTeamStaff';
 import { usageKeys } from './useUsage';
 
 export type InvitationStatus = 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED' | 'CANCELLED';
@@ -76,7 +76,7 @@ export interface StaffInvitationView {
   id: string;
   status: InvitationStatus;
   teamName: string;
-  roleType: 'HEAD_COACH' | 'ASSISTANT_COACH' | 'TEAM_MANAGER';
+  roleType: StaffRoleType;
   inviterName: string;
   /** Inviter's tombstone state; render via `inviterDisplayName`. */
   inviterDeletedAt: string | null;

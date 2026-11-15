@@ -55,15 +55,6 @@ import { useGoBack } from '../../../hooks/useGoBack';
 import { MIN_TOUCH_TARGET } from '../../../utils/touch-target';
 import { BackButton } from '../../../components/BackButton';
 
-const ROLE_LABEL_KEY: Record<StaffRoleType, string> = {
-  HEAD_COACH: 'teams.roleHeadCoach',
-  ASSISTANT_COACH: 'teams.roleAssistantCoach',
-  TEAM_MANAGER: 'teams.roleTeamManager',
-};
-
-const isStaffRoleType = (type: string): type is StaffRoleType =>
-  (STAFF_ROLE_TYPES as readonly string[]).includes(type);
-
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function TeamStaffScreen() {
@@ -105,8 +96,8 @@ export default function TeamStaffScreen() {
     [staff]
   );
 
-  const roleLabel = (row: TeamStaffRow) =>
-    isStaffRoleType(row.role.type) ? t(ROLE_LABEL_KEY[row.role.type]) : row.role.name;
+  // A CUSTOM role has no label key: its own name.
+  const roleLabel = (row: TeamStaffRow) => staffRoleLabel(t, row.role.type, row.role.name);
 
   const handleAdd = async () => {
     const trimmed = email.trim();
@@ -121,8 +112,9 @@ export default function TeamStaffScreen() {
       setShowAddForm(false);
       toast.showToast(t('teams.staffAdded'), 'success');
     } catch (err) {
-      const status = (err as { apiError?: { status?: number } }).apiError?.status;
-      if (status === 404) {
+      const apiError = (err as { apiError?: { status?: number; error?: string } }).apiError;
+      // Only the target lookup's 404 means "no account" (a gone team is a 404 too).
+      if (apiError?.status === 404 && apiError.error === 'User not found') {
         setInviteOffer(trimmed);
         return;
       }
@@ -186,7 +178,7 @@ export default function TeamStaffScreen() {
   // only three Alert buttons). The sheet brings its own Close item.
   const roleMenuItemsFor = (row: TeamStaffRow): ActionMenuItem[] =>
     STAFF_ROLE_TYPES.filter((type) => type !== row.role.type).map((type) => ({
-      label: t(ROLE_LABEL_KEY[type]),
+      label: staffRoleLabel(t, type),
       onPress: () => void changeRole(row, type),
     }));
 
@@ -294,7 +286,7 @@ export default function TeamStaffScreen() {
                         onPress={() => setRoleType(type)}
                         accessibilityRole="radio"
                         accessibilityState={{ selected }}
-                        accessibilityLabel={t(ROLE_LABEL_KEY[type])}
+                        accessibilityLabel={staffRoleLabel(t, type)}
                         style={[
                           styles.roleChip,
                           {
@@ -307,7 +299,7 @@ export default function TeamStaffScreen() {
                           variant="captionBold"
                           style={selected ? styles.roleChipTextSelected : undefined}
                         >
-                          {t(ROLE_LABEL_KEY[type])}
+                          {staffRoleLabel(t, type)}
                         </ThemedText>
                       </TouchableOpacity>
                     );

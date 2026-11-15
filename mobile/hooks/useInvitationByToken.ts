@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '../services/api-client';
 import type { GuardianRelationship } from '../../shared/types';
+import type { StaffRoleType } from './useTeamStaff';
 
 export type InvitationByTokenStatus = 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED' | 'CANCELLED';
 
@@ -41,7 +42,7 @@ export interface StaffInvitationByToken {
   id: string;
   status: InvitationByTokenStatus;
   teamName: string;
-  roleType: 'HEAD_COACH' | 'ASSISTANT_COACH' | 'TEAM_MANAGER';
+  roleType: StaffRoleType;
   inviterName: string;
   /** Inviter's tombstone state; render via `inviterDisplayName`. */
   inviterDeletedAt: string | null;

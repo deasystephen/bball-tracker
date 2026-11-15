@@ -3,9 +3,9 @@
  * screen, its pending invitations and the staff invitation views (#460).
  * A type this build does not know (a newer API, a CUSTOM role) has none.
  */
-export type StaffRoleTypeName = 'HEAD_COACH' | 'ASSISTANT_COACH' | 'TEAM_MANAGER';
+import type { StaffRoleType } from '../hooks/useTeamStaff';
 
-const ROLE_LABEL_KEY: Record<StaffRoleTypeName, string> = {
+const ROLE_LABEL_KEY: Record<StaffRoleType, string> = {
   HEAD_COACH: 'teams.roleHeadCoach',
   ASSISTANT_COACH: 'teams.roleAssistantCoach',
   TEAM_MANAGER: 'teams.roleTeamManager',
@@ -13,7 +13,7 @@ const ROLE_LABEL_KEY: Record<StaffRoleTypeName, string> = {
 
 export function staffRoleLabelKey(type: string): string | null {
   return Object.prototype.hasOwnProperty.call(ROLE_LABEL_KEY, type)
-    ? ROLE_LABEL_KEY[type as StaffRoleTypeName]
+    ? ROLE_LABEL_KEY[type as StaffRoleType]
     : null;
 }
 

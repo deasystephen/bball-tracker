@@ -124,4 +124,17 @@ describe('InviteDeepLinkScreen staff invitation (#460)', () => {
       'success'
     );
   });
+
+  it('an already-accepted staff link goes to Teams (it is never listed again); an expired one asks the head coach', () => {
+    signedIn(true);
+    mockInvitation = { ...staffInvitation, status: 'ACCEPTED' } as InvitationByToken;
+    const accepted = render(<InviteDeepLinkScreen />);
+    fireEvent.press(accepted.getByText('Teams'));
+    expect(mockReplace).toHaveBeenCalledWith('/(tabs)/teams');
+    accepted.unmount();
+
+    mockInvitation = { ...staffInvitation, expiresAt: new Date(Date.now() - 1000).toISOString() } as InvitationByToken;
+    const expired = render(<InviteDeepLinkScreen />);
+    expect(expired.getByText('Ask the head coach to send a new invitation.')).toBeTruthy();
+  });
 });

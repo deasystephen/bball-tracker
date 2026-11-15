@@ -577,7 +577,8 @@
     "acceptStaffBody": "Join {{team}} as {{role}}?",
     "joinedStaff": "You joined {{team}} as {{role}}",
     "loginHintStaff": "Sign in, or create an account, with the email address this invitation was sent to.",
-    "alreadyStaff": "You're already on the {{team}} staff. Your role was not changed."
+    "alreadyStaff": "You're already on the {{team}} staff. Your role was not changed.",
+    "askHeadCoach": "Ask the head coach to send a new invitation."
   },
   "guardians": {
     "resendA11y": "Resend invitation: {{email}}",
@@ -774,7 +775,8 @@
     "emptyMessage": "You don't have any pending invitations",
     "count_one": "{{count}} invitation",
     "count_other": "{{count}} invitations",
-    "staffSubtitle": "Staff invitation: {{role}}"
+    "staffSubtitle": "Staff invitation: {{role}}",
+    "declineStaffBody": "Decline the invitation to join {{team}} as {{role}}?"
   },
   "tracker": {
     "shot": {

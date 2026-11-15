@@ -577,7 +577,8 @@
     "acceptStaffBody": "¿Unirte a {{team}} como {{role}}?",
     "joinedStaff": "Te uniste a {{team}} como {{role}}",
     "loginHintStaff": "Inicia sesión, o crea una cuenta, con el correo al que se envió esta invitación.",
-    "alreadyStaff": "Ya formas parte del cuerpo técnico de {{team}}. Tu rol no cambió."
+    "alreadyStaff": "Ya formas parte del cuerpo técnico de {{team}}. Tu rol no cambió.",
+    "askHeadCoach": "Pide al entrenador principal que te envíe una nueva invitación."
   },
   "guardians": {
     "resendA11y": "Reenviar invitación: {{email}}",
@@ -774,7 +775,8 @@
     "emptyMessage": "No tienes invitaciones pendientes",
     "count_one": "{{count}} invitación",
     "count_other": "{{count}} invitaciones",
-    "staffSubtitle": "Invitación al cuerpo técnico: {{role}}"
+    "staffSubtitle": "Invitación al cuerpo técnico: {{role}}",
+    "declineStaffBody": "¿Rechazar la invitación para unirte a {{team}} como {{role}}?"
   },
   "tracker": {
     "shot": {

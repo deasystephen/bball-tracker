@@ -211,9 +211,10 @@ export default function InviteDeepLinkScreen() {
               ? t('invite.alreadyAcceptedGuardian', { subject })
               : t('invite.alreadyAcceptedTeam', { subject })}
           </ThemedText>
+          {/* An accepted staff invitation is never listed again: go to the team instead. */}
           <Button
-            title={t('invite.viewInvitations')}
-            onPress={() => router.replace('/(tabs)/invitations')}
+            title={staff ? t('tabs.teams') : t('invite.viewInvitations')}
+            onPress={() => router.replace(staff ? '/(tabs)/teams' : '/(tabs)/invitations')}
             style={styles.btn}
           />
         </View>
@@ -263,7 +264,7 @@ export default function InviteDeepLinkScreen() {
               : t('invite.expiredTeam', { subject, date: formatExpiry(invitation.expiresAt) })}
           </ThemedText>
           <ThemedText variant="caption" color="textTertiary" style={styles.hint}>
-            {t('invite.askCoach')}
+            {staff ? t('invite.askHeadCoach') : t('invite.askCoach')}
           </ThemedText>
           <Button title={t('invite.goHome')} onPress={() => router.replace('/')} style={styles.btn} />
         </View>
