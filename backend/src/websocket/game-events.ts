@@ -284,10 +284,7 @@ export async function authenticateSocket(
       return;
     }
 
-    socket.data.user = session.user;
-    socket.data.tokenExpiresAt = session.expiresAt;
-    socket.data.tokenLifetimeMs = session.lifetimeMs;
-    socket.data.workosUserId = session.workosUserId;
+    applySession(socket, session);
     socket.data.authToken = handshakeToken(socket);
     next();
   } catch (error) {
@@ -527,12 +524,21 @@ export async function pruneGameRooms(socket: GameSocket): Promise<string[]> {
   }
 }
 
-/** Adopt a verified session for the same user, re-check rooms, reschedule. */
-async function adoptSession(socket: GameSocket, session: SocketSession): Promise<void> {
+/**
+ * Copy a verified session onto the socket: the one place the handshake and
+ * every adopted session set these fields, so none can be left behind (the
+ * revocation sweep fails closed on an unset `workosUserId`, #1004).
+ */
+function applySession(socket: GameSocket, session: SocketSession): void {
   socket.data.user = session.user;
   socket.data.tokenExpiresAt = session.expiresAt;
   socket.data.tokenLifetimeMs = session.lifetimeMs;
   socket.data.workosUserId = session.workosUserId;
+}
+
+/** Adopt a verified session for the same user, re-check rooms, reschedule. */
+async function adoptSession(socket: GameSocket, session: SocketSession): Promise<void> {
+  applySession(socket, session);
   socket.data.expiryDeferred = false;
   await pruneGameRooms(socket);
   if (socket.connected) scheduleSocketReauth(socket);
