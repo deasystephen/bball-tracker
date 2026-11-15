@@ -27,6 +27,7 @@ import {
   SeasonArchivedError,
   SeasonNotAfterSourceError,
   StaffTargetNotFoundError,
+  StaffTargetNeedsInvitationError,
 } from '../utils/errors';
 import {
   Feature,
@@ -1444,36 +1445,30 @@ export class TeamService {
   private static async resolveStaffTarget(
     target: Pick<AddStaffInput, 'userId' | 'email'>
   ): Promise<{ id: string; name: string }> {
-    let user: { id: string; name: string } | null = null;
+    const select = { id: true, name: true, workosUserId: true, isManaged: true } as const;
+    let row: { id: string; name: string; workosUserId: string | null; isManaged: boolean } | null = null;
     if (target.userId) {
-      user = await prisma.user.findUnique({
-        where: { id: target.userId, deletedAt: null },
-        select: { id: true, name: true },
-      });
+      row = await prisma.user.findUnique({ where: { id: target.userId, deletedAt: null }, select });
     } else if (target.email) {
       // Never build the filter from a missing email: Prisma drops an
       // `undefined` condition, and the lookup would match the first user.
-      const row = await prisma.user.findFirst({
-        where: { email: emailEquals(target.email), deletedAt: null },
-        select: { id: true, name: true, workosUserId: true, isManaged: true },
-      });
-      // An unclaimed managed roster record is not a staff target (#460): its
-      // managing coach may rewrite its email (B2.10) and claim the role. A
-      // staff invitation, accepted after signing in, is the way.
-      if (row && row.workosUserId === null && row.isManaged) {
-        throw new BadRequestError(
-          'This address belongs to a roster record that has not signed in. Send a staff invitation instead.'
-        );
-      }
-      user = row ? { id: row.id, name: row.name } : null;
+      row = await prisma.user.findFirst({ where: { email: emailEquals(target.email), deletedAt: null }, select });
     }
 
-    if (!user) {
+    if (!row) {
       // A coded 404: the app offers a staff invitation for an unknown address (#460).
       throw new StaffTargetNotFoundError();
     }
-    return user;
+    // An unclaimed managed roster record is not a staff target, by id or by
+    // address (#460): a staff invitation, accepted after signing in, is the
+    // way. (Its email cannot be re-addressed while it holds a staff role
+    // anyway: PlayerService.updatePlayer.)
+    if (row.workosUserId === null && row.isManaged) {
+      throw new StaffTargetNeedsInvitationError();
+    }
+    return { id: row.id, name: row.name };
   }
+
 
   /**
    * Run after a staff row is removed or re-roled, inside that transaction:

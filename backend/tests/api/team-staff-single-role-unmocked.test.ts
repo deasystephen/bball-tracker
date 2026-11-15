@@ -144,7 +144,27 @@ describe('POST /api/v1/teams/:teamId/staff — one role per user per team (#463)
       .send({ email: 'managed@example.com', roleType: 'ASSISTANT_COACH' });
 
     expect(response.status).toBe(400);
+    expect(response.body.code).toBe('staff_target_needs_invitation');
     expect(response.body.error).toContain('Send a staff invitation instead');
+    expect(mockPrisma.teamStaff.create).not.toHaveBeenCalled();
+  });
+
+  it('refuses the same record when it is named by userId', async () => {
+    givenHeadCoachAddingAssistant();
+    (mockPrisma.user.findUnique as jest.Mock).mockImplementation((args: { where: { id: string } }) =>
+      Promise.resolve(
+        args.where.id === HEAD_COACH_ID
+          ? { id: HEAD_COACH_ID, name: 'Casey Coach', role: 'COACH' }
+          : { id: ASSISTANT_ID, name: 'Managed Kid', workosUserId: null, isManaged: true }
+      )
+    );
+
+    const response = await request(app)
+      .post(`/api/v1/teams/${TEAM_ID}/staff`)
+      .send({ userId: ASSISTANT_ID, roleType: 'ASSISTANT_COACH' });
+
+    expect(response.status).toBe(400);
+    expect(response.body.code).toBe('staff_target_needs_invitation');
     expect(mockPrisma.teamStaff.create).not.toHaveBeenCalled();
   });
 

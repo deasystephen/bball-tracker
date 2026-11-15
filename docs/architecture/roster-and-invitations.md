@@ -196,8 +196,9 @@ eng-review amendments recorded there).
 
 `POST /teams/:teamId/staff` still adds an **existing** account only (404 for an unknown address,
 with code `staff_target_not_found` since #460 so the app can offer an invitation instead). It refuses
-(400) an address that belongs to an unclaimed **managed** roster record: its managing coach could rewrite
-that email (B2.10) and claim the role, so such an address is invited instead.
+(400 `staff_target_needs_invitation`) an unclaimed **managed** roster record, named by address or by id:
+its managing coach could rewrite that email (B2.10) and claim the role, so such an address is invited
+instead (the app offers the invitation on either code).
 `services/staff-invitation-service.ts` invites any address to a staff role through a
 **`StaffInvitation`** row, the third invitation kind next to `TeamInvitation` and
 `GuardianInvitation`. It reuses the same machinery rather than copying it: a random bearer-secret
