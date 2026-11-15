@@ -22,7 +22,7 @@ import { WorkOSService } from '../../src/services/workos-service';
 import { deletePreviousAvatar } from '../../src/services/upload-service';
 import { captureException } from '../../src/utils/sentry';
 import { ForbiddenError, LastHeadCoachError, NotFoundError } from '../../src/utils/errors';
-import { revokeUserSockets } from '../../src/websocket/revocation';
+import { revokeUserSockets } from '../../src/websocket/io-registry';
 
 jest.mock('../../src/services/workos-service');
 jest.mock('../../src/services/upload-service', () => ({
@@ -32,7 +32,8 @@ jest.mock('../../src/utils/sentry', () => ({
   ...jest.requireActual('../../src/utils/sentry'),
   captureException: jest.fn(),
 }));
-jest.mock('../../src/websocket/revocation', () => ({
+jest.mock('../../src/websocket/io-registry', () => ({
+  ...jest.requireActual('../../src/websocket/io-registry'),
   revokeUserSockets: jest.fn().mockReturnValue(0),
 }));
 

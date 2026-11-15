@@ -5,15 +5,16 @@
 import { Server as SocketServer } from 'socket.io';
 import { registerGameEventHandlers } from './game-events';
 import { setIo } from './io-registry';
-import { startRevocationSweep } from './revocation';
+import { installSocketRevocation } from './revocation';
 
 export function setupWebSocketHandlers(io: SocketServer): void {
   setIo(io);
   registerGameEventHandlers(io);
   // Closes the sockets of deleted or converted accounts (#1004).
-  startRevocationSweep(io);
+  installSocketRevocation(io);
 }
 
 export { getIo, setIo } from './io-registry';
 export { emitGameEvent, emitGameStatusChange } from './emit';
-export { revokeUserSockets, stopRevocationSweep } from './revocation';
+export { stopRevocationSweep } from './revocation';
+export { revokeUserSockets } from './io-registry';

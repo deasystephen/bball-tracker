@@ -13,13 +13,15 @@ jest.mock('../../src/utils/sentry', () => ({
 
 import { mockPrisma } from '../setup';
 import { captureException } from '../../src/utils/sentry';
-import { setIo } from '../../src/websocket/io-registry';
+import { revokeUserSockets, setIo, setUserSocketRevoker } from '../../src/websocket/io-registry';
 import { REAUTH_REQUIRED_EVENT, type GameSocket } from '../../src/websocket/game-events';
 import {
   REVOCATION_SWEEP_CHUNK,
   REVOCATION_SWEEP_INTERVAL_MS,
+  REVOCATION_SWEEP_STALL_MS,
   SOCKET_REVOCATION_SELECT,
-  revokeUserSockets,
+  installSocketRevocation,
+  revokeLocalUserSockets,
   sessionRevoked,
   startRevocationSweep,
   stopRevocationSweep,
@@ -34,7 +36,7 @@ interface FakeSocket {
   connected: boolean;
   data: { user?: { id: string }; workosUserId?: string | null };
   emit: jest.Mock;
-  conn: { close: jest.Mock };
+  conn: { readyState: string; close: jest.Mock };
 }
 
 let counter = 0;
@@ -45,10 +47,12 @@ function fakeSocket(userId: string | undefined, workosUserId: string | null = nu
     connected: true,
     data: { ...(userId && { user: { id: userId } }), workosUserId },
     emit: jest.fn(),
-    conn: { close: jest.fn() },
+    conn: { readyState: 'open', close: jest.fn() },
   };
+  // As Engine.IO does: the transport is `closing` at once, while `connected`
+  // stays true until the `disconnect` event arrives later.
   socket.conn.close.mockImplementation(() => {
-    socket.connected = false;
+    socket.conn.readyState = 'closing';
   });
   return socket;
 }
@@ -59,7 +63,18 @@ function fakeIo(sockets: FakeSocket[]): SocketServer {
 }
 
 function row(id: string, overrides: Partial<SocketRevocationRow> = {}): SocketRevocationRow {
-  return { id, workosUserId: null, ageConfirmedAt: new Date(), ageRefusedAt: null, ...overrides };
+  return {
+    id,
+    email: null,
+    name: id,
+    role: 'PLAYER',
+    subscriptionTier: 'FREE',
+    subscriptionExpiresAt: null,
+    workosUserId: null,
+    ageConfirmedAt: new Date(),
+    ageRefusedAt: null,
+    ...overrides,
+  };
 }
 
 function wasCut(socket: FakeSocket): boolean {
@@ -73,6 +88,7 @@ beforeEach(() => {
 
 afterEach(() => {
   setIo(null);
+  setUserSocketRevoker(null);
   stopRevocationSweep();
 });
 
@@ -90,6 +106,12 @@ describe('sessionRevoked', () => {
     expect(sessionRevoked(socket, row('u1', { workosUserId: 'wos_1' }))).toBe(false);
   });
 
+  it('fails closed on a socket with no recorded WorkOS id (undefined, not a dev token)', () => {
+    const socket = fakeSocket('u1');
+    delete socket.data.workosUserId;
+    expect(sessionRevoked(asSocket(socket), row('u1'))).toBe(true);
+  });
+
   it('checks a dev-token socket on the row and the age gate only', () => {
     const socket = asSocket(fakeSocket('u1', null));
     expect(sessionRevoked(socket, row('u1', { workosUserId: null }))).toBe(false);
@@ -104,8 +126,25 @@ describe('sessionRevoked', () => {
 });
 
 describe('revokeUserSockets (in-process)', () => {
-  it('does nothing without a registered Socket.io server (an operator script)', () => {
+  it('does nothing without a registered Socket.io server and revoker (an operator script)', () => {
     expect(revokeUserSockets('u1')).toBe(0);
+    // A server alone, without the revoker installSocketRevocation registers: still nothing.
+    const socket = fakeSocket('u1');
+    setIo(fakeIo([socket]));
+    expect(revokeUserSockets('u1')).toBe(0);
+    expect(wasCut(socket)).toBe(false);
+  });
+
+  it('reaches revokeLocalUserSockets once installSocketRevocation registered it', () => {
+    const socket = fakeSocket('u1');
+    const io = fakeIo([socket]);
+    setIo(io);
+    installSocketRevocation(io);
+    expect(revokeUserSockets('u1')).toBe(1);
+    expect(wasCut(socket)).toBe(true);
+    // Already being cut: a second call does not cut it again.
+    expect(revokeUserSockets('u1')).toBe(0);
+    expect(socket.emit).toHaveBeenCalledTimes(1);
   });
 
   it("closes every connected socket of that user with reauth_required and leaves others' alone", () => {
@@ -114,9 +153,7 @@ describe('revokeUserSockets (in-process)', () => {
     gone.connected = false;
     const theirs = fakeSocket('u2');
     const anonymous = fakeSocket(undefined);
-    setIo(fakeIo([...mine, gone, theirs, anonymous]));
-
-    expect(revokeUserSockets('u1')).toBe(2);
+    expect(revokeLocalUserSockets(fakeIo([...mine, gone, theirs, anonymous]), 'u1')).toBe(2);
     expect(mine.every(wasCut)).toBe(true);
     expect(wasCut(gone)).toBe(false);
     expect(wasCut(theirs)).toBe(false);
@@ -130,8 +167,7 @@ describe('revokeUserSockets (in-process)', () => {
     socket.conn.close.mockImplementation(() => {
       throw new Error('boom');
     });
-    setIo(fakeIo([socket]));
-    expect(revokeUserSockets('u1')).toBe(0);
+    expect(revokeLocalUserSockets(fakeIo([socket]), 'u1')).toBe(0);
   });
 });
 
@@ -176,6 +212,17 @@ describe('sweepRevokedSockets', () => {
     });
     expect(await sweepRevokedSockets(fakeIo([socket]))).toBe(0);
     expect(wasCut(socket)).toBe(false);
+  });
+
+  it('does not cut again a socket the in-process path cut while the query ran', async () => {
+    const socket = fakeSocket('deleted');
+    const io = fakeIo([socket]);
+    findMany.mockImplementation(() => {
+      revokeLocalUserSockets(io, 'deleted');
+      return Promise.resolve([]);
+    });
+    expect(await sweepRevokedSockets(io)).toBe(0);
+    expect(socket.emit).toHaveBeenCalledTimes(1);
   });
 
   it('keeps every socket when the database fails, reporting the first failure of a streak only', async () => {
@@ -226,9 +273,24 @@ describe('startRevocationSweep', () => {
 
     stopRevocationSweep();
     stopRevocationSweep();
-    socket.connected = true;
+    socket.conn.readyState = 'open';
     await jest.advanceTimersByTimeAsync(REVOCATION_SWEEP_INTERVAL_MS * 3);
     expect(findMany).toHaveBeenCalledTimes(1);
+  });
+
+  it('starts another sweep once one has hung for REVOCATION_SWEEP_STALL_MS', async () => {
+    const socket = fakeSocket('u1');
+    findMany.mockImplementationOnce(() => new Promise(() => undefined));
+    findMany.mockResolvedValue([]);
+    startRevocationSweep(fakeIo([socket]));
+
+    await jest.advanceTimersByTimeAsync(REVOCATION_SWEEP_INTERVAL_MS);
+    expect(findMany).toHaveBeenCalledTimes(1);
+    await jest.advanceTimersByTimeAsync(REVOCATION_SWEEP_STALL_MS - REVOCATION_SWEEP_INTERVAL_MS);
+    expect(findMany).toHaveBeenCalledTimes(1);
+    await jest.advanceTimersByTimeAsync(REVOCATION_SWEEP_INTERVAL_MS);
+    expect(findMany).toHaveBeenCalledTimes(2);
+    expect(wasCut(socket)).toBe(true);
   });
 
   it('survives a sweep that throws', async () => {

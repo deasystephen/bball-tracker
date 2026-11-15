@@ -251,8 +251,10 @@ const SOCKET_USER_SELECT = AUTH_USER_SELECT;
  * `Unauthorized`: a refreshed token changes nothing) and the re-verification
  * path treats as a rejected session. The client never opens a socket before
  * the age screen is passed, so this only stops a stale or bypassing client.
+ * The revocation sweep (`websocket/revocation.ts`, #1004) applies the same
+ * rule to open sockets.
  */
-function socketUserAllowed(user: AuthUserRow): boolean {
+export function socketUserAllowed(user: AuthUserRow): boolean {
   return isAgeConfirmed(user);
 }
 

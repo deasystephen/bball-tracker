@@ -77,7 +77,7 @@ import {
 } from './upload-service';
 import { GuardianService } from './guardian-service';
 import { WorkOSService } from './workos-service';
-import { revokeUserSockets } from '../websocket/revocation';
+import { revokeUserSockets } from '../websocket/io-registry';
 
 /** The tombstone's display name. Clients render their own localized label from `deletedAt`. */
 export const DELETED_USER_NAME = 'Deleted user';
@@ -515,6 +515,13 @@ export class AccountService {
       const unclaimed = await unclaimManagedRow(tx, row, managedById);
       return { kind: 'unclaimed' as const, ...unclaimed, workosUserId: row.workosUserId, managedById };
     });
+
+    // An un-claimed row lost its login and a refused one is shut out by the
+    // gate: close this process's sockets now, as deletion does (#1004). The
+    // delete branch closes them inside deleteAccount.
+    if (decision.kind === 'unclaimed' || decision.kind === 'operator') {
+      revokeUserSockets(userId);
+    }
 
     if (decision.kind === 'already_refused') {
       logger.info('Under-age answer refused', { userId, outcome: 'pending_operator', identityDeleted: false, repeat: true });

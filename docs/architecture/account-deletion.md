@@ -21,7 +21,7 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   `TeamMember`, authored announcements and announcement replies stay so other members' stats and
   threads remain coherent, and any of them keeps the tombstone. The result carries `erased: boolean` (both routes and the operator
   script return it; the runbook's request log records it). After commit: the account's open
-  Socket.io connections are closed (`websocket/revocation.ts#revokeUserSockets` at once in the API
+  Socket.io connections are closed (`websocket/io-registry.ts#revokeUserSockets` at once in the API
   process, the revocation sweep within `REVOCATION_SWEEP_INTERVAL_MS` (10 s) for the operator
   script; `docs/architecture/live-games.md`, "Revocation on deletion or conversion", #1004), then,
   best-effort: S3 avatar

@@ -245,6 +245,16 @@ describe('socket revocation after conversion to a managed record (#1004)', () =>
     await expectCutOff(client, gameId);
   });
 
+  it('in-process: an under-age answer that un-claims the row closes the socket at once', async () => {
+    const { gameId, kid } = await convertible('underage-in');
+    const client = await liveClient(workosToken(kid.workosUserId), gameId);
+    await expectReceiving(client, gameId);
+
+    expect(await AccountService.refuseUnderage(kid.id)).toMatchObject({ outcome: 'unclaimed' });
+
+    await expectCutOff(client, gameId);
+  });
+
   it('the sweep keeps a live account’s socket', async () => {
     const { gameId, kid } = await convertible('conv-keep');
     const client = await liveClient(workosToken(kid.workosUserId), gameId);
