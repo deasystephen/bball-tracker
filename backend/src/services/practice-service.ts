@@ -13,7 +13,7 @@
  * docs/architecture/practice-scheduling.md.
  */
 
-import { Prisma } from '@prisma/client';
+import { Prisma, PracticeStatus, PracticeType } from '@prisma/client';
 import prisma from '../models';
 import {
   CancelPracticeInput,
@@ -55,7 +55,7 @@ export const PRACTICE_EXCEPTION_FIELDS = [
 /** The series fields a session can inherit, as `updatePractice` reads them under the series lock. */
 const SERIES_DEFAULT_FIELDS = ['type', 'title', 'location', 'notes'] as const;
 type SeriesDefaults = {
-  type: string;
+  type: PracticeType;
   title: string | null;
   location: string | null;
   notes: string | null;
@@ -63,9 +63,9 @@ type SeriesDefaults = {
 
 /** A session row as `updatePractice` reads it under its lock. */
 type LockedSession = {
-  status: string;
+  status: PracticeStatus;
   exceptionFields: string[];
-  type: string;
+  type: PracticeType;
   title: string | null;
   location: string | null;
   notes: string | null;
@@ -282,7 +282,13 @@ export class PracticeService {
       }
       where.teamId = query.teamId;
     } else if (!(await isSystemAdmin(userId))) {
-      where.team = await readableTeamsWhere(userId);
+      // Resolve the readable team ids first (as GameService.listGames does), so
+      // the session queries filter on the indexed teamId, not a relation OR.
+      const teams = await prisma.team.findMany({ where: await readableTeamsWhere(userId), select: { id: true } });
+      if (teams.length === 0) {
+        return { practices: [], total: 0, limit: query.limit, offset: query.offset };
+      }
+      where.teamId = { in: teams.map((team) => team.id) };
     }
 
     const [total, practices] = await Promise.all([
@@ -496,11 +502,12 @@ export class PracticeService {
         if (locked[0].status === 'CANCELLED') {
           throw new BadRequestError('This practice was cancelled');
         }
-        // FOR SHARE on the player too: account deletion locks the User row
-        // FOR UPDATE and purges answers, so it either waits for this write
-        // (and purges it) or has tombstoned the row, which is refused here.
+        // FOR KEY SHARE on the player too: account deletion locks the User row
+        // FOR UPDATE and purges answers, so it either waits for this write (and
+        // purges it) or has tombstoned the row, which is refused here. KEY
+        // SHARE is enough for that and does not block ordinary profile edits.
         const player = await tx.$queryRaw<Array<{ deletedAt: Date | null }>>`
-          SELECT "deletedAt" FROM "User" WHERE "id" = ${subjectId} FOR SHARE`;
+          SELECT "deletedAt" FROM "User" WHERE "id" = ${subjectId} FOR KEY SHARE`;
         if (!player[0] || player[0].deletedAt) {
           throw new NotFoundError('Player not found');
         }

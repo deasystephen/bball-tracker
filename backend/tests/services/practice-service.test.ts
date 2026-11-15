@@ -186,7 +186,8 @@ describe('PracticeService.listPractices', () => {
     mockPrisma.practiceSession.findMany.mockResolvedValue([practiceRow()]);
   });
 
-  it('scopes a non-admin to readableTeamsWhere and applies the window and status', async () => {
+  it('scopes a non-admin to the team ids readableTeamsWhere resolves, with the window and status', async () => {
+    mockPrisma.team.findMany.mockResolvedValue([{ id: TEAM }]);
     const result = await PracticeService.listPractices(
       { ...page, status: 'SCHEDULED', from: '2030-01-01T00:00:00Z', to: '2030-02-01T00:00:00Z' },
       USER
@@ -196,9 +197,19 @@ describe('PracticeService.listPractices', () => {
     expect(where).toEqual({
       status: 'SCHEDULED',
       startsAt: { gte: new Date('2030-01-01T00:00:00Z'), lte: new Date('2030-02-01T00:00:00Z') },
-      team: { OR: [{ staff: { some: { userId: USER } } }] },
+      teamId: { in: [TEAM] },
+    });
+    expect(mockPrisma.team.findMany).toHaveBeenCalledWith({
+      where: { OR: [{ staff: { some: { userId: USER } } }] },
+      select: { id: true },
     });
     expect(mockPrisma.practiceSession.findMany.mock.calls[0][0].orderBy).toEqual([{ startsAt: 'asc' }, { id: 'asc' }]);
+  });
+
+  it('answers an empty page, without a session query, to a caller with no teams', async () => {
+    mockPrisma.team.findMany.mockResolvedValue([]);
+    expect(await PracticeService.listPractices(page, USER)).toEqual({ practices: [], total: 0, limit: 50, offset: 0 });
+    expect(mockPrisma.practiceSession.findMany).not.toHaveBeenCalled();
   });
 
   it('checks canAccessTeam for a teamId filter and 403s without it', async () => {
