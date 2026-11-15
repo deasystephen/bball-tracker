@@ -7,6 +7,7 @@ import { rsvpConfirmationTemplate } from '../../src/services/mailer/templates/rs
 import { announcementTemplate } from '../../src/services/mailer/templates/announcement';
 import { announcementReplyTemplate } from '../../src/services/mailer/templates/announcement-reply';
 import { guardianInvitationTemplate } from '../../src/services/mailer/templates/guardian-invitation';
+import { staffInvitationTemplate } from '../../src/services/mailer/templates/staff-invitation';
 import { APP_NAME, SUPPORT_EMAIL } from '../../src/services/mailer/templates/brand';
 import { readdirSync, readFileSync } from 'fs';
 import path from 'path';
@@ -434,6 +435,62 @@ describe('invitationTemplate', () => {
   });
 });
 
+describe('staffInvitationTemplate (#460)', () => {
+  const vars = {
+    teamName: 'Bulls',
+    roleName: 'Assistant Coach',
+    inviterName: 'Phil',
+    expiresAt: '2026-12-01',
+    acceptUrl: 'https://app.example.test/invite/xyz789',
+  };
+
+  it('has a distinct template name', () => {
+    expect(staffInvitationTemplate.name).toBe('staff-invitation');
+  });
+
+  it('subject names the team and the role', () => {
+    const subject = staffInvitationTemplate.subject(vars);
+    expect(subject).toContain('Bulls');
+    expect(subject).toContain('Assistant Coach');
+  });
+
+  it('html names team, role, inviter and expiry, and links the accept URL', () => {
+    const html = staffInvitationTemplate.html(vars);
+    expect(html).toContain('Bulls');
+    expect(html).toContain('Assistant Coach');
+    expect(html).toContain('Phil');
+    expect(html).toContain('2026-12-01');
+    expect(html).toContain('https://app.example.test/invite/xyz789');
+    expect(html).toContain('Accept Invitation');
+  });
+
+  it('escapes the inviter and team names in html', () => {
+    const html = staffInvitationTemplate.html({ ...vars, inviterName: '<b>x</b>', teamName: 'A&B' });
+    expect(html).not.toContain('<b>x</b>');
+    expect(html).toContain('A&amp;B');
+  });
+
+  it('falls back to generic copy when acceptUrl is missing', () => {
+    expect(staffInvitationTemplate.html({ ...vars, acceptUrl: '' })).not.toContain('Accept Invitation');
+    expect(staffInvitationTemplate.html({ ...vars, acceptUrl: '' })).toContain(`Open the ${APP_NAME} app`);
+    expect(staffInvitationTemplate.text({ ...vars, acceptUrl: '' })).toContain(`Open the ${APP_NAME} app`);
+  });
+
+  it('tells an address that already has an account to accept in the app', () => {
+    const withAccount = { ...vars, acceptInApp: 'true' };
+    expect(staffInvitationTemplate.html(withAccount)).toContain('already has a');
+    expect(staffInvitationTemplate.text(withAccount)).toContain('signed in with this email address');
+    expect(staffInvitationTemplate.text(vars)).toContain("If you don't have an account yet");
+  });
+
+  it('text mirrors the html content', () => {
+    const text = staffInvitationTemplate.text(vars);
+    expect(text).toContain('Bulls');
+    expect(text).toContain('Assistant Coach');
+    expect(text).toContain('Accept your invitation: https://app.example.test/invite/xyz789');
+  });
+});
+
 describe('guardianInvitationTemplate', () => {
   const vars = {
     guardianName: 'Pat',
@@ -650,6 +707,9 @@ describe('brand copy (domain migration PR2, D12)', () => {
   const guardianVars = {
     guardianName: 'Pat', childName: 'Kid', teamName: 'Bulls', inviterName: 'Phil', expiresAt: '2026-09-01', acceptUrl: '',
   };
+  const staffVars = {
+    teamName: 'Bulls', roleName: 'Assistant Coach', inviterName: 'Phil', expiresAt: '2026-12-01', acceptUrl: '',
+  };
   const rsvpVars = { playerName: 'Jordan', teamName: 'Bulls', opponent: 'Celtics', gameDate: 'Sat', rsvpStatus: 'YES' };
   const announcementVars = { teamName: 'Bulls', title: 'Practice', body: 'Gym 6pm', recipientName: 'Jordan', authorName: 'Phil' };
   const replyVars = { teamName: 'Bulls', title: 'Practice', body: 'On my way', recipientName: 'Phil', replierName: 'Jordan' };
@@ -657,6 +717,8 @@ describe('brand copy (domain migration PR2, D12)', () => {
     [invitationTemplate, invitationVars],
     [invitationTemplate, { ...invitationVars, variant: 'added' }],
     [guardianInvitationTemplate, guardianVars],
+    [staffInvitationTemplate, staffVars],
+    [staffInvitationTemplate, { ...staffVars, acceptUrl: 'https://app.example.test/invite/abc' }],
     [rsvpConfirmationTemplate, rsvpVars],
     [announcementTemplate, announcementVars],
     [announcementReplyTemplate, replyVars],

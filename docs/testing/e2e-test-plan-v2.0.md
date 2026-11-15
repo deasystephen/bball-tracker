@@ -497,6 +497,20 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
 - **Notes:** Automated: `maestro test .maestro/team-staff.yaml` (read-only); Jest
   `__tests__/app/team-staff-gating.test.tsx`, `__tests__/hooks/useTeamStaff.runtime.test.tsx`.
 
+### D.8a — Head coach invites a coach who has no account (#460) 📧
+- [ ] Pass / Fail / Skipped
+- **Role:** the team's head coach. API-level until the app has an invite-by-email action.
+- **Steps:**
+  1. `POST /teams/:id/staff-invitations { "email": "<new address>", "roleType": "ASSISTANT_COACH" }`.
+  2. Check no `User` row exists for the address; open the emailed link (`/invite/<token>`).
+  3. Accept (web "Accept without app", or sign up with the address in the app and accept from the link).
+  4. As an assistant coach, repeat step 1 for another address.
+- **Expected:** Step 1 → 201 with `emailSent: true`, no `token` in the body; `GET /teams/:id/staff-invitations`
+  lists it. Step 2 → no account yet. Step 3 → the account exists and holds an Assistant Coach staff row; signing
+  in with the address claims it and shows the age screen. Step 4 → 403.
+- **Notes:** Automated: `backend/tests/api/staff-invitations.test.ts`,
+  `backend/tests/integration/staff-invitation.db.test.ts`.
+
 ### D.9 — Head coach deletes a team
 - [ ] Pass / Fail / Skipped
 - **Role:** COACH who is the team's **head coach**

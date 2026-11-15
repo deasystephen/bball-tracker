@@ -189,8 +189,19 @@ describe('AccountService.deleteAccount', () => {
       },
       data: { status: 'EXPIRED' },
     });
-    // D17: every matching invitedEmail is scrubbed, not just PENDING rows
-    expect(mockPrisma.$executeRaw).toHaveBeenCalledTimes(1);
+    // D17: every matching invitedEmail is scrubbed, not just PENDING rows:
+    // guardian invitations, then staff invitations (#460: PENDING expired
+    // first so the link cannot be accepted for the sentinel, then the scrub)
+    expect(mockPrisma.$executeRaw).toHaveBeenCalledTimes(2);
+    const scrubSql = (mockPrisma.$executeRaw as jest.Mock).mock.calls.map((call) =>
+      (call[0] as TemplateStringsArray).join('?')
+    );
+    expect(scrubSql[0]).toContain('UPDATE "GuardianInvitation"');
+    // One statement for staff invitations: PENDING → EXPIRED, address and hash scrubbed.
+    expect(scrubSql[1]).toMatch(/UPDATE "StaffInvitation"\s+SET "status" = CASE WHEN "status" = 'PENDING' THEN 'EXPIRED'/);
+    expect(scrubSql[1]).toMatch(/"invitedEmail" = \? \|\| "id" \|\| \?/);
+    // The sentinel's parts come from utils/stripped-email.ts, one definition with the TypeScript writers.
+    expect((mockPrisma.$executeRaw as jest.Mock).mock.calls[1].slice(1, 3)).toEqual(['deleted-', '@invalid']);
     expect(mockPrisma.user.updateMany).toHaveBeenCalledWith({
       where: { managedById: USER_ID },
       data: { managedById: null },
@@ -568,8 +579,8 @@ describe('AccountService.exportUserData', () => {
       [
         'announcementReplies', 'announcements', 'calendarFeedTokens', 'exportedAt', 'gameEvents', 'gameRsvps',
         'guardianInvitations', 'guardiansAsChild', 'guardiansAsParent', 'leagueAdmins', 'personalLeague', 'playerStats',
-        'pushTokens', 'receivedInvitations', 'sentGuardianInvitations', 'sentInvitations', 'teamMembers', 'teamStaff', 'user',
-        'practiceAvailability',
+        'pushTokens', 'receivedInvitations', 'sentGuardianInvitations', 'sentInvitations', 'sentStaffInvitations', 'staffInvitations',
+        'teamMembers', 'teamStaff', 'user', 'practiceAvailability',
       ].sort()
     );
     expect(data.user).not.toHaveProperty('workosUserId');

@@ -116,6 +116,58 @@ describe('POST /api/v1/teams/:teamId/staff — one role per user per team (#463)
     expect(response.body.error).toBe(ALREADY_STAFF);
   });
 
+  it('answers 404 with code staff_target_not_found for an address with no account (#460)', async () => {
+    givenHeadCoachAddingAssistant();
+    (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(null);
+
+    const response = await request(app)
+      .post(`/api/v1/teams/${TEAM_ID}/staff`)
+      .send({ email: 'nobody@example.com', roleType: 'ASSISTANT_COACH' });
+
+    // The app branches on the code to offer a staff invitation; the message is unchanged.
+    expect(response.status).toBe(404);
+    expect(response.body).toEqual({ error: 'User not found', code: 'staff_target_not_found' });
+    expect(mockPrisma.teamStaff.create).not.toHaveBeenCalled();
+  });
+
+  it('refuses (400) to make an unclaimed managed roster record staff: its coach could claim the role (#460)', async () => {
+    givenHeadCoachAddingAssistant();
+    (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue({
+      id: ASSISTANT_ID,
+      name: 'Managed Kid',
+      workosUserId: null,
+      isManaged: true,
+    });
+
+    const response = await request(app)
+      .post(`/api/v1/teams/${TEAM_ID}/staff`)
+      .send({ email: 'managed@example.com', roleType: 'ASSISTANT_COACH' });
+
+    expect(response.status).toBe(400);
+    expect(response.body.code).toBe('staff_target_needs_invitation');
+    expect(response.body.error).toContain('Send a staff invitation instead');
+    expect(mockPrisma.teamStaff.create).not.toHaveBeenCalled();
+  });
+
+  it('refuses the same record when it is named by userId', async () => {
+    givenHeadCoachAddingAssistant();
+    (mockPrisma.user.findUnique as jest.Mock).mockImplementation((args: { where: { id: string } }) =>
+      Promise.resolve(
+        args.where.id === HEAD_COACH_ID
+          ? { id: HEAD_COACH_ID, name: 'Casey Coach', role: 'COACH' }
+          : { id: ASSISTANT_ID, name: 'Managed Kid', workosUserId: null, isManaged: true }
+      )
+    );
+
+    const response = await request(app)
+      .post(`/api/v1/teams/${TEAM_ID}/staff`)
+      .send({ userId: ASSISTANT_ID, roleType: 'ASSISTANT_COACH' });
+
+    expect(response.status).toBe(400);
+    expect(response.body.code).toBe('staff_target_needs_invitation');
+    expect(mockPrisma.teamStaff.create).not.toHaveBeenCalled();
+  });
+
   it('adds a user who holds no role on the team (201)', async () => {
     givenHeadCoachAddingAssistant();
     givenTargetStaffRow(null);

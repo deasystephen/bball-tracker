@@ -54,7 +54,7 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
      admin and per-season team counts), judged by the pure `assertPlayerAccount`:
      `adult_account` for the global `ADMIN` role (a refusal signal, not an access check; `COACH`
      is not a signal, a child can self-select it), a staff row, a guardian-of link, managed
-     players, announcements authored, sent team or guardian invitations that are not `CANCELLED`,
+     players, announcements authored, sent team, guardian or staff invitations that are not `CANCELLED`,
      or admin of any league but its own personal league; `personal_league_in_use` for a personal
      league with teams or another admin. An empty personal league is deleted by
      `deletePersonalLeagueIfEmpty` (D16, shared with `deleteAccount`, which passes its own team
@@ -72,7 +72,10 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
        copied at claim time; a cleared photo in our bucket is deleted from S3 whoever uploaded it,
        unless another `User` row still references the URL); and the address on every guardian
        invitation that carries it, any status, any child (`scrubInvitedEmail`, D17, shared with
-       `deleteAccount`), after every PENDING one is expired. Every expired one is returned with
+       `deleteAccount`), after every PENDING one is expired; the same function expires every
+       PENDING staff invitation to the address and scrubs `invitedEmail` and `recipientHash` on
+       every staff invitation that carries it (#460). `deleteAccount` also cancels the PENDING staff
+       invitations the user sent. Every expired one is returned with
        its `childId` as `expiredGuardianInvitations`, so the operator can contact each child's
        coach.
      - **Reset:** `isManaged` true, `managedById` the coach, role `PLAYER`, free tier.
