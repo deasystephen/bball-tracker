@@ -67,8 +67,11 @@ export interface InviteStaffInput {
   supersede?: boolean;
 }
 
+/** What `POST /teams/:teamId/staff-invitations` returns (no `invitedBy` object). */
+export type StaffInvitationSummary = Omit<StaffInvitationRow, 'invitedBy'> & { invitedById: string };
+
 export interface InviteStaffResult {
-  invitation: StaffInvitationRow;
+  invitation: StaffInvitationSummary;
   /** `false`: the invitation exists but the email failed; warn the coach. */
   emailSent: boolean;
 }
@@ -110,6 +113,8 @@ function useInvalidateStaff() {
   const queryClient = useQueryClient();
   return (teamId: string) => {
     queryClient.invalidateQueries({ queryKey: teamStaffKeys.list(teamId) });
+    // Removing or demoting a head coach cancels their pending staff invitations (#460).
+    queryClient.invalidateQueries({ queryKey: teamStaffKeys.invitations(teamId) });
     queryClient.invalidateQueries({ queryKey: teamKeys.detail(teamId) });
     queryClient.invalidateQueries({ queryKey: teamKeys.lists() });
     // Staff membership is what the usage meter counts (#43 / B2.8).

@@ -340,12 +340,15 @@ for every address match and the address stored trimmed and lower-cased; the shar
   `POST /invitations/:id/accept`, which accepts the staff invitation correctly (the response's
   `kind: 'staff'` is ignored). The web page (`web/app/invite/[token]/`) renders the role.
 - **Mobile.** The staff screen (`app/teams/[id]/staff.tsx`) turns the add's 404 `staff_target_not_found`
-  (only that code: a gone team is a 404 too) into an offer: the hint "No account uses that email yet" and
+  or 400 `staff_target_needs_invitation` (only those codes: a gone team is a 404 too) into an offer: the hint "No account uses that email yet" and
   a **Send invitation** button (`useInviteStaff`, `emailSent: false` is an error toast, never silent).
   The offer holds only while the field shows the address the 404 was for. Callers who may manage staff
   see **Pending invitations** (`useStaffInvitations`, requested only for them) with Resend (the same call
   with `supersede: true`, after a confirm, because it kills the invitee's link) and Cancel
-  (`useCancelStaffInvitation`, confirm dialog). Home's invitations bell counts staff invitations. The Invitations tab
+  (`useCancelStaffInvitation`, confirm dialog); a staff removal or re-role refreshes that list too (it can
+  cancel a head coach's invitations). Home's invitations bell counts staff and guardian invitations. A
+  staff accept re-reads `GET /auth/me` for the role (a coaching row makes the account a COACH, which shows
+  "Create team"). The Invitations tab
   renders `staffInvitations` cards (Accept / Decline), and the deep-link screen renders `kind: 'staff'`
   (team and role rows; the sign-in hint asks for the address the invitation was sent to). Role labels come from
   `utils/staff-role.ts`. Accept invalidates teams, games, staff and usage. Events: `staff_invited`,

@@ -6,7 +6,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../services/api-client';
 import { trackEvent, AnalyticsEvents } from '../services/analytics';
 import { gameKeys, teamKeys, invitationKeys, type InvitationsQueryParams } from './query-keys';
-import type { GuardianRelationship } from '../../shared/types';
+import type { GuardianRelationship, User } from '../../shared/types';
+import { useAuthStore } from '../store/auth-store';
 import { teamStaffKeys, type StaffRoleType } from './useTeamStaff';
 import { usageKeys } from './useUsage';
 
@@ -285,6 +286,16 @@ export function useAcceptInvitation({ source = 'in_app' }: { source?: Invitation
       if (data.kind === 'staff') {
         queryClient.invalidateQueries({ queryKey: teamStaffKeys.all });
         queryClient.invalidateQueries({ queryKey: usageKeys.all });
+        // A coaching role makes a PLAYER or PARENT account a COACH on the
+        // server (it gates "Create team"): take the new role now, best effort
+        // (useSessionRefresh catches up on the next foreground otherwise).
+        void apiClient
+          .get<{ success: boolean; user: { role?: User['role'] } }>('/auth/me')
+          .then((me) => {
+            const role = me.data?.user?.role;
+            if (role) useAuthStore.getState().updateUser({ role });
+          })
+          .catch(() => undefined);
       }
     },
   });

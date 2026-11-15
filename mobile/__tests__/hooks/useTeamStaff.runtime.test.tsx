@@ -64,6 +64,8 @@ const row: TeamStaffRow = {
 
 const expectStaffInvalidation = (invalidateSpy: jest.SpyInstance, teamId: string) => {
   expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: teamStaffKeys.list(teamId) });
+  // A head coach's removal or demotion cancels their pending staff invitations (#460).
+  expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: teamStaffKeys.invitations(teamId) });
   expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: teamKeys.detail(teamId) });
   expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: teamKeys.lists() });
   expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: usageKeys.all });

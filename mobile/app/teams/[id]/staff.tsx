@@ -116,8 +116,10 @@ export default function TeamStaffScreen() {
       setShowAddForm(false);
       toast.showToast(t('teams.staffAdded'), 'success');
     } catch (err) {
-      // Only the target lookup's coded 404 means "no account" (a gone team is a 404 too).
-      if (apiErrorCode(err) === 'staff_target_not_found') {
+      // Only the target lookup's codes mean "invite instead": no account (404;
+      // a gone team is a 404 too), or a roster record nobody has signed in to (400).
+      const code = apiErrorCode(err);
+      if (code === 'staff_target_not_found' || code === 'staff_target_needs_invitation') {
         setInviteOffer(trimmed);
         return;
       }

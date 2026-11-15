@@ -370,6 +370,21 @@ describe('TeamStaffScreen permission gating', () => {
     expect(mockShowToast).toHaveBeenCalledWith('Invitation cancelled', 'success');
   });
 
+  it('a roster record nobody has signed in to (400 staff_target_needs_invitation) gets the same offer', async () => {
+    signIn({ id: 'coach-1', role: 'COACH' });
+    const { getByText, getByTestId, findByTestId } = render(<TeamStaffScreen />);
+    fireEvent.press(getByText('Add staff'));
+    fireEvent.changeText(getByTestId('staff-email-input'), 'kid.parent@example.com');
+    mockAddStaff.mutateAsync.mockRejectedValueOnce(
+      Object.assign(new Error('Send a staff invitation instead.'), {
+        apiError: { status: 400, error: 'Send a staff invitation instead.', code: 'staff_target_needs_invitation' },
+      })
+    );
+    fireEvent.press(getByTestId('staff-add-submit'));
+    expect(await findByTestId('staff-invite-submit')).toBeTruthy();
+    expect(mockShowToast).not.toHaveBeenCalled();
+  });
+
   it('an offer is withdrawn when the field changed while the add was in flight', async () => {
     signIn({ id: 'coach-1', role: 'COACH' });
     const { getByText, getByTestId, queryByTestId } = render(<TeamStaffScreen />);

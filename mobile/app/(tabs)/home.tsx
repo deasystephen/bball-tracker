@@ -89,8 +89,11 @@ export default function Home() {
   } = useInvitations({ status: 'PENDING' });
 
   const pendingInvitations = invitationsData?.invitations || [];
-  // The bell counts staff invitations too (#460); they are accepted on the Invitations tab.
-  const pendingCount = pendingInvitations.length + (invitationsData?.staffInvitations?.length ?? 0);
+  // The bell counts every kind the Invitations tab lists: staff (#460) and guardian invitations too.
+  const pendingCount =
+    pendingInvitations.length +
+    (invitationsData?.staffInvitations?.length ?? 0) +
+    (invitationsData?.guardianInvitations?.length ?? 0);
   const isLoading = teamsLoading || invitationsLoading;
   const isRefetching =
     teamsRefetching ||
