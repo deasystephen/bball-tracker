@@ -45,6 +45,8 @@ import { requireReauth, socketUserAllowed, type GameSocket } from './game-events
 export const REVOCATION_SWEEP_INTERVAL_MS = 10 * 1000;
 /** User ids per sweep query; more open users than this take more than one. */
 export const REVOCATION_SWEEP_CHUNK = 1000;
+/** A sweep still running after this long is reported once as stalled. */
+export const REVOCATION_SWEEP_STALL_MS = 60 * 1000;
 /**
  * The columns the sweep reads: the handshake's (`AUTH_USER_SELECT`, so a
  * column added for a gate reaches the sweep too) plus the WorkOS id.
@@ -119,16 +121,22 @@ export function revokeLocalUserSockets(io: SocketServer, userId: string): number
   return closed;
 }
 
+/** Sockets whose cut already failed and was reported: retried, not re-reported. */
+const failedCuts = new WeakSet<GameSocket>();
+
 /**
  * Cut one socket; false if that threw. One socket's failure never stops the
- * others being cut, and the next sweep retries it.
+ * others being cut; the next sweep retries it, reporting it only the first time.
  */
 function cut(socket: GameSocket): boolean {
   try {
     requireReauth(socket, 'revoked');
     return true;
   } catch (error) {
-    reportDefect(error, { socketId: socket.id, userId: socket.data.user?.id });
+    if (!failedCuts.has(socket)) {
+      failedCuts.add(socket);
+      reportDefect(error, { socketId: socket.id, userId: socket.data.user?.id });
+    }
     return false;
   }
 }
@@ -143,7 +151,9 @@ function reportDefect(error: unknown, ids: Record<string, string | undefined>): 
 }
 
 let sweepTimer: ReturnType<typeof setInterval> | null = null;
-let sweepRunning = false;
+/** When the sweep in flight started, or null when none is. */
+let sweepStartedAt: number | null = null;
+let sweepStallReported = false;
 let sweepFailing = false;
 
 /**
@@ -209,19 +219,28 @@ export function installSocketRevocation(io: SocketServer): void {
  * Start the periodic sweep for `io` (a second call replaces the first). The
  * timer is unref'd, so it never keeps the process alive, and a tick is
  * skipped while the previous sweep is still running: one query in flight at
- * most. A query that never settled would stop the sweep with it; the pool has
- * no statement timeout, so that is the hazard every REST request shares, and
- * the expiry re-check (`game-events.ts`) still bounds such a socket.
+ * most. A query that never settles would stop the sweep with it (the pool has
+ * no statement timeout, a hazard every REST request shares; the expiry
+ * re-check in `game-events.ts` still bounds such a socket), so a sweep running
+ * past `REVOCATION_SWEEP_STALL_MS` is reported, once, at error and to Sentry.
  */
 export function startRevocationSweep(io: SocketServer, intervalMs = REVOCATION_SWEEP_INTERVAL_MS): void {
   stopRevocationSweep();
   sweepTimer = setInterval(() => {
-    if (sweepRunning) return;
-    sweepRunning = true;
+    if (sweepStartedAt !== null) {
+      const runningMs = Date.now() - sweepStartedAt;
+      if (runningMs >= REVOCATION_SWEEP_STALL_MS && !sweepStallReported) {
+        sweepStallReported = true;
+        reportDefect(new Error('Socket revocation sweep stalled'), { runningMs: String(runningMs) });
+      }
+      return;
+    }
+    sweepStartedAt = Date.now();
+    sweepStallReported = false;
     void sweepRevokedSockets(io)
       .catch((error: unknown) => reportDefect(error, {}))
       .finally(() => {
-        sweepRunning = false;
+        sweepStartedAt = null;
       });
   }, intervalMs);
   sweepTimer.unref();
@@ -231,4 +250,5 @@ export function startRevocationSweep(io: SocketServer, intervalMs = REVOCATION_S
 export function stopRevocationSweep(): void {
   if (sweepTimer) clearInterval(sweepTimer);
   sweepTimer = null;
+  sweepStartedAt = null;
 }

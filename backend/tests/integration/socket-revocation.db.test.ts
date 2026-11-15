@@ -255,6 +255,21 @@ describe('socket revocation after conversion to a managed record (#1004)', () =>
     await expectCutOff(client, gameId);
   });
 
+  it('in-process: an under-age answer from an adult-signal account (handed to the operator) closes the socket at once', async () => {
+    const { org, gameId } = await convertible('underage-op');
+    // A staff role is an adult signal: the answer is recorded as final, nothing is deleted.
+    const coach = await fx.user('underage-op-coach', 'COACH');
+    const workosUserId = `workos-underage-op-coach-${fx.run}`;
+    await prisma.user.update({ where: { id: coach }, data: { workosUserId, emailVerified: true, ageConfirmedAt: new Date() } });
+    await fx.staff(coach, org);
+    const client = await liveClient(workosToken(workosUserId), gameId);
+    await expectReceiving(client, gameId);
+
+    expect(await AccountService.refuseUnderage(coach)).toMatchObject({ outcome: 'pending_operator' });
+
+    await expectCutOff(client, gameId);
+  });
+
   it('the sweep keeps a live account’s socket', async () => {
     const { gameId, kid } = await convertible('conv-keep');
     const client = await liveClient(workosToken(kid.workosUserId), gameId);

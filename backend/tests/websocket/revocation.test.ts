@@ -18,6 +18,7 @@ import { REAUTH_REQUIRED_EVENT, type GameSocket } from '../../src/websocket/game
 import {
   REVOCATION_SWEEP_CHUNK,
   REVOCATION_SWEEP_INTERVAL_MS,
+  REVOCATION_SWEEP_STALL_MS,
   SOCKET_REVOCATION_SELECT,
   installSocketRevocation,
   revokeLocalUserSockets,
@@ -300,7 +301,7 @@ describe('startRevocationSweep', () => {
     expect(findMany).toHaveBeenCalledTimes(1);
   });
 
-  it('survives a sweep that throws', async () => {
+  it('retries a socket whose cut throws on every sweep, reporting it once', async () => {
     const socket = fakeSocket('u1');
     socket.emit.mockImplementation(() => {
       throw new Error('emit failed');
@@ -310,5 +311,38 @@ describe('startRevocationSweep', () => {
     await jest.advanceTimersByTimeAsync(REVOCATION_SWEEP_INTERVAL_MS);
     await jest.advanceTimersByTimeAsync(REVOCATION_SWEEP_INTERVAL_MS);
     expect(findMany).toHaveBeenCalledTimes(2);
+    expect(socket.emit).toHaveBeenCalledTimes(2);
+    expect(captureException).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports a sweep that throws outside the query as a defect and keeps sweeping', async () => {
+    let calls = 0;
+    const io = {
+      of: () => {
+        calls += 1;
+        throw new Error('namespace gone');
+      },
+    } as unknown as SocketServer;
+    startRevocationSweep(io);
+    await jest.advanceTimersByTimeAsync(REVOCATION_SWEEP_INTERVAL_MS * 2);
+    expect(calls).toBe(2);
+    expect(captureException).toHaveBeenCalledWith(expect.any(Error), expect.objectContaining({ flow: 'socket-revocation' }));
+  });
+
+  it('reports a sweep that never settles once, and runs none beside it', async () => {
+    findMany.mockImplementation(() => new Promise(() => undefined));
+    startRevocationSweep(fakeIo([fakeSocket('u1')]));
+
+    await jest.advanceTimersByTimeAsync(REVOCATION_SWEEP_INTERVAL_MS);
+    await jest.advanceTimersByTimeAsync(REVOCATION_SWEEP_STALL_MS - REVOCATION_SWEEP_INTERVAL_MS);
+    expect(captureException).not.toHaveBeenCalled();
+    await jest.advanceTimersByTimeAsync(REVOCATION_SWEEP_INTERVAL_MS * 5);
+
+    expect(findMany).toHaveBeenCalledTimes(1);
+    expect(captureException).toHaveBeenCalledTimes(1);
+    expect(captureException).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'Socket revocation sweep stalled' }),
+      expect.objectContaining({ flow: 'socket-revocation' })
+    );
   });
 });

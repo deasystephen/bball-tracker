@@ -219,10 +219,10 @@ describe('AccountService.deleteAccount', () => {
     // After commit
     expect(mockDeleteAvatar).toHaveBeenCalledWith('https://bucket.s3.amazonaws.com/avatars/u/a.jpg', null);
     expect(mockWorkOS.deleteUser).toHaveBeenCalledWith('workos_1');
-    // The account's live sockets on this process are closed once the WorkOS user is gone,
-    // so the client's refresh on reauth_required fails too (#1004)
+    // The account's live sockets on this process are closed right after commit, before the
+    // slow external calls (#1004)
     expect(revokeUserSockets).toHaveBeenCalledWith(USER_ID);
-    expect((revokeUserSockets as jest.Mock).mock.invocationCallOrder[0]).toBeGreaterThan(
+    expect((revokeUserSockets as jest.Mock).mock.invocationCallOrder[0]).toBeLessThan(
       mockWorkOS.deleteUser.mock.invocationCallOrder[0]
     );
   });

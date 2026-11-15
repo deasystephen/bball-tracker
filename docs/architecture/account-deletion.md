@@ -20,13 +20,12 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   rule is "nothing references this row", never "no game events". `GameEvent`, `PlayerStats`,
   `TeamMember`, authored announcements and announcement replies stay so other members' stats and
   threads remain coherent, and any of them keeps the tombstone. The result carries `erased: boolean` (both routes and the operator
-  script return it; the runbook's request log records it). After commit, best-effort: S3 avatar
-  delete and `WorkOSService.deleteUser` (response `identityDeleted: false` on failure, Sentry
-  `flow: account-delete`; the runbook finishes it in the dashboard). Then the account's open
+  script return it; the runbook's request log records it). Right after commit the account's open
   Socket.io connections are closed (`websocket/io-registry.ts#revokeUserSockets` at once in the
-  API process, after the WorkOS call so the client's refresh fails too; the revocation sweep within
-  `REVOCATION_SWEEP_INTERVAL_MS` (10 s) for the operator script; `docs/architecture/live-games.md`,
-  "Revocation on deletion or conversion", #1004). **Never read the tombstone
+  API process; the revocation sweep within `REVOCATION_SWEEP_INTERVAL_MS` (10 s) for the operator
+  script; `docs/architecture/live-games.md`, "Revocation on deletion or conversion", #1004). Then,
+  best-effort: S3 avatar delete and `WorkOSService.deleteUser` (response `identityDeleted: false`
+  on failure, Sentry `flow: account-delete`; the runbook finishes it in the dashboard). **Never read the tombstone
   state from `name`/`email` — `deletedAt` is the signal.**
 - **The tombstone also clears `ageConfirmedAt`** (#981), and the age screen's under-minimum branch
   (`AccountService.refuseUnderage`, `docs/architecture/children-and-age.md`) reuses `deleteAccount`
@@ -99,8 +98,8 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   or a Staging id after the #24 cutover) and no alarm. On `false`: Sentry `flow: convert-to-managed`, then
   `WorkOSService.revokeAllSessions` (one client, `Promise.allSettled`, `{ revoked, failed }`); the
   result carries `workosUserId` and `sessions`, the error lines and the domain event log the
-  `workosUserId`, and the script exits 3. Open Socket.io connections are then closed with
-  `reauth_required`, the same as after `deleteAccount`: at once when the API
+  `workosUserId`, and the script exits 3. Open Socket.io connections are closed with
+  `reauth_required` right after commit, the same as after `deleteAccount`: at once when the API
   process ran it, within about 10 s by the API's revocation sweep when the script did (the row no
   longer carries the WorkOS id the socket was verified for; #1004). Domain event
   `Account converted to managed` (`userId`, `actorId`, `managedById`, `identityDeleted`,
