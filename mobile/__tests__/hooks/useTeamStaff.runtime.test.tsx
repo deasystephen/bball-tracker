@@ -14,6 +14,9 @@ import {
   useAddStaff,
   useUpdateStaffRole,
   useRemoveStaff,
+  useStaffInvitations,
+  useInviteStaff,
+  useCancelStaffInvitation,
   teamStaffKeys,
   type TeamStaffRow,
   type TeamRole,
@@ -24,6 +27,12 @@ import { gameKeys } from '../../hooks/query-keys';
 import { useAuthStore } from '../../store/auth-store';
 import { apiClient } from '../../services/api-client';
 import { createQueryWrapper } from '../utils/queryWrapper';
+import { trackEvent } from '../../services/analytics';
+
+jest.mock('../../services/analytics', () => ({
+  ...jest.requireActual('../../services/analytics'),
+  trackEvent: jest.fn(),
+}));
 
 const mockedGet = apiClient.get as jest.Mock;
 const mockedPost = apiClient.post as jest.Mock;
@@ -55,6 +64,8 @@ const row: TeamStaffRow = {
 
 const expectStaffInvalidation = (invalidateSpy: jest.SpyInstance, teamId: string) => {
   expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: teamStaffKeys.list(teamId) });
+  // A head coach's removal or demotion cancels their pending staff invitations (#460).
+  expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: teamStaffKeys.invitations(teamId) });
   expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: teamKeys.detail(teamId) });
   expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: teamKeys.lists() });
   expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: usageKeys.all });
@@ -203,6 +214,77 @@ describe('useTeamStaff runtime', () => {
 
       expectStaffInvalidation(invalidateSpy, 't1');
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: gameKeys.lists() });
+    });
+  });
+
+  describe('staff invitations (#460)', () => {
+    const pending = {
+      id: 'si1',
+      teamId: 't1',
+      invitedEmail: 'new.coach@example.com',
+      roleType: 'ASSISTANT_COACH' as const,
+      status: 'PENDING' as const,
+      expiresAt: '2026-12-01T00:00:00Z',
+      createdAt: '2026-11-15T00:00:00Z',
+      invitedBy: { id: 'coach-1', name: 'Frank', deletedAt: null },
+    };
+
+    it('useStaffInvitations fetches the team list only when enabled', async () => {
+      mockedGet.mockResolvedValueOnce({ data: { success: true, invitations: [pending] } });
+      const { wrapper } = createQueryWrapper();
+      const { result } = renderHook(() => useStaffInvitations('t1', true), { wrapper });
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+      expect(mockedGet).toHaveBeenCalledWith('/teams/t1/staff-invitations');
+      expect(result.current.data).toEqual([pending]);
+
+      mockedGet.mockClear();
+      const disabled = renderHook(() => useStaffInvitations('t1', false), { wrapper: createQueryWrapper().wrapper });
+      expect(disabled.result.current.fetchStatus).toBe('idle');
+      expect(mockedGet).not.toHaveBeenCalled();
+    });
+
+    it('useInviteStaff posts, returns emailSent, tracks staff_invited and refreshes the pending list', async () => {
+      mockedPost.mockResolvedValueOnce({ data: { success: true, invitation: pending, emailSent: false } });
+      const { wrapper, client } = createQueryWrapper();
+      const invalidateSpy = jest.spyOn(client, 'invalidateQueries');
+      const { result } = renderHook(() => useInviteStaff(), { wrapper });
+
+      let returned: unknown;
+      await act(async () => {
+        returned = await result.current.mutateAsync({
+          teamId: 't1',
+          data: { email: 'new.coach@example.com', roleType: 'ASSISTANT_COACH' },
+        });
+      });
+
+      expect(mockedPost).toHaveBeenCalledWith('/teams/t1/staff-invitations', {
+        email: 'new.coach@example.com',
+        roleType: 'ASSISTANT_COACH',
+      });
+      expect(returned).toEqual({ invitation: pending, emailSent: false });
+      expect(trackEvent).toHaveBeenCalledWith('staff_invited', {
+        team_id: 't1',
+        invitation_id: 'si1',
+        role_type: 'ASSISTANT_COACH',
+        resend: false,
+        email_sent: false,
+      });
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: teamStaffKeys.invitations('t1') });
+    });
+
+    it('useCancelStaffInvitation deletes, tracks staff_invitation_cancelled and refreshes the pending list', async () => {
+      mockedDelete.mockResolvedValueOnce({ data: { success: true } });
+      const { wrapper, client } = createQueryWrapper();
+      const invalidateSpy = jest.spyOn(client, 'invalidateQueries');
+      const { result } = renderHook(() => useCancelStaffInvitation(), { wrapper });
+
+      await act(async () => {
+        await result.current.mutateAsync({ teamId: 't1', invitationId: 'si1' });
+      });
+
+      expect(mockedDelete).toHaveBeenCalledWith('/teams/t1/staff-invitations/si1');
+      expect(trackEvent).toHaveBeenCalledWith('staff_invitation_cancelled', { team_id: 't1', invitation_id: 'si1' });
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: teamStaffKeys.invitations('t1') });
     });
   });
 });

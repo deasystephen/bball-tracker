@@ -485,8 +485,8 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
 - **Steps:**
   1. Team detail → tap the **Staff** card (shows coach names + count) → staff screen lists name, role and
      email (email is only present for callers with `canManageRoster`).
-  2. Tap **Add staff** → enter a made-up email → Add. Expect the inline hint
-     "No account with that email — ask them to sign up first, then invite" (API 404) and no toast.
+  2. Tap **Add staff** → enter a made-up email → Add. Expect the hint "No account uses that email yet…"
+     (API 404) and the button turning into **Send invitation** (D.8a); edit the address to go back.
   3. Enter the assistant's real email, pick **Assistant Coach** → Add.
   4. On the new row tap the role-change icon → choose **Team Manager**; then tap the remove icon → confirm.
 - **Expected:** Step 3 → toast "Staff member added", row appears with "Assistant Coach · <email>", the team
@@ -499,17 +499,22 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
 
 ### D.8a — Head coach invites a coach who has no account (#460) 📧
 - [ ] Pass / Fail / Skipped
-- **Role:** the team's head coach. API-level until the app has an invite-by-email action.
+- **Role:** the team's head coach (Frank Vogel on Lakers); a second device or simulator for the invitee.
 - **Steps:**
-  1. `POST /teams/:id/staff-invitations { "email": "<new address>", "roleType": "ASSISTANT_COACH" }`.
-  2. Check no `User` row exists for the address; open the emailed link (`/invite/<token>`).
-  3. Accept (web "Accept without app", or sign up with the address in the app and accept from the link).
-  4. As an assistant coach, repeat step 1 for another address.
-- **Expected:** Step 1 → 201 with `emailSent: true`, no `token` in the body; `GET /teams/:id/staff-invitations`
-  lists it. Step 2 → no account yet. Step 3 → the account exists and holds an Assistant Coach staff row; signing
-  in with the address claims it and shows the age screen. Step 4 → 403.
-- **Notes:** Automated: `backend/tests/api/staff-invitations.test.ts`,
-  `backend/tests/integration/staff-invitation.db.test.ts`.
+  1. Staff screen → **Add staff** → an address with no account, **Assistant Coach** → Add → **Send invitation**.
+  2. Check no `User` row exists for the address; **Pending invitations** lists it with Resend and Cancel.
+  3. Open the emailed link (`/invite/<token>`) signed out: "You're invited to coach", Role row, "Log In to
+     Accept". Sign up with the invited address (age screen first), then accept.
+  4. Signed in as the assistant coach: no **Add staff**, no pending list (API 403).
+  5. Invite another address, then Cancel it from the pending list.
+- **Expected:** Step 1 → toast "Invitation sent" (an error toast if the email failed). Step 3 → toast "You joined
+  Lakers as Assistant Coach", the team is on the Teams tab, the head coach's staff list shows the new row and the
+  pending list no longer does. An invitee who is already on the staff is told the role was not changed. Step 5 →
+  "Invitation cancelled"; the old link shows "Invitation Cancelled".
+- **Notes:** Automated: `maestro test .maestro/staff-invitation.yaml` (steps 1 and 5; mutates, re-seed first);
+  Jest `__tests__/app/team-staff-gating.test.tsx`, `__tests__/app/invitations-staff.test.tsx`,
+  `__tests__/app/invite-staff.test.tsx`; backend `tests/api/staff-invitations.test.ts`,
+  `tests/integration/staff-invitation.db.test.ts`.
 
 ### D.9 — Head coach deletes a team
 - [ ] Pass / Fail / Skipped

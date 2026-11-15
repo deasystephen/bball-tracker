@@ -18,9 +18,11 @@ import {
   useRejectInvitation,
   type TeamInvitation,
   type GuardianInvitationView,
+  type StaffInvitationView,
 } from '../../hooks/useInvitations';
+import { staffAcceptedMessage, staffRoleLabel } from '../../utils/staff-role';
 import { relationshipNoun } from '../../utils/guardian';
-import { apiClient } from '../../services/api-client';
+import { apiClient, getApiErrorMessage } from '../../services/api-client';
 import { useQueryErrorState } from '../../hooks/useQueryErrorState';
 import type { User } from '../../../shared/types';
 import { useTheme } from '../../hooks/useTheme';
@@ -61,6 +63,7 @@ export default function InvitationsScreen() {
 
   const invitations = invitationsData?.invitations || [];
   const guardianInvitations = invitationsData?.guardianInvitations || [];
+  const staffInvitations = invitationsData?.staffInvitations || [];
 
   /** Guardian invitation addressed to a child of the signed-in guardian? */
   const isForChild = (invitation: TeamInvitation) =>
@@ -229,6 +232,110 @@ export default function InvitationsScreen() {
             title={t('invitations.decline')}
             variant="outline"
             onPress={() => handleRejectGuardian(item)}
+            loading={rejectInvitation.isPending}
+            style={styles.rejectButton}
+            fullWidth
+          />
+        </View>
+      </Card>
+    );
+  };
+
+  /** Accept a staff invitation (#460): the caller joins the team's staff with the invited role. */
+  const handleAcceptStaff = async (invitation: StaffInvitationView) => {
+    try {
+      const accepted = await acceptInvitation.mutateAsync(invitation.id);
+      toast.showToast(staffAcceptedMessage(t, invitation, accepted.alreadyStaff), 'success');
+    } catch (error) {
+      // Through getApiErrorMessage, so `error_shown` fires (#967).
+      toast.showToast(getApiErrorMessage(error, t('invitations.acceptFailed')), 'error');
+    }
+  };
+
+  const handleRejectStaff = (invitation: StaffInvitationView) => {
+    Alert.alert(
+      t('invitations.declineTitle'),
+      t('invitations.declineStaffBody', {
+        team: invitation.teamName,
+        role: staffRoleLabel(t, invitation.roleType),
+      }),
+      [
+        { text: t('common.cancel'), style: 'cancel' },
+        {
+          text: t('invitations.decline'),
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await rejectInvitation.mutateAsync(invitation.id);
+              toast.showToast(t('invitations.declined'), 'success');
+            } catch (error) {
+              toast.showToast(getApiErrorMessage(error, t('invitations.declineFailed')), 'error');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const renderStaffInvitation = (item: StaffInvitationView) => {
+    const canAccept = item.status === 'PENDING' && !isInvitationExpired(item.expiresAt);
+    const role = staffRoleLabel(t, item.roleType);
+
+    return (
+      <Card
+        key={`staff-${item.id}`}
+        variant="elevated"
+        style={styles.invitationCard}
+        testID={`staff-invitation-${item.id}`}
+      >
+        <View style={styles.invitationHeader}>
+          <View style={styles.invitationInfo}>
+            <ThemedText variant="h4">{item.teamName}</ThemedText>
+            <ThemedText variant="caption" color="textSecondary">
+              {t('invitations.staffSubtitle', { role })}
+            </ThemedText>
+          </View>
+          <View style={[styles.statusBadge, { backgroundColor: colors.warning + '20' }]}>
+            <ThemedText variant="captionBold" style={{ color: colors.warning }}>
+              {t(`invitations.statusLabel.${item.status}`, { defaultValue: item.status })}
+            </ThemedText>
+          </View>
+        </View>
+
+        <View style={styles.invitationDetails}>
+          <View style={styles.detailRow}>
+            <Ionicons name="person-outline" size={16} color={colors.textTertiary} />
+            <ThemedText variant="caption" color="textSecondary">
+              {t('invitations.invitedBy', { name: inviterDisplayName(item) })}
+            </ThemedText>
+          </View>
+          <View style={styles.detailRow}>
+            <Ionicons name="time-outline" size={16} color={colors.textTertiary} />
+            <ThemedText variant="caption" color="textSecondary">
+              {formatInvitationExpiry(item.expiresAt)}
+            </ThemedText>
+          </View>
+        </View>
+
+        <View style={styles.actionButtons}>
+          {canAccept ? (
+            <Button
+              title={t('invitations.accept')}
+              onPress={() => handleAcceptStaff(item)}
+              loading={acceptInvitation.isPending}
+              style={styles.acceptButton}
+              fullWidth
+              testID={`staff-invitation-accept-${item.id}`}
+            />
+          ) : (
+            <ThemedText variant="caption" color="error" style={styles.expiredText}>
+              {t('invitations.expiredNotice')}
+            </ThemedText>
+          )}
+          <Button
+            title={t('invitations.decline')}
+            variant="outline"
+            onPress={() => handleRejectStaff(item)}
             loading={rejectInvitation.isPending}
             style={styles.rejectButton}
             fullWidth
@@ -445,7 +552,9 @@ export default function InvitationsScreen() {
     );
   };
 
-  if (invitations.length === 0 && guardianInvitations.length === 0) {
+  const headerCount = guardianInvitations.length + staffInvitations.length;
+
+  if (invitations.length === 0 && headerCount === 0) {
     return (
       <ThemedView variant="background" style={styles.container}>
         <View style={[styles.header, { paddingHorizontal: padding }]}>
@@ -466,7 +575,7 @@ export default function InvitationsScreen() {
       <View style={[styles.header, { paddingHorizontal: padding }]}>
         <ThemedText variant="h1" heading>{t('tabs.invitations')}</ThemedText>
         <ThemedText variant="caption" color="textSecondary">
-          {t('invitations.count', { count: invitations.length + guardianInvitations.length })}
+          {t('invitations.count', { count: invitations.length + headerCount })}
         </ThemedText>
       </View>
       <View style={{ paddingHorizontal: padding }}>{renderDebugCard()}</View>
@@ -476,7 +585,12 @@ export default function InvitationsScreen() {
         renderItem={renderInvitation}
         keyExtractor={(item) => item.id}
         ListHeaderComponent={
-          guardianInvitations.length > 0 ? <View>{guardianInvitations.map(renderGuardianInvitation)}</View> : null
+          headerCount > 0 ? (
+            <View>
+              {staffInvitations.map(renderStaffInvitation)}
+              {guardianInvitations.map(renderGuardianInvitation)}
+            </View>
+          ) : null
         }
         contentContainerStyle={{
           paddingHorizontal: padding,

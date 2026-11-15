@@ -19,7 +19,8 @@ import {
   isTransientRequestError,
 } from '../../services/api-client';
 import { useAuthStore } from '../../store/auth-store';
-import { useInvitationByToken, isGuardianInvitation } from '../../hooks/useInvitationByToken';
+import { useInvitationByToken, isGuardianInvitation, isStaffInvitation } from '../../hooks/useInvitationByToken';
+import { staffAcceptedMessage, staffRoleLabel } from '../../utils/staff-role';
 import { relationshipLabel, relationshipNoun } from '../../utils/guardian';
 import { childDisplayName, inviterDisplayName } from '../../utils/display-name';
 import type { User } from '../../../shared/types';
@@ -82,7 +83,11 @@ export default function InviteDeepLinkScreen() {
   // Guardian (PARENT role) invitations have no team of their own; describe
   // them by the child instead (docs/plans/parent-role-spec.md).
   const guardian = isGuardianInvitation(invitation) ? invitation : null;
-  const teamInvite = invitation && !isGuardianInvitation(invitation) ? invitation : null;
+  // Staff invitations (#460) name a team and a role, never a jersey.
+  const staff = isStaffInvitation(invitation) ? invitation : null;
+  const staffRole = staff ? staffRoleLabel(t, staff.roleType) : '';
+  const teamInvite =
+    invitation && !isGuardianInvitation(invitation) && !isStaffInvitation(invitation) ? invitation : null;
   const subject = guardian
     ? `${childDisplayName(guardian)}${guardian.teamName ? ` (${guardian.teamName})` : ''}`
     : invitation?.teamName ?? '';
@@ -103,7 +108,7 @@ export default function InviteDeepLinkScreen() {
 
     const doAccept = async () => {
       try {
-        await acceptById.mutateAsync(invitation.id);
+        const accepted = await acceptById.mutateAsync(invitation.id);
         if (guardian) {
           // Pull the new `guardianOf` so Profile → "My kids" shows up now.
           try {
@@ -124,6 +129,12 @@ export default function InviteDeepLinkScreen() {
           router.replace('/(tabs)/profile');
           return;
         }
+        if (staff) {
+          // An existing staff row is left as it was (never re-roled): say so.
+          toast.showToast(staffAcceptedMessage(t, staff, accepted.alreadyStaff), 'success');
+          router.replace('/(tabs)/teams');
+          return;
+        }
         toast.showToast(t('invite.joined', { team: invitation.teamName }), 'success');
         router.replace('/(tabs)/invitations');
       } catch (err) {
@@ -139,7 +150,9 @@ export default function InviteDeepLinkScreen() {
             child: childDisplayName(guardian),
             relationship: relationshipNoun(guardian.relationship),
           })
-        : t('invite.acceptTeamBody', { team: invitation.teamName }),
+        : staff
+          ? t('invite.acceptStaffBody', { team: staff.teamName, role: staffRole })
+          : t('invite.acceptTeamBody', { team: invitation.teamName }),
       [
         { text: t('common.cancel'), style: 'cancel' },
         { text: t('invitations.accept'), onPress: doAccept },
@@ -193,9 +206,10 @@ export default function InviteDeepLinkScreen() {
               ? t('invite.alreadyAcceptedGuardian', { subject })
               : t('invite.alreadyAcceptedTeam', { subject })}
           </ThemedText>
+          {/* An accepted staff invitation is never listed again: go to the team instead. */}
           <Button
-            title={t('invite.viewInvitations')}
-            onPress={() => router.replace('/(tabs)/invitations')}
+            title={staff ? t('tabs.teams') : t('invite.viewInvitations')}
+            onPress={() => router.replace(staff ? '/(tabs)/teams' : '/(tabs)/invitations')}
             style={styles.btn}
           />
         </View>
@@ -245,7 +259,7 @@ export default function InviteDeepLinkScreen() {
               : t('invite.expiredTeam', { subject, date: formatExpiry(invitation.expiresAt) })}
           </ThemedText>
           <ThemedText variant="caption" color="textTertiary" style={styles.hint}>
-            {t('invite.askCoach')}
+            {staff ? t('invite.askHeadCoach') : t('invite.askCoach')}
           </ThemedText>
           <Button title={t('invite.goHome')} onPress={() => router.replace('/')} style={styles.btn} />
         </View>
@@ -258,7 +272,7 @@ export default function InviteDeepLinkScreen() {
       <View style={styles.content}>
         <Ionicons name={guardian ? 'people-outline' : 'mail-open-outline'} size={64} color={colors.primary} />
         <ThemedText variant="h1" heading style={styles.title}>
-          {guardian ? t('invite.parentTitle') : t('invite.teamTitle')}
+          {guardian ? t('invite.parentTitle') : staff ? t('invite.staffTitle') : t('invite.teamTitle')}
         </ThemedText>
         <ThemedText variant="body" color="textSecondary" style={styles.subtitle}>
           {guardian
@@ -266,7 +280,9 @@ export default function InviteDeepLinkScreen() {
                 child: childDisplayName(guardian),
                 relationship: relationshipNoun(guardian.relationship),
               })
-            : t('invite.invitedTeam')}
+            : staff
+              ? t('invite.invitedStaff', { role: staffRole })
+              : t('invite.invitedTeam')}
         </ThemedText>
 
         <Card variant="elevated" style={styles.detailCard}>
@@ -277,8 +293,9 @@ export default function InviteDeepLinkScreen() {
               {guardian.teamName != null && <DetailRow label={t('invite.team')} value={guardian.teamName} />}
             </>
           ) : (
-            <DetailRow label={t('invite.team')} value={teamInvite?.teamName ?? ''} />
+            <DetailRow label={t('invite.team')} value={staff?.teamName ?? teamInvite?.teamName ?? ''} />
           )}
+          {staff && <DetailRow label={t('teams.staffRole')} value={staffRole} />}
           <DetailRow label={t('invite.from')} value={inviter} />
           {teamInvite?.position != null && (
             <DetailRow label={t('players.position')} value={teamInvite.position} />
@@ -299,7 +316,11 @@ export default function InviteDeepLinkScreen() {
           <>
             {!isAuthenticated && (
               <ThemedText variant="caption" color="textSecondary" style={styles.hint}>
-                {guardian ? t('invite.loginHintGuardian') : t('invite.loginHintTeam')}
+                {guardian
+                  ? t('invite.loginHintGuardian')
+                  : staff
+                    ? t('invite.loginHintStaff')
+                    : t('invite.loginHintTeam')}
               </ThemedText>
             )}
             <Button

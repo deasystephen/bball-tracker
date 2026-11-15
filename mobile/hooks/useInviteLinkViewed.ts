@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { trackEvent, AnalyticsEvents, type InviteLinkState } from '../services/analytics';
-import { isGuardianInvitation, type InvitationByToken } from './useInvitationByToken';
+import { isGuardianInvitation, isStaffInvitation, type InvitationByToken } from './useInvitationByToken';
 
 /**
  * `invite_link_viewed` for the `/invite/[token]` deep link (#967): what the
@@ -69,7 +69,13 @@ export function useInviteLinkViewed(input: InviteLinkViewInput): void {
   const reportedRef = useRef<{ token: string; state: InviteLinkState } | null>(null);
   const state = inviteLinkState(input);
   const { token, src, invitation, isAuthenticated } = input;
-  const kind = invitation ? (isGuardianInvitation(invitation) ? 'guardian' : 'team') : undefined;
+  const kind = invitation
+    ? isGuardianInvitation(invitation)
+      ? 'guardian'
+      : isStaffInvitation(invitation)
+        ? 'staff'
+        : 'team'
+    : undefined;
 
   useEffect(() => {
     if (!state || token === undefined) return;

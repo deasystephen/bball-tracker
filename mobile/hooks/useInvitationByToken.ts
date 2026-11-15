@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '../services/api-client';
 import type { GuardianRelationship } from '../../shared/types';
+import type { StaffInvitationView } from './useInvitations';
 
 export type InvitationByTokenStatus = 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED' | 'CANCELLED';
 
@@ -35,7 +36,16 @@ export interface GuardianInvitationByToken {
   expiresAt: string;
 }
 
-export type InvitationByToken = TeamInvitationByToken | GuardianInvitationByToken;
+/** Staff invitation (#460): the same public view `GET /invitations` lists (`staffInvitations`). */
+export type StaffInvitationByToken = StaffInvitationView;
+
+export type InvitationByToken = TeamInvitationByToken | GuardianInvitationByToken | StaffInvitationByToken;
+
+export function isStaffInvitation(
+  invitation: InvitationByToken | null | undefined
+): invitation is StaffInvitationByToken {
+  return invitation?.kind === 'staff';
+}
 
 export function isGuardianInvitation(
   invitation: InvitationByToken | null | undefined

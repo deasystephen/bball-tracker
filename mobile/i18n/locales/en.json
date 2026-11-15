@@ -162,7 +162,6 @@
     "staffEmailPlaceholder": "coach@example.com",
     "staffRole": "Role",
     "staffAdded": "Staff member added",
-    "staffNoAccount": "No account with that email — ask them to sign up first, then invite",
     "staffAddFailed": "Failed to add staff member",
     "changeRole": "Change role",
     "changeRoleTitle": "Change role for {{name}}",
@@ -227,7 +226,23 @@
     "creatingIn": "Creating team in:",
     "updateSuccess": "Team updated successfully",
     "updateFailed": "Failed to update team",
-    "chatLink": "Team Chat Link"
+    "chatLink": "Team Chat Link",
+    "staffNoAccountInvite": "No account uses that email yet. Send an invitation: they join the staff when they accept.",
+    "sendStaffInvitation": "Send invitation",
+    "staffInvitationSent": "Invitation sent",
+    "staffInvitationEmailFailed": "The invitation was saved but the email failed to send. Use Resend to try again in a couple of minutes.",
+    "staffInviteFailed": "Couldn't send the invitation",
+    "cancelStaffInvitationTitle": "Cancel invitation?",
+    "cancelStaffInvitationMessage": "The link sent to {{email}} will stop working.",
+    "staffInvitationCancelled": "Invitation cancelled",
+    "staffInvitationCancelFailed": "Couldn't cancel the invitation",
+    "staffInvitationsLoadFailed": "Couldn't load pending invitations",
+    "pendingStaffInvitations": "Pending invitations",
+    "pendingStaffInvitationLabel": "Invitation to {{email}}, {{role}}",
+    "resendStaffInvitation": "Resend invitation",
+    "staffMember": "Staff member",
+    "resendStaffInvitationMessage": "A new link goes to {{email}} and the one they have stops working.",
+    "resendStaffInvitationConfirm": "Resend"
   },
   "players": {
     "title": "Players",
@@ -558,7 +573,14 @@
     "expires": "Expires",
     "loginHintGuardian": "Log in to accept this invitation.",
     "loginHintTeam": "Log in to accept this invitation and join the team.",
-    "loginToAccept": "Log In to Accept"
+    "loginToAccept": "Log In to Accept",
+    "staffTitle": "You're invited to coach",
+    "invitedStaff": "Join the team's staff as {{role}}.",
+    "acceptStaffBody": "Join {{team}} as {{role}}?",
+    "joinedStaff": "You joined {{team}} as {{role}}",
+    "loginHintStaff": "Sign in, or create an account, with the email address this invitation was sent to.",
+    "alreadyStaff": "You're already on the {{team}} staff. Your role was not changed.",
+    "askHeadCoach": "Ask the head coach to send a new invitation."
   },
   "guardians": {
     "resendA11y": "Resend invitation: {{email}}",
@@ -754,7 +776,9 @@
     "emptyTitle": "No Invitations",
     "emptyMessage": "You don't have any pending invitations",
     "count_one": "{{count}} invitation",
-    "count_other": "{{count}} invitations"
+    "count_other": "{{count}} invitations",
+    "staffSubtitle": "Staff invitation: {{role}}",
+    "declineStaffBody": "Decline the invitation to join {{team}} as {{role}}?"
   },
   "tracker": {
     "shot": {

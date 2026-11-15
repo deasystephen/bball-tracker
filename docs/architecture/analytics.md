@@ -103,9 +103,11 @@ on the same path do not repeat it. Stats views (`/(tabs)/stats`, `/teams/[id]/st
 | `staff_added` | a staff member is added | `team_id`, `role_type`, `by`: `user_id` / `email` | `hooks/useTeamStaff.ts` |
 | `staff_role_updated` | a staff member's role changes | `team_id`, `role_type` | `hooks/useTeamStaff.ts` |
 | `staff_removed` | a staff member is removed | `team_id` | `hooks/useTeamStaff.ts` |
+| `staff_invited` | a staff invitation is sent to an address, or re-sent (#460) | `team_id`, `invitation_id`, `role_type`, `resend`, `email_sent` | `hooks/useTeamStaff.ts` |
+| `staff_invitation_cancelled` | a head coach cancels a pending staff invitation (#460) | `team_id`, `invitation_id` | `hooks/useTeamStaff.ts` |
 | `invitation_sent` | an invitation is created or re-sent | `team_id`, `invitation_id`, `resend`, `email_sent` (null when the player has no email) | `hooks/useInvitations.ts` |
 | `invite_link_viewed` | the `/invite/[token]` screen has a settled outcome to show, once per token per mount (not while loading or refetching, so a remount never reports a stale cached result, nor while Try Again is in flight); after `unavailable`, the outcome a successful Try Again shows is reported too; a signed-out invitee who signs in comes back to a new mount, which reports again with `authenticated: true` (#967) | `state`, `kind` (when the invitation loaded), `authenticated`, `source` | `hooks/useInviteLinkViewed.ts` via `app/invite/[token].tsx` |
-| `invitation_accepted` | an invitation is accepted, in-app or from a link | `kind`: `team` / `guardian`, `source`: `in_app` / `link` | `hooks/useInvitations.ts` |
+| `invitation_accepted` | an invitation is accepted, in-app or from a link | `kind`: `team` / `guardian` / `staff` (#460), `source`: `in_app` / `link` | `hooks/useInvitations.ts` |
 | `invitation_declined` | the invitee rejects | `invitation_id` | `hooks/useInvitations.ts` |
 | `invitation_cancelled` | a coach cancels a pending invitation | `team_id`, `invitation_id` | `hooks/useInvitations.ts` |
 | `guardian_invited` | a parent is invited for a roster player, or a pending guardian invite is re-sent (#420) | `team_id`, `relationship`, `resend`, `email_sent` | `hooks/useGuardians.ts` |

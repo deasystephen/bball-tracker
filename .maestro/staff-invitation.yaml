@@ -1,0 +1,76 @@
+appId: com.bballtracker.mobile
+---
+# Staff invitation by email (#460): the head coach adds an address that has no
+# account, the form offers "Send invitation", the invitation appears under
+# "Pending invitations", and Cancel removes it.
+#
+# MUTATES DATA: leaves a CANCELLED StaffInvitation on the Lakers. Run
+# `npx prisma db seed` before this flow (the seed deletes every staff
+# invitation on the Lakers, which also resets the resend cooldown). The
+# backend sends through the FakeMailer locally, so "Invitation sent" is the
+# success toast.
+- launchApp:
+    clearState: true
+- tapOn: "Skip"
+- tapOn: "Developer login with test users"
+- extendedWaitUntil:
+    visible: "Select Test User"
+    timeout: 10000
+- tapOn: "Frank Vogel.*"
+- assertVisible: "Your Teams"
+
+- tapOn: "Teams tab"
+- extendedWaitUntil:
+    visible: "Lakers"
+    timeout: 10000
+- tapOn: "Lakers"
+- scrollUntilVisible:
+    element:
+      id: "team-staff-card"
+    direction: DOWN
+    timeout: 10000
+- tapOn:
+    id: "team-staff-card"
+- extendedWaitUntil:
+    visible: "Add staff"
+    timeout: 10000
+
+# Add an address with no account: the add answers 404 and the form offers an invitation.
+- tapOn: "Add staff"
+- tapOn:
+    id: "staff-email-input"
+- inputText: "maestro.staff.invite@example.com"
+# Never hideKeyboard (Maestro 2.11); Enter dismisses it.
+- pressKey: Enter
+- tapOn: "Assistant Coach"
+- tapOn:
+    id: "staff-add-submit"
+- extendedWaitUntil:
+    visible: "No account uses that email yet.*"
+    timeout: 10000
+- tapOn:
+    id: "staff-invite-submit"
+- extendedWaitUntil:
+    visible: "Invitation sent"
+    timeout: 10000
+
+# The pending invitation is listed with its role.
+- scrollUntilVisible:
+    element:
+      text: "Pending invitations"
+    direction: DOWN
+    timeout: 10000
+- assertVisible: "maestro.staff.invite@example.com"
+- assertVisible: "Assistant Coach · .*"
+
+# Cancel it (confirm in the dialog).
+- tapOn: "Cancel invitation: maestro.staff.invite@example.com"
+- extendedWaitUntil:
+    visible: "Cancel invitation\\?"
+    timeout: 5000
+- tapOn: "Cancel invitation"
+- extendedWaitUntil:
+    visible: "Invitation cancelled"
+    timeout: 10000
+- assertNotVisible: "maestro.staff.invite@example.com"
+- assertNotVisible: "Pending invitations"

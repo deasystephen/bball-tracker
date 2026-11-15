@@ -162,7 +162,6 @@
     "staffEmailPlaceholder": "entrenador@ejemplo.com",
     "staffRole": "Rol",
     "staffAdded": "Miembro agregado",
-    "staffNoAccount": "No hay una cuenta con ese correo. Pídele que se registre primero y luego invítalo.",
     "staffAddFailed": "No se pudo agregar el miembro",
     "changeRole": "Cambiar rol",
     "changeRoleTitle": "Cambiar rol de {{name}}",
@@ -227,7 +226,23 @@
     "creatingIn": "Se creará el equipo en:",
     "updateSuccess": "Equipo actualizado",
     "updateFailed": "No se pudo actualizar el equipo",
-    "chatLink": "Enlace del chat del equipo"
+    "chatLink": "Enlace del chat del equipo",
+    "staffNoAccountInvite": "Todavía no hay una cuenta con ese correo. Envía una invitación: se unirá al cuerpo técnico cuando la acepte.",
+    "sendStaffInvitation": "Enviar invitación",
+    "staffInvitationSent": "Invitación enviada",
+    "staffInvitationEmailFailed": "La invitación se guardó, pero el correo no se pudo enviar. Usa Reenviar para intentarlo de nuevo en un par de minutos.",
+    "staffInviteFailed": "No se pudo enviar la invitación",
+    "cancelStaffInvitationTitle": "¿Cancelar la invitación?",
+    "cancelStaffInvitationMessage": "El enlace enviado a {{email}} dejará de funcionar.",
+    "staffInvitationCancelled": "Invitación cancelada",
+    "staffInvitationCancelFailed": "No se pudo cancelar la invitación",
+    "staffInvitationsLoadFailed": "No se pudieron cargar las invitaciones pendientes",
+    "pendingStaffInvitations": "Invitaciones pendientes",
+    "pendingStaffInvitationLabel": "Invitación a {{email}}, {{role}}",
+    "resendStaffInvitation": "Reenviar invitación",
+    "staffMember": "Miembro del cuerpo técnico",
+    "resendStaffInvitationMessage": "Se enviará un enlace nuevo a {{email}} y el que tiene dejará de funcionar.",
+    "resendStaffInvitationConfirm": "Reenviar"
   },
   "players": {
     "title": "Jugadores",
@@ -558,7 +573,14 @@
     "expires": "Vence",
     "loginHintGuardian": "Inicia sesión para aceptar esta invitación.",
     "loginHintTeam": "Inicia sesión para aceptar esta invitación y unirte al equipo.",
-    "loginToAccept": "Inicia sesión para aceptar"
+    "loginToAccept": "Inicia sesión para aceptar",
+    "staffTitle": "Te invitaron a entrenar",
+    "invitedStaff": "Únete al cuerpo técnico del equipo como {{role}}.",
+    "acceptStaffBody": "¿Unirte a {{team}} como {{role}}?",
+    "joinedStaff": "Te uniste a {{team}} como {{role}}",
+    "loginHintStaff": "Inicia sesión, o crea una cuenta, con el correo al que se envió esta invitación.",
+    "alreadyStaff": "Ya formas parte del cuerpo técnico de {{team}}. Tu rol no cambió.",
+    "askHeadCoach": "Pide al entrenador principal que te envíe una nueva invitación."
   },
   "guardians": {
     "resendA11y": "Reenviar invitación: {{email}}",
@@ -754,7 +776,9 @@
     "emptyTitle": "No hay invitaciones",
     "emptyMessage": "No tienes invitaciones pendientes",
     "count_one": "{{count}} invitación",
-    "count_other": "{{count}} invitaciones"
+    "count_other": "{{count}} invitaciones",
+    "staffSubtitle": "Invitación al cuerpo técnico: {{role}}",
+    "declineStaffBody": "¿Rechazar la invitación para unirte a {{team}} como {{role}}?"
   },
   "tracker": {
     "shot": {
