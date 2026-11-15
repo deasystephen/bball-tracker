@@ -237,15 +237,20 @@ for every address match and the address stored trimmed and lower-cased; the shar
   mutation takes; account deletion's user-then-team order, so the two cannot deadlock): a team-season that
   is not its lineage's latest (`latestTeamSeasonId`, #461) answers 400 (invite the team's current
   season); a live PENDING row for the team + address answers 400 `A pending staff invitation already
-  exists for this email` unless `supersede`; on **every** create the cooldown reads the newest row for
-  the team + `recipientHash` (any status, so a cancel or a decline, whose hash outlives its stripped
+  exists for this email` unless `supersede`; the `canManageStaff` gate is checked again behind the lock
+  (a head coach removed meanwhile, whose invitations that removal cancels under the same lock, cannot
+  slip one in after it); on **every** create the cooldown reads the newest row for the address's
+  `recipientHash` within the team's **lineage** (so a rollover, which moves only PENDING rows, does
+  not reset it; any status, so a cancel or a decline, whose hash outlives its stripped
   address, does not reset it) and answers 429 `resend_cooldown`. Team invitations get the same cap
   from supersede alone because a player's address lives on the `User` row; here only the invitation
   rows know it, so cancel-and-reinvite would otherwise email the address at once. A role correction
   waits the 2 minutes. Then lapsed PENDING
   rows (and with `supersede` the live one, so the old link dies) are flipped to EXPIRED; the new row
   is created (7-day expiry). 201 `{ invitation, emailSent }`. Template:
-  `services/mailer/templates/staff-invitation.ts`, link `${PUBLIC_APP_URL}/invite/<token>`.
+  `services/mailer/templates/staff-invitation.ts`, link `${PUBLIC_APP_URL}/invite/<token>`; when the
+  address already belongs to a claimed account or a managed record (`acceptInApp`), the email says to
+  open the link in the app signed in with the address, since the public accept refuses it.
 - **`GET /teams/:teamId/staff-invitations`** lists the team's pending, unexpired rows (with
   `invitedEmail` and `invitedBy { id, name, deletedAt }`) to `canManageStaff` callers only (403
   otherwise: an invitee's address is not a staff email until they accept).
@@ -311,6 +316,11 @@ for every address match and the address stored trimmed and lower-cased; the shar
   update (the sentinel and the raw-SQL scrub share `utils/stripped-email.ts`); `recipientHash`
   stays, so the cooldown still applies to a re-invite. Cancel and expiry
   keep the address. With no `User` row created at invite time there is nothing else to strip.
+- **A staff role's email is not the managing coach's to rewrite.** `PATCH /players/:id { email }`
+  answers 403 for a non-admin when the row holds any `TeamStaff` row, checked before the write and
+  again in the write's `where` (`teamStaff: { none: {} }`): with the email pointed at their own
+  address, signing in would claim the row and its role. This is the root guard; the ones below keep
+  such rows from arising.
 - **An accepted-but-unclaimed staff account stays unmanaged.** Add Player's case 2 never adopts a
   row that holds a `TeamStaff` row (`teamStaff: { none: {} }` on its claim-guarded `updateMany`):
   it re-branches to case 3 like a claimed account, because a managing coach could otherwise rewrite

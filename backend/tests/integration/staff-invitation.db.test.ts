@@ -21,6 +21,7 @@ import { StaffInvitationService } from '../../src/services/staff-invitation-serv
 import { AccountService } from '../../src/services/account-service';
 import { InvitationService } from '../../src/services/invitation-service';
 import { TeamService } from '../../src/services/team-service';
+import { PlayerService } from '../../src/services/player-service';
 import { BadRequestError, SignInRequiredError } from '../../src/utils/errors';
 import { DbFixtures, type Org } from '../support/db-fixtures';
 
@@ -325,6 +326,45 @@ describe('StaffInvitationService (real Postgres, #460)', () => {
     expect(moved).toMatchObject({ teamId: team.id, status: 'PENDING' });
     const result = await StaffInvitationService.acceptInvitationByToken(await tokenOf(invitation.id));
     expect(result.staff.teamId).toBe(team.id);
+  });
+
+  it('a managing coach cannot rewrite the email of a managed record that holds a staff role', async () => {
+    // A managed record on the club's roster, managed by the head coach, that
+    // got a staff role some way (here directly): its email is now fixed.
+    const managedId = await fx.user('managed-staff', 'PLAYER');
+    await prisma.user.update({ where: { id: managedId }, data: { isManaged: true, managedById: headCoachId } });
+    await fx.member(managedId, org);
+    const assistantRole = await prisma.teamRole.findFirstOrThrow({ where: { teamId: org.teamId, type: 'ASSISTANT_COACH' } });
+    await prisma.teamStaff.create({ data: { teamId: org.teamId, userId: managedId, roleId: assistantRole.id } });
+
+    await expect(
+      PlayerService.updatePlayer(managedId, { email: address('coach-alias') }, headCoachId)
+    ).rejects.toThrow('holds a staff role');
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: managedId } })).email).not.toBe(address('coach-alias'));
+
+    // Without the staff row the managing coach may correct it (B2.10, unchanged).
+    await prisma.teamStaff.deleteMany({ where: { userId: managedId } });
+    await PlayerService.updatePlayer(managedId, { email: address('fixed-address') }, headCoachId);
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: managedId } })).email).toBe(address('fixed-address'));
+  });
+
+  it('the resend cooldown survives a season rollover (keyed on the lineage)', async () => {
+    const coachId = await fx.user('cooldown-head', 'COACH');
+    const club = await fx.org('cooldown-club');
+    await fx.staff(coachId, club);
+    await fx.leagueAdmin(coachId, club);
+    await prisma.teamRole.create({
+      data: { teamId: club.teamId, type: 'ASSISTANT_COACH', name: 'Assistant Coach', canManageRoster: true },
+    });
+    const email = address('cooldown-invitee');
+    const first = await StaffInvitationService.inviteStaff(club.teamId, { email, roleType: 'ASSISTANT_COACH' }, coachId);
+    await StaffInvitationService.cancelInvitation(club.teamId, first.id, coachId);
+
+    const { team } = await TeamService.rolloverTeam(club.teamId, { seasonName: `S3-${fx.run}` }, coachId);
+
+    await expect(
+      StaffInvitationService.inviteStaff(team.id, { email, roleType: 'ASSISTANT_COACH' }, coachId)
+    ).rejects.toMatchObject({ code: 'resend_cooldown' });
   });
 
   it('a team manager invitation creates a PLAYER account (the app asks the role step)', async () => {

@@ -8,6 +8,13 @@ import { footerHtml, footerText } from './footer';
  * address may have no account yet: accepting creates it. Same accept-link
  * shape as the team and guardian invitations.
  */
+/** How to accept: an address that already has an account accepts signed in to the app. */
+function howToAccept(vars: Record<string, string>): string {
+  return vars.acceptInApp
+    ? `This address already has a ${APP_NAME} account: open the link below in the ${APP_NAME} app, signed in with this email address, to accept.`
+    : `Accept from the link below, or sign in to the ${APP_NAME} app with this email address and accept it there. If you don't have an account yet, sign up with this address and the team will be waiting for you.`;
+}
+
 export const staffInvitationTemplate: EmailTemplate = {
   name: 'staff-invitation',
   subject(vars) {
@@ -26,7 +33,7 @@ export const staffInvitationTemplate: EmailTemplate = {
 <body style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:20px;">
   <h2>You've been invited to join a team's staff on ${APP_NAME}</h2>
   <p>${e(vars.inviterName)} has invited you to join <strong>${e(vars.teamName)}</strong> as <strong>${e(vars.roleName)}</strong>.</p>
-  <p>Accept from the link below, or sign in to the ${APP_NAME} app with this email address and accept it there. If you don't have an account yet, sign up with this address and the team will be waiting for you.</p>
+  <p>${e(howToAccept(vars))}</p>
   <p>This invitation expires on ${e(vars.expiresAt)}.</p>
   ${ctaBlock}
   ${footerHtml()}
@@ -41,7 +48,7 @@ export const staffInvitationTemplate: EmailTemplate = {
 
 ${vars.inviterName} has invited you to join ${vars.teamName} as ${vars.roleName}.
 
-Accept from the link below, or sign in to the ${APP_NAME} app with this email address and accept it there. If you don't have an account yet, sign up with this address and the team will be waiting for you.
+${howToAccept(vars)}
 
 This invitation expires on ${vars.expiresAt}.
 

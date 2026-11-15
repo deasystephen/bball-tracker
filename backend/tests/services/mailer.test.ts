@@ -476,6 +476,13 @@ describe('staffInvitationTemplate (#460)', () => {
     expect(staffInvitationTemplate.text({ ...vars, acceptUrl: '' })).toContain(`Open the ${APP_NAME} app`);
   });
 
+  it('tells an address that already has an account to accept in the app', () => {
+    const withAccount = { ...vars, acceptInApp: 'true' };
+    expect(staffInvitationTemplate.html(withAccount)).toContain('already has a');
+    expect(staffInvitationTemplate.text(withAccount)).toContain('signed in with this email address');
+    expect(staffInvitationTemplate.text(vars)).toContain("If you don't have an account yet");
+  });
+
   it('text mirrors the html content', () => {
     const text = staffInvitationTemplate.text(vars);
     expect(text).toContain('Bulls');
