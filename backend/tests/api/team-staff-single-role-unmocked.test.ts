@@ -130,6 +130,24 @@ describe('POST /api/v1/teams/:teamId/staff — one role per user per team (#463)
     expect(mockPrisma.teamStaff.create).not.toHaveBeenCalled();
   });
 
+  it('refuses (400) to make an unclaimed managed roster record staff: its coach could claim the role (#460)', async () => {
+    givenHeadCoachAddingAssistant();
+    (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue({
+      id: ASSISTANT_ID,
+      name: 'Managed Kid',
+      workosUserId: null,
+      isManaged: true,
+    });
+
+    const response = await request(app)
+      .post(`/api/v1/teams/${TEAM_ID}/staff`)
+      .send({ email: 'managed@example.com', roleType: 'ASSISTANT_COACH' });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toContain('Send a staff invitation instead');
+    expect(mockPrisma.teamStaff.create).not.toHaveBeenCalled();
+  });
+
   it('adds a user who holds no role on the team (201)', async () => {
     givenHeadCoachAddingAssistant();
     givenTargetStaffRow(null);

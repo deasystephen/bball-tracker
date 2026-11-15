@@ -195,7 +195,9 @@ eng-review amendments recorded there).
 ### Staff invitations by email (#460, club coach onboarding)
 
 `POST /teams/:teamId/staff` still adds an **existing** account only (404 for an unknown address,
-with code `staff_target_not_found` since #460 so the app can offer an invitation instead).
+with code `staff_target_not_found` since #460 so the app can offer an invitation instead). It refuses
+(400) an address that belongs to an unclaimed **managed** roster record: its managing coach could rewrite
+that email (B2.10) and claim the role, so such an address is invited instead.
 `services/staff-invitation-service.ts` invites any address to a staff role through a
 **`StaffInvitation`** row, the third invitation kind next to `TeamInvitation` and
 `GuardianInvitation`. It reuses the same machinery rather than copying it: a random bearer-secret
@@ -264,18 +266,23 @@ for every address match and the address stored trimmed and lower-cased; the shar
   link never reveals the invited address, the inviter's id or the account's id, name or email) and invalidates the account's usage cache. With `alreadyStaff` the web page and
   the app say the role was not changed.
   - **Which account:** the verified caller on the authenticated path (never a second lookup by
-    address); by token, the live account holding the address (`emailEquals`), else a new one,
+    address); by token, the live account holding the address (`emailEquals`) **only if nobody has
+    signed in to it**, else a new one,
     created **inside the accept transaction** with a native `INSERT … ON CONFLICT ("email") DO
     NOTHING` and the same lookup, so a refused or failed accept leaves no account behind and two
-    concurrent accepts converge on one row. **By token, an unclaimed *managed* roster record
-    holding the address is refused 409 `sign_in_required`** (`SignInRequiredError`): its managing
-    coach may still rewrite that email (`PATCH /players/:id`, B2.10), so a staff role on the row
-    would be a grant the coach could take by pointing it at their own address. The invitee signs in
-    with the address (which claims the row) and accepts in the app. The check runs again on the row
+    concurrent accepts converge on one row. **By token, a claimed account or an unclaimed *managed*
+    roster record holding the address is refused 409 `sign_in_required`** (`SignInRequiredError`):
+    a forwarded link must not put a role (and a global role change) on someone's login, and a
+    managed record's coach may still rewrite its email (`PATCH /players/:id`, B2.10) and take the
+    role by pointing it at their own address. The invitee signs in with the address (which claims a
+    managed row) and accepts in the app. The check runs again on the row
     read **after** the transaction's row lock, and Add Player's adoption locks the same row before
     its guarded update, so an adoption racing the accept either commits first (409 here) or waits
     and then sees the staff row (case 3).
-  - **The transaction** locks the account's `User` row, then the `Team` row (account deletion's
+  - **The transaction** reads the invitation's team again under the team lock (a season rollover
+    that committed after the unlocked read moved the row onto the new team-season; the accept then
+    locks and uses that one, and a dead-invitation cancel is guarded on the team it checked), and
+    locks the account's `User` row, then the `Team` row (account deletion's
     order: user first, teams after), so a tombstone never gets a staff row (404) and the accept
     serialises with staff removal and re-role; **re-checks that the inviter is a live account that may
     still manage the team's staff** (`deletedAt` null and `canManageStaff(invitedById)` behind the
@@ -286,7 +293,8 @@ for every address match and the address stored trimmed and lower-cased; the shar
     when `canManageStaff` no longer holds for them, so a league or system admin keeps theirs); refuses
     an invitation whose team-season is no longer its lineage's latest (the staff row would land on
     last season's team; a season rollover moves the team's PENDING staff invitations onto the new
-    team-season, so this catches only an invitation that slipped past that); and in both of those cases cancels the row after the rollback
+    team-season, and cancels the ones whose sender cannot manage the new team-season's staff, so
+    this catches only an invitation that slipped past that); and in both of those cases cancels the row after the rollback
     (`Staff invitation cancelled` with a `reason`), so it stops showing as pending. A team that no
     longer has the invited default role answers 400. It then flips PENDING → ACCEPTED
     guarded on the status (the loser of a race gets 400); and creates the `TeamStaff` row with the
