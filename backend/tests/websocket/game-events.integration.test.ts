@@ -23,6 +23,7 @@ import { WorkOSService } from '../../src/services/workos-service';
 import { ServiceUnavailableError } from '../../src/utils/errors';
 import { captureException } from '../../src/utils/sentry';
 import { setIo } from '../../src/websocket/io-registry';
+import { stopRevocationSweep } from '../../src/websocket/revocation';
 import {
   REAUTH_REQUIRED_EVENT,
   REFRESH_AUTH_EVENT,
@@ -60,6 +61,9 @@ describe('websocket integration (socket.io-client)', () => {
     httpServer = createServer();
     io = new SocketServer(httpServer);
     setupWebSocketHandlers(io);
+    // The revocation sweep (#1004) has its own suites; its timer would read
+    // the mocked Prisma here.
+    stopRevocationSweep();
     httpServer.listen(() => {
       port = (httpServer.address() as AddressInfo).port;
       done();

@@ -22,6 +22,7 @@ import { WorkOSService } from '../../src/services/workos-service';
 import { deletePreviousAvatar } from '../../src/services/upload-service';
 import { captureException } from '../../src/utils/sentry';
 import { ForbiddenError, LastHeadCoachError, NotFoundError } from '../../src/utils/errors';
+import { revokeUserSockets } from '../../src/websocket/io-registry';
 
 jest.mock('../../src/services/workos-service');
 jest.mock('../../src/services/upload-service', () => ({
@@ -30,6 +31,10 @@ jest.mock('../../src/services/upload-service', () => ({
 jest.mock('../../src/utils/sentry', () => ({
   ...jest.requireActual('../../src/utils/sentry'),
   captureException: jest.fn(),
+}));
+jest.mock('../../src/websocket/io-registry', () => ({
+  ...jest.requireActual('../../src/websocket/io-registry'),
+  revokeUserSockets: jest.fn().mockReturnValue(0),
 }));
 
 const mockWorkOS = WorkOSService as jest.Mocked<typeof WorkOSService>;
@@ -214,6 +219,12 @@ describe('AccountService.deleteAccount', () => {
     // After commit
     expect(mockDeleteAvatar).toHaveBeenCalledWith('https://bucket.s3.amazonaws.com/avatars/u/a.jpg', null);
     expect(mockWorkOS.deleteUser).toHaveBeenCalledWith('workos_1');
+    // The account's live sockets on this process are closed right after commit, before the
+    // slow external calls (#1004)
+    expect(revokeUserSockets).toHaveBeenCalledWith(USER_ID);
+    expect((revokeUserSockets as jest.Mock).mock.invocationCallOrder[0]).toBeLessThan(
+      mockWorkOS.deleteUser.mock.invocationCallOrder[0]
+    );
   });
 
   describe('true erasure for an account nothing references (#529)', () => {
@@ -301,6 +312,7 @@ describe('AccountService.deleteAccount', () => {
     expect(mockPrisma.user.update).not.toHaveBeenCalled();
     expect(mockPrisma.teamStaff.deleteMany).not.toHaveBeenCalled();
     expect(mockWorkOS.deleteUser).not.toHaveBeenCalled();
+    expect(revokeUserSockets).not.toHaveBeenCalled();
   });
 
   it('blocks a sole head coach of an active-season team with a 400 that lists the teams, and writes nothing', async () => {

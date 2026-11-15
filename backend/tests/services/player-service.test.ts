@@ -41,6 +41,7 @@ jest.mock('@aws-sdk/client-s3', () => ({
   DeleteObjectTaggingCommand: jest.fn().mockImplementation((input: unknown) => ({ input })),
 }));
 
+import * as ioRegistry from '../../src/websocket/io-registry';
 import { Prisma } from '@prisma/client';
 import { PlayerService } from '../../src/services/player-service';
 import { teamAccessWhere } from '../../src/utils/permissions';
@@ -1197,6 +1198,7 @@ describe('PlayerService', () => {
     it('should delete player successfully', async () => {
       const player = createPlayer();
       const infoSpy = spyOnInfo();
+      const revokeSpy = jest.spyOn(ioRegistry, 'revokeUserSockets');
 
       (mockPrisma.user.findUnique as jest.Mock)
         .mockResolvedValueOnce(adminUser) // admin check
@@ -1217,6 +1219,9 @@ describe('PlayerService', () => {
       });
       // One domain event, ids only.
       expect(infoSpy).toHaveBeenCalledWith('Player deleted', { playerId: player.id, userId: 'admin-id' });
+      // A claimed player's live sockets go with the row (#1004).
+      expect(revokeSpy).toHaveBeenCalledWith(player.id);
+      revokeSpy.mockRestore();
     });
 
     describe('avatar cleanup (#725)', () => {

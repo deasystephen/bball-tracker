@@ -107,7 +107,7 @@ two-task load test, capacity last.
 | server → client | `game-score-change`  | `{ gameId, score }` (on `PATCH /games/:id` score edits)        |
 | server → client | `game-status-change` | `{ gameId, previousStatus, status, score }` (on transition)    |
 | client → server | `refresh-auth`       | `{ token }` after each token refresh (ack `{ success, code? }`, #49) |
-| server → client | `reauth_required`    | `{}` (no valid token by expiry; the transport closes next, #49) |
+| server → client | `reauth_required`    | `{}` (no valid token by expiry, #49, or the account was deleted or converted, #1004; the transport closes next) |
 
 `score` is always `{ homeScore, awayScore }`. Every broadcast carries the
 current score so a client can drop events and still converge.
@@ -185,8 +185,10 @@ current score so a client can drop events and still converge.
   - **Logging.** The expected cycle is `debug` (`Socket auth refreshed`, `Socket reauth check
     passed`, and `Socket reauth required` with `reason: 'expired'`). Anomalies are `info`:
     `Socket reauth required` with `reason: 'rejected'` (the verifier refused an unexpired token,
-    or the account was deleted) or `'user_changed'`, `Socket refresh-auth rejected`, and `Socket
-    evicted from game room`. Ids only.
+    or the account was deleted), `'user_changed'` or `'revoked'` (next bullet), `Socket
+    refresh-auth rejected`, `Socket evicted from game room` and `Socket revocation sweep closed
+    sockets`. A failed sweep is `warn` (`Socket revocation sweep failed`); a revocation defect or a
+    stalled sweep is `error` (`Socket revocation error`). Ids only.
   - **Room access (audit #72).** Every accepted `refresh-auth` and every passing re-check runs
     `pruneGameRooms`, which resolves every `game:<id>` room at once with `viewableGameIds`: one
     `game.findMany` with `id in` the rooms and `team` filtered by `readableTeamsWhere` (the
@@ -202,6 +204,75 @@ current score so a client can drop events and still converge.
   (real transport: timer cleared on disconnect, `refresh-auth` keeps the connection past the
   handshake token's expiry, `reauth_required` then `transport close`, automatic reconnect with
   a fresh token).
+- **Revocation on deletion or conversion (#1004, `websocket/revocation.ts`).** The re-check above
+  can be a whole token lifetime away, so an account deleted (`AccountService.deleteAccount`) or
+  converted to a managed record (`convertToManaged`) while a device sits in a game room is cut off
+  by two other paths, both through the same `requireReauth` (`reason: 'revoked'`: `reauth_required`,
+  then a transport close). The client's reconnect is then refused: `Unauthorized` for a deleted or
+  un-claimed account (the row is gone or no longer carries the WorkOS id; a refresh that still
+  succeeds while WorkOS is being torn down changes nothing, the handshake reads the row), and
+  `age_confirmation_required` for an under-age answer handed to the operator (`ageRefusedAt`), which
+  sends the app back to the age screen. The paths:
+  - **In-process, immediate.** Both service methods (and `refuseUnderage`: its un-claim branch,
+    and `handToOperator` for a refused account; its delete branch goes through `deleteAccount`;
+    and `PlayerService.deletePlayer`) call `io-registry.ts#revokeUserSockets(userId)` right after
+    their transaction commits, before the S3 and WorkOS calls, so a slow provider never delays the
+    cut. `setupWebSocketHandlers` registers `revocation.ts#revokeLocalUserSockets` there
+    (`installSocketRevocation`), so services import only the leaf `io-registry` and never the
+    socket handler graph. It walks this process's live sockets (`io.of('/').sockets`, transport
+    still `open`, so a socket already being cut is never cut twice) for that user id: no
+    database, no Redis, never throws. In an operator script (`scripts/data-subject-request.ts
+    delete`, `scripts/convert-to-managed.ts`) no server or revoker is registered, so it returns 0.
+  - **The sweep, the guarantee.** `setupWebSocketHandlers` starts `startRevocationSweep` (the
+    shutdown routine stops it before `io.close()`): every `REVOCATION_SWEEP_INTERVAL_MS` (10 s,
+    unref'd timer) it collects the distinct user ids of this process's live sockets and reads
+    their live rows in one `user.findMany` (`id in …`, `deletedAt: null`,
+    `SOCKET_REVOCATION_SELECT` = `AUTH_USER_SELECT` plus `workosUserId`, the columns the handshake
+    already reads per connection, so a column added for a handshake gate reaches the sweep too;
+    chunks of 1,000 ids; no query at all with no socket open). `sessionRevoked` cuts a socket
+    whose row is missing (erased or tombstoned), whose row no longer carries the WorkOS id its
+    token was verified for (`socket.data.workosUserId`, set at the handshake and on every adopted
+    `refresh-auth`; null for a dev token, which is checked on the row only, exactly as its
+    handshake is; unset fails closed), or whom the handshake's gate refuses (`socketUserAllowed`).
+    A WorkOS relink at the production cutover changes the id too, which cuts staging-token
+    sockets once; their REST calls already fail the same way. The sweep catches the operator
+    scripts, which run in another process, and the race the in-process call misses (a handshake
+    that read the row just before the commit). A socket that disconnected or was cut while the
+    query ran, or whose user or WorkOS id changed (an adopted `refresh-auth`), is left to the next
+    sweep rather than judged on a row read before the change.
+  - **Failures.** Only the query counts as a database failure: it keeps every socket, logs `warn`
+    and reports the first failure of a streak to Sentry (`flow: 'socket-revocation-sweep'`). A
+    cut that throws is logged at `error` and reported once per socket (`flow:
+    'socket-revocation'`), does not stop the others, and is retried by every later sweep. A tick
+    is skipped while the previous sweep runs, so at most one query is in flight. The pool has no
+    statement timeout, so a query that never settled would stop the sweep with it (a hazard every
+    REST request shares; the expiry re-check still bounds such a socket): a sweep still running
+    after `REVOCATION_SWEEP_STALL_MS` (60 s) is reported once, at `error` and to Sentry
+    (`Socket revocation sweep stalled`). Each start of the timer keeps its own in-flight marker, and
+    a query that fails after its timer was stopped (the shutdown routine stops it before the Prisma
+    disconnect) is dropped silently rather than reported.
+  - **Why not a room or a Redis signal.** A per-user room would let the adapter fan a cut out to
+    other tasks, but room fan-out cannot close a remote transport and the sweep already bounds
+    every task. A Redis signal from the scripts could only shave seconds off that bound, since
+    Redis fails open in this codebase.
+  - **Bounds.** In-process (the routes): at once for every socket open at the commit; a handshake
+    that read the row just before the commit and completes just after it is caught by the next
+    sweep, within about 10 s. Operator script, Redis up or down: at most one sweep interval plus
+    the query, about 10 s; the sweep never touches Redis, so a Redis outage changes nothing. During
+    a database
+    outage the sweep keeps sockets (as the re-check does), so the bound is then the first sweep
+    after recovery; REST is down too meanwhile.
+  - **Cost and replicas.** One indexed query per task every 10 s while sockets are open; nothing
+    runs per broadcast. Both paths act only on the task's own sockets, which stays correct with the
+    Redis adapter on and several tasks: each task sweeps its own (the in-process call reaches only
+    the task that served the request, the others within one sweep).
+  - Tests: `tests/websocket/revocation.test.ts` (fake sockets: the predicate, the registry hook,
+    no double cut, identity change mid-query, one failing cut, chunking, failure streak, timer,
+    stall report) and `tests/integration/socket-revocation.db.test.ts` (real Postgres, real
+    `AccountService`, real transport: a deleted and a converted account's socket gets
+    `reauth_required`, `transport close` and no later `game-event`, with an hour left on its token,
+    both in-process and with no server registered followed by a sweep; an under-age un-claim and
+    an under-age answer handed to the operator, in-process; a live account's socket is kept).
 - Rate limits (audit #16, `websocket/rate-limit.ts`; the handshake window shared across tasks since
   #452): handshake attempts 60/min per IP, checked **before** auth so connect spam never reaches
   JWKS/DB; max 50 concurrent sockets per IP **per task**; `join-game` 20/min per socket (ack
