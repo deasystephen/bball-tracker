@@ -26,6 +26,7 @@ import {
   NotLatestSeasonError,
   SeasonArchivedError,
   SeasonNotAfterSourceError,
+  StaffTargetNotFoundError,
 } from '../utils/errors';
 import {
   Feature,
@@ -1443,7 +1444,8 @@ export class TeamService {
     }
 
     if (!user) {
-      throw new NotFoundError('User not found');
+      // A coded 404: the app offers a staff invitation for an unknown address (#460).
+      throw new StaffTargetNotFoundError();
     }
     return user;
   }
