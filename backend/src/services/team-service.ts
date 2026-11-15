@@ -1441,23 +1441,18 @@ export class TeamService {
   }
 
   /**
-   * A head coach who is removed or demoted can no longer manage the team's
-   * staff, so the PENDING staff invitations they sent on it are cancelled in
-   * the same transaction (#460); accept re-checks the inviter anyway, this
-   * keeps the pending lists honest. A league or system admin who sent them
-   * keeps them.
+   * Run after a staff row is removed or re-roled, inside that transaction:
+   * when the user can no longer manage the team's staff (`canManageStaff`,
+   * read through the transaction), the PENDING staff invitations they sent on
+   * it are cancelled (#460). Accept re-checks the inviter anyway; this keeps
+   * the pending lists honest. An admin who still manages staff keeps theirs.
    */
   private static async cancelSentStaffInvitations(
     tx: Prisma.TransactionClient,
     teamId: string,
     staffUserId: string
   ): Promise<void> {
-    // Still able to manage staff without the head-coach row: keep them.
-    if (await isSystemAdmin(staffUserId, tx)) {
-      return;
-    }
-    const team = await tx.team.findUnique({ where: { id: teamId }, select: { season: { select: { leagueId: true } } } });
-    if (team?.season && (await isLeagueAdmin(staffUserId, team.season.leagueId, tx))) {
+    if (await canManageStaff(staffUserId, teamId, tx)) {
       return;
     }
     await tx.staffInvitation.updateMany({
@@ -1621,8 +1616,6 @@ export class TeamService {
       // Demoting the only head coach would leave the team unmanageable.
       if (current.role.type === 'HEAD_COACH') {
         await TeamService.assertNotLastHeadCoach(teamId, staffUserId, tx);
-        // Their pending staff invitations die with the right (#460).
-        await TeamService.cancelSentStaffInvitations(tx, teamId, staffUserId);
       }
 
       // Account deletion removes a non-head-coach's staff rows without this
@@ -1637,6 +1630,10 @@ export class TeamService {
           }),
         new NotFoundError('User is not a staff member of this team')
       );
+      // A demoted head coach's pending staff invitations die with the right (#460).
+      if (current.role.type === 'HEAD_COACH') {
+        await TeamService.cancelSentStaffInvitations(tx, teamId, staffUserId);
+      }
       return { current, updated };
     });
 
@@ -1693,15 +1690,19 @@ export class TeamService {
 
       if (existing.role.type === 'HEAD_COACH') {
         await TeamService.assertNotLastHeadCoach(teamId, staffUserId, tx);
-        await TeamService.cancelSentStaffInvitations(tx, teamId, staffUserId);
       }
 
       // Account deletion removes a non-head-coach's staff rows without this
       // lock, so the row can still vanish under us: 404, not a P2025 500.
-      return orNotFound(
+      const deleted = await orNotFound(
         () => tx.teamStaff.delete({ where: { id: existing.id } }),
         new NotFoundError('User is not a staff member of this team')
       );
+      // A removed head coach's pending staff invitations die with the right (#460).
+      if (existing.role.type === 'HEAD_COACH') {
+        await TeamService.cancelSentStaffInvitations(tx, teamId, staffUserId);
+      }
+      return deleted;
     });
 
     logger.info('Staff removed', {

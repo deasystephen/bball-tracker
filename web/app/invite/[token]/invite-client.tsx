@@ -48,7 +48,7 @@ export function InviteClient({ invitation, token }: Props) {
   const guardian = invitation.kind === 'guardian' ? invitation : null;
   const staff = invitation.kind === 'staff' ? invitation : null;
   const teamInvite = invitation.kind === 'guardian' || invitation.kind === 'staff' ? null : invitation;
-  const staffRole = staff ? (STAFF_ROLE_LABEL[staff.roleType] ?? 'staff member') : '';
+  const staffRole = staff ? (STAFF_ROLE_LABEL[staff.roleType] ?? 'a staff member') : '';
   // Tombstoned child: label from deletedAt, never from the stored name (#894).
   const childLabel = guardian ? childDisplayName(guardian) : '';
   const childRole = guardian ? `${childLabel}'s ${RELATIONSHIP_LABEL[guardian.relationship]}` : '';
@@ -91,7 +91,7 @@ export function InviteClient({ invitation, token }: Props) {
                 : `You've joined ${invitation.teamName}!`}
           </p>
           {/* A staff invite may have created the account: it is claimed by signing in with the invited address. */}
-          {staff && <p>Sign in to the app with the email address this invitation was sent to.</p>}
+          {staff && APP_STORE_RELEASED && <p>Sign in to the app with the email address this invitation was sent to.</p>}
           {/* No "download the app" before the release: there is nothing to download yet. */}
           {APP_STORE_RELEASED && (
             <p>

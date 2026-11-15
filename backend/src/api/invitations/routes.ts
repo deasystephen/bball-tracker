@@ -112,7 +112,7 @@ router.post('/:id/accept', validateUuidParams('id'), async (req, res) => {
     // Staff invitation (#460) addressed to the signed-in account? Tried
     // before the team kind: its accept creates a TeamStaff row. An app build
     // that predates staff invitations reaches here from its deep-link screen.
-    const staffInvitation = await StaffInvitationService.findInvitationForUser(id, req.user!.id);
+    const staffInvitation = await StaffInvitationService.findInvitationForUser(id, req.user!.email);
     if (staffInvitation) {
       const accepted = await StaffInvitationService.acceptInvitation(id, req.user!.id, staffInvitation);
       // Joining a team's staff changes the caller's metered team count.
@@ -162,7 +162,7 @@ router.post('/:id/reject', validateUuidParams('id'), async (req, res) => {
       return;
     }
 
-    const staffInvitation = await StaffInvitationService.findInvitationForUser(id, req.user!.id);
+    const staffInvitation = await StaffInvitationService.findInvitationForUser(id, req.user!.email);
     if (staffInvitation) {
       const rejected = await StaffInvitationService.rejectInvitation(id, req.user!.id, staffInvitation);
       res.json({
