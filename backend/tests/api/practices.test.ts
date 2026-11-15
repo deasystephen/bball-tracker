@@ -10,6 +10,7 @@ import { app } from '../../src/index';
 import { mockPrisma } from '../setup';
 import { canAccessTeam, hasTeamPermission, isGuardianOf, isSystemAdmin } from '../../src/utils/permissions';
 import type { AuthUser } from '../support/auth-fixtures';
+import { Feature, FREE_FEATURES } from '../../src/services/entitlements';
 
 const CHILD_ID = 'b2c3d4e5-f6a7-4901-a345-67890abcdef0';
 const TEAM_ID = 'c3d4e5f6-a7b8-4012-a456-7890abcdef01';
@@ -104,12 +105,40 @@ describe('POST /api/v1/practices', () => {
     );
   });
 
-  it('lets a FREE assistant coach on another coach’s team create one (no 402 on any tier)', async () => {
+  // The tier is not checked beyond the gate; that an assistant's staff row passes
+  // canManageTeam on a head coach's team is proven in practice-schedule.db.test.ts.
+  it('lets a FREE caller with canManageTeam create one (no 402 on any tier)', async () => {
     mockCaller = FREE_ASSISTANT;
     mockPrisma.practiceSession.create.mockResolvedValue(practiceRow());
     const res = await request(app).post('/api/v1/practices').send(body);
     expect(res.status).toBe(201);
     expect(hasTeamPermission).toHaveBeenCalledWith(FREE_ASSISTANT.id, TEAM_ID, 'canManageTeam');
+  });
+
+  it('keeps the entitlement gate mounted: with the feature off FREE, both creates answer 402', async () => {
+    // Simulates the documented move back to PREMIUM without editing the source.
+    FREE_FEATURES.delete(Feature.PRACTICE_SCHEDULING);
+    try {
+      const practice = await request(app).post('/api/v1/practices').send(body);
+      expect(practice.status).toBe(402);
+      expect(practice.body).toEqual(
+        expect.objectContaining({ code: 'upgrade_required', feature: 'practice_scheduling', requiredTier: 'PREMIUM' })
+      );
+      const series = await request(app).post('/api/v1/practice-series').send({
+        teamId: TEAM_ID,
+        frequency: 'WEEKLY',
+        weekdays: [2],
+        startDate: '2030-01-01',
+        startTime: '18:00',
+        durationMinutes: 60,
+        timezone: 'UTC',
+        occurrenceCount: 2,
+      });
+      expect(series.status).toBe(402);
+      expect(mockPrisma.practiceSession.create).not.toHaveBeenCalled();
+    } finally {
+      FREE_FEATURES.add(Feature.PRACTICE_SCHEDULING);
+    }
   });
 
   it('answers 403 to a caller without canManageTeam', async () => {

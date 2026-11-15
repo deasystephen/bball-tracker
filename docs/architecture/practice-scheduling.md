@@ -131,11 +131,15 @@ All through `utils/permissions.ts`, never a copy:
 `Feature.PRACTICE_SCHEDULING` is in `FREE_FEATURES` in `services/entitlements/index.ts`, so every
 tier has it, and `requireEntitlement(Feature.PRACTICE_SCHEDULING)` stays mounted on the two create
 routes (`POST /practices`, `POST /practice-series`). That mirrors the usage caps, which stay mounted
-at `Infinity`: making practices paid again is a one-line move to `PREMIUM_FEATURES` with no route
-change. The gate is per caller, so a FREE assistant coach can create on any team they manage.
+at `Infinity`: making practices paid again means moving the feature out of `FREE_FEATURES` into
+`PREMIUM_FEATURES` (two lines; `PREMIUM_FEATURES` spreads `FREE_FEATURES`, so adding it there alone
+changes nothing), with no route change. `tests/api/practices.test.ts` proves the gate is mounted by
+taking the feature off FREE and expecting 402. The gate is per caller, so a FREE assistant coach can create on any team they manage.
 `GET /auth/entitlements` reports `PRACTICE_SCHEDULING: true` for FREE; no client reads the feature
 list today (`docs/architecture/entitlements-and-usage.md`). Editing, cancelling, deleting, reading
-and answering were never gated. Practices count against no usage meter.
+and answering were never gated. Practices count against no usage meter. **Calendar sync is still
+PREMIUM**: subscribing to the team feed (`CALENDAR_SYNC`) answers 402 on FREE, so a FREE family sees
+practices in the app but cannot subscribe to them in a calendar app (an owner question below).
 
 ## Calendar feed
 
@@ -185,6 +189,8 @@ child's availability answers but clears their free-text `comment`.
 
 Recorded on #33; each is a one-place change.
 
+- **Calendar sync** (`CALENDAR_SYNC`) stays PREMIUM although practices are free, so the iCal feed
+  that carries them is not available on FREE.
 - **Series cancel** deletes future sessions (subscribers see them vanish) rather than marking them
   `CANCELLED` with a reason.
 - **Calendar feed** carries practice `LOCATION` and notes; the feed URL is a bearer link a parent may

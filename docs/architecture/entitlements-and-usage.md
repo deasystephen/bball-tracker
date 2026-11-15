@@ -35,7 +35,8 @@ the old unmounted `requireFeature` / `requireUsageLimit` in `api/auth/middleware
 - `requireEntitlement(feature)` — gates a route behind a feature. On denial it
   returns **HTTP 402** with `{ code: 'upgrade_required', feature, currentTier, requiredTier }`.
   Applied to practice and practice-series create (`PRACTICE_SCHEDULING`, #33, which every tier has, so
-  it never denies today; it stays mounted like the `Infinity` caps;
+  it never denies today; it stays mounted like the `Infinity` caps; to make it paid, move it from
+  `FREE_FEATURES` to `PREMIUM_FEATURES`;
   `docs/architecture/practice-scheduling.md#entitlement`), team season-stats CSV export (`STATS_EXPORT`) and calendar
   subscribe (`CALENDAR_SYNC`). System `ADMIN`s bypass all checks. Expired paid
   subscriptions resolve to an effective FREE tier.

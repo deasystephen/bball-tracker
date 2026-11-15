@@ -208,8 +208,9 @@ Back-relations (`practiceSeries`, `practiceSessions`, `availabilityDefaults`,
 New resource dir `backend/src/api/practice-schedules/` (`routes.ts`,
 `schemas.ts`), service `backend/src/services/practice-schedule-service.ts`,
 mirroring `games/` and `game-service.ts`. All routes behind `authenticate`;
-**write routes** additionally behind `requireEntitlement(Feature.PRACTICE_SCHEDULING)`
-and a `canManageTeam` permission check; **read/availability/ride routes** behind
+**write routes** additionally behind a `canManageTeam` permission check (as built,
+only the two create routes carry `requireEntitlement(Feature.PRACTICE_SCHEDULING)`,
+and every tier has that feature); **read/availability/ride routes** behind
 `canAccessTeam`.
 
 ### Practices

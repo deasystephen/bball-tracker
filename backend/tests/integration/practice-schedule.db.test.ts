@@ -106,6 +106,27 @@ describe('practice scheduling (real Postgres)', () => {
     futureSessionIds = future.map((s) => s.id);
   });
 
+  it('lets a FREE assistant coach (staff with canManageTeam on the head coach’s team) create', async () => {
+    const assistantRole = await prisma.teamRole.create({
+      data: { teamId: orgs.A.teamId, type: 'ASSISTANT_COACH', name: 'ASSISTANT_COACH', canManageTeam: true, canManageRoster: true },
+      select: { id: true },
+    });
+    await fx.staff(await fx.user('assistant', 'COACH'), orgs.A, assistantRole.id);
+    const practice = await PracticeService.createPractice(
+      {
+        teamId: orgs.A.teamId,
+        type: 'OTHER',
+        title: 'Team meeting',
+        startsAt: new Date(Date.now() + 3 * DAY_MS).toISOString(),
+        durationMinutes: 30,
+        timezone: 'America/New_York',
+      },
+      users.assistant
+    );
+    expect(practice.teamId).toBe(orgs.A.teamId);
+    await PracticeService.deletePractice(practice.id, users.assistant);
+  });
+
   it('refuses practice writes to staff without canManageTeam and to outsiders', async () => {
     const input = {
       teamId: orgs.B.teamId,

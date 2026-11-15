@@ -51,7 +51,8 @@
 import { SubscriptionTier } from '@prisma/client';
 
 /**
- * All gated product features. The enum VALUES are the stable UPPER_SNAKE
+ * All named product features, gated by tier (one, PRACTICE_SCHEDULING, is on
+ * every tier today). The enum VALUES are the stable UPPER_SNAKE
  * identifiers exposed by GET /auth/entitlements (`getAllFeatures` keys). The
  * 402 upgrade-hint payload emits the lowercased form (see `featureCode`).
  */
@@ -60,11 +61,13 @@ export enum Feature {
   UNLIMITED_TEAMS = 'UNLIMITED_TEAMS',
   FULL_SEASON_HISTORY = 'FULL_SEASON_HISTORY',
 
+  // Every tier (FREE_FEATURES)
+  PRACTICE_SCHEDULING = 'PRACTICE_SCHEDULING',
+
   // Premium features
   CALENDAR_SYNC = 'CALENDAR_SYNC',
   STATS_EXPORT = 'STATS_EXPORT',
   ADVANCED_STATS = 'ADVANCED_STATS',
-  PRACTICE_SCHEDULING = 'PRACTICE_SCHEDULING',
   AD_FREE = 'AD_FREE',
 
   // League features
@@ -78,11 +81,13 @@ export enum Feature {
 /**
  * Features every tier has. Practice scheduling is table stakes for a team
  * (owner decision 2026-11-15, #33): it stays a named feature behind
- * `requireEntitlement` on the create routes, so making it paid again is a
- * one-line move from here to `PREMIUM_FEATURES`, as the usage caps stay
- * mounted at `Infinity`.
+ * `requireEntitlement` on the create routes, as the usage caps stay mounted
+ * at `Infinity`. To make it paid again, MOVE it: remove it here and add it to
+ * `PREMIUM_FEATURES` (which spreads this set, so leaving it here keeps it
+ * free). Exported only so the API test can take the feature off and prove the
+ * gate is mounted; application code never mutates it.
  */
-const FREE_FEATURES = new Set<Feature>([Feature.PRACTICE_SCHEDULING]);
+export const FREE_FEATURES = new Set<Feature>([Feature.PRACTICE_SCHEDULING]);
 
 const PREMIUM_FEATURES = new Set<Feature>([
   ...FREE_FEATURES,
