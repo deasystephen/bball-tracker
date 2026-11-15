@@ -19,7 +19,7 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   let the hard delete cascade through rows other people rely on, which is what D1 forbids. The
   rule is "nothing references this row", never "no game events". `GameEvent`, `PlayerStats`,
   `TeamMember`, authored announcements and announcement replies stay so other members' stats and
-  threads remain coherent, and any of them keeps the tombstone. The result carries `erased: boolean` (both routes and the operator
+  threads remain coherent, and any of them keeps the tombstone. Game RSVPs and practice availability answers (#33) only serve the person and are purged. The result carries `erased: boolean` (both routes and the operator
   script return it; the runbook's request log records it). Right after commit the account's open
   Socket.io connections are closed (`websocket/io-registry.ts#revokeUserSockets` at once in the
   API process; the revocation sweep within `REVOCATION_SWEEP_INTERVAL_MS` (10 s) for the operator
@@ -63,8 +63,9 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
      branch (#981).
      - **Deleted** (what identifies or reaches the child, or what the child wrote):
        `workosUserId`, `email` (with `EMAIL_SUPPRESSION_CLEARED`) and `emailVerified`;
-       announcement replies the child wrote (the only free text a player authors; the schema
-       holds no chat or messages); `purgeLoginBindings` (push and calendar-feed tokens, pending
+       announcement replies the child wrote and the `comment` on the child's practice availability
+       answers (#33; the answers stay, like RSVPs) — the only free text a player authors; the schema
+       holds no chat or messages; `purgeLoginBindings` (push and calendar-feed tokens, pending
        team invitations `CANCELLED`, `recipientHash` cleared); the photo unless it is an upload
        under the `avatars/<id>/` prefix of the coach or another live staff member of the player's
        active-season teams (external URLs are cleared too, since the identity provider's photo is

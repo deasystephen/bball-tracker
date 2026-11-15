@@ -26,6 +26,7 @@
  *   │    non-empty ──────────────────► LastHeadCoachError 400      │
  *   │ 3  purge: pushToken, calendarFeedToken, teamStaff,           │
  *   │    leagueAdmin (log admin-less leagues), gameRsvp,           │
+ *   │    practiceAvailability (#33),                               │
  *   │    guardian links both ways (+ promote next primary),        │
  *   │    PENDING team invitations → CANCELLED,                     │
  *   │    PENDING guardian + staff invitations → EXPIRED,           │
@@ -114,6 +115,7 @@ export const USER_REFERENCE_COUNT_SELECT = {
   announcements: true,
   announcementReplies: true,
   calendarFeedTokens: true,
+  practiceAvailability: true,
 } satisfies Prisma.UserCountOutputTypeSelect;
 
 /** The erasure check's select: the list-relation counts plus every one-to-one relation that points at the row. */
@@ -242,6 +244,7 @@ export class AccountService {
       // 3. Purge what only serves the person.
       await tx.teamStaff.deleteMany({ where: { userId } });
       await tx.gameRsvp.deleteMany({ where: { userId } });
+      await tx.practiceAvailability.deleteMany({ where: { userId } });
 
       const adminOf = await tx.leagueAdmin.findMany({ where: { userId }, select: { leagueId: true } });
       await tx.leagueAdmin.deleteMany({ where: { userId } });
@@ -623,6 +626,7 @@ export class AccountService {
       staffInvitations,
       sentStaffInvitations,
       gameRsvps,
+      practiceAvailability,
       gameEvents,
       playerStats,
       pushTokens,
@@ -646,6 +650,7 @@ export class AccountService {
       staffInvitationsQuery,
       prisma.staffInvitation.findMany({ where: { invitedById: userId }, select: SENT_STAFF_INVITATION_SELECT }),
       prisma.gameRsvp.findMany({ where: { userId } }),
+      prisma.practiceAvailability.findMany({ where: { userId } }),
       prisma.gameEvent.findMany({ where: { playerId: userId }, orderBy: { createdAt: 'asc' } }),
       prisma.playerStats.findMany({ where: { playerId: userId } }),
       prisma.pushToken.findMany({ where: { userId }, select: { platform: true, createdAt: true, updatedAt: true } }),
@@ -671,6 +676,7 @@ export class AccountService {
       staffInvitations,
       sentStaffInvitations,
       gameRsvps,
+      practiceAvailability,
       gameEvents,
       playerStats,
       pushTokens,
@@ -1196,8 +1202,10 @@ export type UnclaimTarget = Pick<LockedUserRow, 'id' | 'email' | 'workosUserId' 
  *   too: the identity provider's photo is copied at claim time and cannot be
  *   told apart. A cleared photo in our bucket is returned as `removedAvatar`
  *   for deletion, whoever uploaded it, unless another user row still shows it;
- * - announcement replies the child wrote (the only free text a player can
- *   author; announcements themselves are an adult signal the caller refused);
+ * - announcement replies the child wrote (announcements themselves are an
+ *   adult signal the caller refused), and the free-text `comment` on the
+ *   child's practice availability answers (#33; the answer itself stays, like
+ *   an RSVP);
  * - `purgeLoginBindings`: push tokens, calendar feed tokens, pending team
  *   invitations (→ CANCELLED) and their recipient hash;
  * - the child's address on every guardian invitation that carries it, any
@@ -1271,6 +1279,10 @@ export async function unclaimManagedRow(
   }
 
   const replies = await tx.announcementReply.deleteMany({ where: { authorId: userId } });
+  await tx.practiceAvailability.updateMany({
+    where: { userId, comment: { not: null } },
+    data: { comment: null },
+  });
   await purgeLoginBindings(tx, userId);
 
   let expiredGuardianInvitations: ExpiredGuardianInvitation[] = [];
@@ -1470,6 +1482,7 @@ export interface UserDataExport {
   staffInvitations: Prisma.StaffInvitationGetPayload<{ select: typeof STAFF_INVITATION_EXPORT_SELECT }>[];
   sentStaffInvitations: Prisma.StaffInvitationGetPayload<{ select: typeof SENT_STAFF_INVITATION_SELECT }>[];
   gameRsvps: Prisma.GameRsvpGetPayload<Record<string, never>>[];
+  practiceAvailability: Prisma.PracticeAvailabilityGetPayload<Record<string, never>>[];
   gameEvents: Prisma.GameEventGetPayload<Record<string, never>>[];
   playerStats: Prisma.PlayerStatsGetPayload<Record<string, never>>[];
   pushTokens: { platform: string; createdAt: Date; updatedAt: Date }[];

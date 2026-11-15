@@ -136,6 +136,8 @@ Removing the last guardian never deletes the child.
   player and the player is rostered on the game's team; the `GameRsvp` row is keyed on the **player** and the
   confirmation email goes to the guardian. The response row is the child's, projected like
   `GET /games/:id/rsvps`: no `user.email` unless the guardian also has `canManageRoster` (#661).
+  Practice availability (`PUT /practices/:id/availability { status, comment?, playerId? }`, #33) follows the
+  same rule, keyed on the child (`docs/architecture/practice-scheduling.md#access`).
   Team invitations addressed to a child may be accepted/rejected by a guardian, `GET /invitations`
   default scope includes the caller's children, and `listInvitations?playerId=` accepts a child id. `NotificationService.sendToTeam` adds guardians of members (deduped). `PATCH
   /players/:id` lets a guardian change the child's `name` / `profilePictureUrl` (not `email`; jersey stays on

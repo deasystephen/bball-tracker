@@ -1,10 +1,11 @@
 /**
  * Calendar feed service — generates iCalendar (RFC 5545) feeds for a team's
- * games and manages per-user, per-team opaque feed tokens.
+ * games and practices (#33) and manages per-user, per-team opaque feed tokens.
  */
 
 import { randomBytes } from 'crypto';
 import { createEvents, EventAttributes, DateArray } from 'ics';
+import { Prisma } from '@prisma/client';
 import prisma from '../models';
 import { NotFoundError, ForbiddenError, BadRequestError } from '../utils/errors';
 import { canAccessTeam } from '../utils/permissions';
@@ -29,6 +30,20 @@ export const ICAL_PRODUCT_ID = 'hooplings/ical';
 // `/api/v1/...` (`https://api.hooplings.com` in production via the ECS task
 // definition) — not `publicAppUrl()`, the web apex, which serves no API
 // (audit #24). Both live in `utils/urls.ts`.
+
+/** The practice-session columns a feed entry is built from (#33). */
+const FEED_PRACTICE_SELECT = {
+  id: true,
+  type: true,
+  title: true,
+  location: true,
+  notes: true,
+  startsAt: true,
+  durationMinutes: true,
+  status: true,
+  cancelReason: true,
+  updatedAt: true,
+} satisfies Prisma.PracticeSessionSelect;
 
 function dateToDateArray(d: Date): DateArray {
   return [
@@ -198,7 +213,7 @@ export class CalendarService {
   }
 
   /**
-   * Build the iCalendar text for the given team's games.
+   * Build the iCalendar text for the given team's games and practices.
    * Includes SCHEDULED, IN_PROGRESS, and FINISHED games (and CANCELLED ones
    * marked STATUS:CANCELLED so subscribers see cancellations).
    */
@@ -212,10 +227,17 @@ export class CalendarService {
       throw new NotFoundError('Team not found');
     }
 
-    const games = await prisma.game.findMany({
-      where: { teamId },
-      orderBy: { date: 'asc' },
-    });
+    const [games, practices] = await Promise.all([
+      prisma.game.findMany({
+        where: { teamId },
+        orderBy: { date: 'asc' },
+      }),
+      prisma.practiceSession.findMany({
+        where: { teamId },
+        select: FEED_PRACTICE_SELECT,
+        orderBy: { startsAt: 'asc' },
+      }),
+    ]);
 
     const base = publicAppUrl();
 
@@ -247,6 +269,38 @@ export class CalendarService {
         categories: ['Basketball', team.name],
       };
     });
+
+    // Practices and other non-game events (#33). Every session is listed,
+    // past ones included, as games are; a cancelled one is STATUS:CANCELLED so
+    // subscribers see it drop off. The UID prefix keeps them apart from games.
+    for (const practice of practices) {
+      const start = new Date(practice.startsAt);
+      const end = new Date(start.getTime() + practice.durationMinutes * 60 * 1000);
+      const label = practice.type === 'PRACTICE' ? 'Practice' : 'Event';
+      const title = `${team.name}: ${practice.title ?? label}`;
+      const descriptionLines = [
+        practice.status === 'CANCELLED' ? 'Cancelled' : null,
+        practice.status === 'CANCELLED' && practice.cancelReason ? `Reason: ${practice.cancelReason}` : null,
+        practice.notes,
+      ].filter((l): l is string => !!l);
+
+      events.push({
+        uid: `practice-${practice.id}@${ICAL_UID_DOMAIN}`,
+        // Practices are edited one by one (time, place, cancel) under a fixed
+        // UID; LAST-MODIFIED tells a client the event changed. A number is an
+        // absolute instant to the ics library, whatever the host's zone.
+        lastModified: practice.updatedAt.getTime(),
+        start: dateToDateArray(start),
+        startInputType: 'utc',
+        end: dateToDateArray(end),
+        endInputType: 'utc',
+        title,
+        ...(descriptionLines.length > 0 ? { description: descriptionLines.join('\n') } : {}),
+        ...(practice.location ? { location: practice.location } : {}),
+        status: practice.status === 'CANCELLED' ? 'CANCELLED' : 'CONFIRMED',
+        categories: [label, team.name],
+      });
+    }
 
     const { error, value } = createEvents(events, {
       calName: `${team.name} — Basketball Schedule`,

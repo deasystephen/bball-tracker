@@ -14,9 +14,9 @@ import {
 
 describe('Entitlements', () => {
   describe('hasFeature', () => {
-    it('should return false for all features on FREE tier', () => {
+    it('gives FREE practice scheduling (#33, 2026-11-15) and no other feature', () => {
       for (const feature of Object.values(Feature)) {
-        expect(hasFeature('FREE', feature)).toBe(false);
+        expect(hasFeature('FREE', feature)).toBe(feature === Feature.PRACTICE_SCHEDULING);
       }
     });
 
@@ -112,6 +112,10 @@ describe('Entitlements', () => {
       expect(getRequiredTier(Feature.UNLIMITED_TEAMS)).toBe('PREMIUM');
     });
 
+    it('should return FREE for a feature every tier has', () => {
+      expect(getRequiredTier(Feature.PRACTICE_SCHEDULING)).toBe('FREE');
+    });
+
     it('should return LEAGUE for league-only features', () => {
       expect(getRequiredTier(Feature.REGISTRATION_PAYMENTS)).toBe('LEAGUE');
       expect(getRequiredTier(Feature.TOURNAMENT_BRACKETS)).toBe('LEAGUE');
@@ -120,9 +124,11 @@ describe('Entitlements', () => {
   });
 
   describe('getAllFeatures', () => {
-    it('should return all features as false for FREE tier', () => {
+    it('should return every feature but practice scheduling as false for FREE tier', () => {
       const features = getAllFeatures('FREE');
-      expect(Object.values(features).every((v) => v === false)).toBe(true);
+      expect(features.PRACTICE_SCHEDULING).toBe(true);
+      const others = Object.entries(features).filter(([feature]) => feature !== Feature.PRACTICE_SCHEDULING);
+      expect(others.every(([, enabled]) => enabled === false)).toBe(true);
     });
 
     it('should return correct features for PREMIUM tier', () => {

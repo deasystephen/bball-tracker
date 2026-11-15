@@ -36,7 +36,7 @@ tombstoned as described next and the response says `erased: false`. In ONE trans
 - **Removed:** login (`workosUserId`), email, name (→ `Deleted user`), photo (S3 object deleted
   best-effort), email-verified flag, the email's bounce/complaint state (`emailSuppressedAt` /
   `emailSuppressedReason`, #449), subscription, push tokens, calendar-feed tokens, every staff
-  role, every league-admin role, RSVPs, guardian links in both directions (the next guardian of
+  role, every league-admin role, RSVPs and practice availability answers, guardian links in both directions (the next guardian of
   each child becomes primary), pending team invitations addressed to them (→ `CANCELLED`), the
   `recipientHash` (hash of the address an invitation went to, #715) on every team invitation addressed to them,
   pending guardian invitations addressed to them (→ `EXPIRED`), and the email on **every**
@@ -211,7 +211,7 @@ on `deletedAt IS NULL`, so a request that raced the deletion cannot re-identify 
    The export contains: `user`, `personalLeague`, `teamMembers`, `teamStaff`, `leagueAdmins`,
    `guardiansAsParent`, `guardiansAsChild`, `receivedInvitations`, `sentInvitations`,
    `guardianInvitations`, `sentGuardianInvitations`, `staffInvitations`, `sentStaffInvitations`,
-   `gameRsvps`, `gameEvents`, `playerStats`,
+   `gameRsvps`, `practiceAvailability`, `gameEvents`, `playerStats`,
    `pushTokens`, `calendarFeedTokens`, `announcements`, `announcementReplies`
    (`AccountService.exportUserData`; the integration test asserts this list).
 4. **Delete:**
@@ -312,7 +312,8 @@ age in writing from the account's address; the next sign-in asks the question ag
      cleared (the next person to claim the row answers the age question again, #981).
 
      **Kept:** the **name** (a roster record needs one, and it is what the coach entered or sees on
-     the roster; the coach can edit it), roster memberships, game events, statistics, RSVPs,
+     the roster; the coach can edit it), roster memberships, game events, statistics, RSVPs, practice
+     availability answers (their free-text comments are cleared),
      guardian links (an accepted link survives the scrub of its invitation's address), and
      guardian invitations for the child at other addresses. The coach's roster looks the same.
 

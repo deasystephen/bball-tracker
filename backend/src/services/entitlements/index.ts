@@ -17,7 +17,7 @@
  *   CALENDAR_SYNC          | PREMIUM
  *   STATS_EXPORT           | PREMIUM
  *   ADVANCED_STATS         | PREMIUM
- *   PRACTICE_SCHEDULING    | PREMIUM
+ *   PRACTICE_SCHEDULING    | FREE (every tier; decided 2026-11-15, #33)
  *   AD_FREE                | PREMIUM
  *   REGISTRATION_PAYMENTS  | LEAGUE
  *   TOURNAMENT_BRACKETS    | LEAGUE
@@ -51,7 +51,8 @@
 import { SubscriptionTier } from '@prisma/client';
 
 /**
- * All gated product features. The enum VALUES are the stable UPPER_SNAKE
+ * All named product features, gated by tier (one, PRACTICE_SCHEDULING, is on
+ * every tier today). The enum VALUES are the stable UPPER_SNAKE
  * identifiers exposed by GET /auth/entitlements (`getAllFeatures` keys). The
  * 402 upgrade-hint payload emits the lowercased form (see `featureCode`).
  */
@@ -60,11 +61,13 @@ export enum Feature {
   UNLIMITED_TEAMS = 'UNLIMITED_TEAMS',
   FULL_SEASON_HISTORY = 'FULL_SEASON_HISTORY',
 
+  // Every tier (FREE_FEATURES)
+  PRACTICE_SCHEDULING = 'PRACTICE_SCHEDULING',
+
   // Premium features
   CALENDAR_SYNC = 'CALENDAR_SYNC',
   STATS_EXPORT = 'STATS_EXPORT',
   ADVANCED_STATS = 'ADVANCED_STATS',
-  PRACTICE_SCHEDULING = 'PRACTICE_SCHEDULING',
   AD_FREE = 'AD_FREE',
 
   // League features
@@ -75,13 +78,24 @@ export enum Feature {
   MASTER_CALENDAR = 'MASTER_CALENDAR',
 }
 
+/**
+ * Features every tier has. Practice scheduling is table stakes for a team
+ * (owner decision 2026-11-15, #33): it stays a named feature behind
+ * `requireEntitlement` on the create routes, as the usage caps stay mounted
+ * at `Infinity`. To make it paid again, MOVE it: remove it here and add it to
+ * `PREMIUM_FEATURES` (which spreads this set, so leaving it here keeps it
+ * free). Exported only so the API test can take the feature off and prove the
+ * gate is mounted; application code never mutates it.
+ */
+export const FREE_FEATURES = new Set<Feature>([Feature.PRACTICE_SCHEDULING]);
+
 const PREMIUM_FEATURES = new Set<Feature>([
+  ...FREE_FEATURES,
   Feature.UNLIMITED_TEAMS,
   Feature.FULL_SEASON_HISTORY,
   Feature.CALENDAR_SYNC,
   Feature.STATS_EXPORT,
   Feature.ADVANCED_STATS,
-  Feature.PRACTICE_SCHEDULING,
   Feature.AD_FREE,
 ]);
 
@@ -98,7 +112,7 @@ const LEAGUE_FEATURES = new Set<Feature>([
  * Canonical tier -> entitled-features map.
  */
 const TIER_ENTITLEMENTS: Record<SubscriptionTier, Set<Feature>> = {
-  FREE: new Set<Feature>(),
+  FREE: FREE_FEATURES,
   PREMIUM: PREMIUM_FEATURES,
   LEAGUE: LEAGUE_FEATURES,
 };
@@ -177,6 +191,7 @@ export function getEffectiveTier(user: EntitlementUser): SubscriptionTier {
  * Get the minimum tier required for a feature.
  */
 export function getRequiredTier(feature: Feature): SubscriptionTier {
+  if (TIER_ENTITLEMENTS.FREE.has(feature)) return 'FREE';
   if (TIER_ENTITLEMENTS.PREMIUM.has(feature)) return 'PREMIUM';
   if (TIER_ENTITLEMENTS.LEAGUE.has(feature)) return 'LEAGUE';
   return 'FREE';

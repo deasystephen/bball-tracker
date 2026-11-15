@@ -1,6 +1,10 @@
 # Team Practice Schedules — Feature Plan
 
-> Status: **Proposed** — product/architecture plan; not yet implemented.
+> Status: **Phase 1 backend built for #33** (separate practice tables, recurring series with
+> eager bounded materialization, single-session exceptions, series cancel, availability, ICS). The
+> as-built reference is `docs/architecture/practice-scheduling.md`, which supersedes §4, §5 and §9
+> here where they differ (no RRULE string: weekdays + WEEKLY/BIWEEKLY; no `minAttendance` yet).
+> Mobile, the differentiators and notifications are not built.
 >
 > **Tracking issues.** Phase 1 (practice sessions, recurring series, per-session
 > availability, ICS) is scoped and buildable as **#33**. The three differentiators
@@ -48,8 +52,9 @@ target exactly these gaps.
 
 ## 3. Architecture Fit (high reuse)
 
-`Feature.PRACTICE_SCHEDULING` already exists in the entitlements enum (PREMIUM
-tier) — no entitlement plumbing needed. Confirmed reusable assets:
+`Feature.PRACTICE_SCHEDULING` already exists in the entitlements enum — no
+entitlement plumbing needed. (Built: every tier has it, owner decision
+2026-11-15; see `docs/architecture/practice-scheduling.md#entitlement`.) Confirmed reusable assets:
 
 | Need | Reuse | Location |
 | --- | --- | --- |
@@ -203,8 +208,9 @@ Back-relations (`practiceSeries`, `practiceSessions`, `availabilityDefaults`,
 New resource dir `backend/src/api/practice-schedules/` (`routes.ts`,
 `schemas.ts`), service `backend/src/services/practice-schedule-service.ts`,
 mirroring `games/` and `game-service.ts`. All routes behind `authenticate`;
-**write routes** additionally behind `requireEntitlement(Feature.PRACTICE_SCHEDULING)`
-and a `canManageTeam` permission check; **read/availability/ride routes** behind
+**write routes** additionally behind a `canManageTeam` permission check (as built,
+only the two create routes carry `requireEntitlement(Feature.PRACTICE_SCHEDULING)`,
+and every tier has that feature); **read/availability/ride routes** behind
 `canAccessTeam`.
 
 ### Practices
@@ -275,8 +281,9 @@ fallback: compute nudges/alerts lazily on read + a single periodic sweep.
     breakdown (coach), carpool section, cancel/edit (coach).
   - `practices/create.tsx` — coach form (one-off or recurring, min-attendance).
   - `availability-defaults.tsx` — "I can never make…" standing rules.
-- Permissions gate coach-only UI via `hasTeamPermission`. Coach create UI shows
-  the upgrade prompt path on `402` (PREMIUM gate).
+- Permissions gate coach-only UI via `hasTeamPermission`. (Planned as a PREMIUM
+  gate with an upgrade prompt on `402`; built free for every tier, so no
+  upgrade path.)
 - **Maestro E2E** in `.maestro/` (repo requires it for major mobile features):
   login → team → create practice → set availability → assert headcount.
 

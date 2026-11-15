@@ -24,27 +24,49 @@ export type RsvpWithUser = Prisma.GameRsvpGetPayload<{ include: typeof RSVP_INCL
  * the caller's own row); everyone else gets the user summary without `email`
  * (`id, name, isManaged, deletedAt`; role matrix B2.5).
  */
-export type RsvpView = Omit<RsvpWithUser, 'user'> & {
-  user: Omit<RsvpWithUser['user'], 'email'> & { email?: string | null };
+export type RsvpView = EmailProjected<RsvpWithUser>;
+
+/** A row carrying a user summary whose `email` is visible only to some readers. */
+type WithUserEmail = { user: { id: string; email: string | null } };
+
+/** `T` with `user.email` optional: what `toRsvpView` returns. */
+export type EmailProjected<T extends WithUserEmail> = Omit<T, 'user'> & {
+  user: Omit<T['user'], 'email'> & { email?: string | null };
 };
 
 /**
  * The B2.5 projection, shared by the read and the write path so they cannot
  * drift (#661): roster managers and the row's own user keep `user.email`.
+ * Generic so practice availability (#33) projects its rows with the same rule.
  */
-export function toRsvpView(row: RsvpWithUser, callerId: string, canManageRoster: boolean): RsvpView {
-  if (canManageRoster || row.user.id === callerId) return row;
-  const { user, ...rest } = row;
+export function toRsvpView<T extends WithUserEmail>(
+  row: T,
+  callerId: string,
+  canManageRoster: boolean
+): EmailProjected<T> {
+  // `T` is wider than `EmailProjected<T>` (email only becomes optional), so
+  // the unprojected row is returned as is; TypeScript cannot see that through
+  // the generic Omit, hence the casts.
+  if (canManageRoster || row.user.id === callerId) return row as unknown as EmailProjected<T>;
   // Every other field of the shared user summary (deletedAt, #813) stays.
-  const publicUser: RsvpView['user'] = { ...user };
+  const publicUser: Partial<T['user']> = { ...row.user };
   delete publicUser.email;
-  return { ...rest, user: publicUser };
+  return { ...row, user: publicUser } as unknown as EmailProjected<T>;
 }
 
 export interface RsvpSummary {
   yes: number;
   no: number;
   maybe: number;
+}
+
+/** Zero-filled counts from `{ status, count }` pairs (repeats add up). */
+export function toRsvpSummary(counts: Array<{ status: RsvpStatus; count: number }>): RsvpSummary {
+  const summary: RsvpSummary = { yes: 0, no: 0, maybe: 0 };
+  for (const { status, count } of counts) {
+    summary[status.toLowerCase() as keyof RsvpSummary] += count;
+  }
+  return summary;
 }
 
 export interface GameRsvps {
@@ -222,16 +244,7 @@ export class RsvpService {
     // Roster managers see everyone's email; other team members only their own.
     const rsvps: RsvpView[] = rows.map((row) => toRsvpView(row, userId, canManageRoster));
 
-    const summary: RsvpSummary = {
-      yes: 0,
-      no: 0,
-      maybe: 0,
-    };
-
-    for (const count of counts) {
-      const key = count.status.toLowerCase() as keyof RsvpSummary;
-      summary[key] = count._count.status;
-    }
+    const summary = toRsvpSummary(counts.map((c) => ({ status: c.status, count: c._count.status })));
 
     return { rsvps, summary };
   }

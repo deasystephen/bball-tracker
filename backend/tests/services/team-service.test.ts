@@ -1540,6 +1540,10 @@ describe('TeamService', () => {
 
       expect(result).toEqual({ success: true });
       expect(mockPrisma.teamMember.delete).toHaveBeenCalled();
+      // Future practice answers go with the membership, in the same transaction (#33).
+      expect(mockPrisma.practiceAvailability.deleteMany).toHaveBeenCalledWith({
+        where: { userId: expect.any(String), session: { teamId: expect.any(String), startsAt: { gt: expect.any(Date) } } },
+      });
     });
 
     it('should throw NotFoundError if team does not exist', async () => {

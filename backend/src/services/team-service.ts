@@ -1329,15 +1329,23 @@ export class TeamService {
       throw new NotFoundError('Player is not on this team');
     }
 
-    // Remove player from team
-    await prisma.teamMember.delete({
-      where: {
-        teamId_playerId: {
-          teamId,
-          playerId,
+    // Remove player from team, with their answers for this team's practices
+    // that have not happened yet (#33): a later re-add starts from no answer
+    // instead of reviving stale ones in the coach's headcount. Past answers
+    // stay as history.
+    await prisma.$transaction([
+      prisma.teamMember.delete({
+        where: {
+          teamId_playerId: {
+            teamId,
+            playerId,
+          },
         },
-      },
-    });
+      }),
+      prisma.practiceAvailability.deleteMany({
+        where: { userId: playerId, session: { teamId, startsAt: { gt: new Date() } } },
+      }),
+    ]);
 
     logger.info('Roster player removed', { teamId, playerId, userId });
 
