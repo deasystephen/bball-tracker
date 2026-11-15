@@ -194,7 +194,8 @@ eng-review amendments recorded there).
 
 ### Staff invitations by email (#460, club coach onboarding)
 
-`POST /teams/:teamId/staff` still adds an **existing** account only (404 for an unknown address).
+`POST /teams/:teamId/staff` still adds an **existing** account only (404 for an unknown address,
+with code `staff_target_not_found` since #460 so the app can offer an invitation instead).
 `services/staff-invitation-service.ts` invites any address to a staff role through a
 **`StaffInvitation`** row, the third invitation kind next to `TeamInvitation` and
 `GuardianInvitation`. It reuses the same machinery rather than copying it: a random bearer-secret

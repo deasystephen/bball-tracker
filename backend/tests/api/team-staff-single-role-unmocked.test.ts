@@ -116,6 +116,20 @@ describe('POST /api/v1/teams/:teamId/staff — one role per user per team (#463)
     expect(response.body.error).toBe(ALREADY_STAFF);
   });
 
+  it('answers 404 with code staff_target_not_found for an address with no account (#460)', async () => {
+    givenHeadCoachAddingAssistant();
+    (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(null);
+
+    const response = await request(app)
+      .post(`/api/v1/teams/${TEAM_ID}/staff`)
+      .send({ email: 'nobody@example.com', roleType: 'ASSISTANT_COACH' });
+
+    // The app branches on the code to offer a staff invitation; the message is unchanged.
+    expect(response.status).toBe(404);
+    expect(response.body).toEqual({ error: 'User not found', code: 'staff_target_not_found' });
+    expect(mockPrisma.teamStaff.create).not.toHaveBeenCalled();
+  });
+
   it('adds a user who holds no role on the team (201)', async () => {
     givenHeadCoachAddingAssistant();
     givenTargetStaffRow(null);

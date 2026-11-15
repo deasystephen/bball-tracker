@@ -287,6 +287,18 @@ export class SignInRequiredError extends DetailedError<Record<string, never>> {
   }
 }
 
+/**
+ * 404 `staff_target_not_found` — `POST /teams/:teamId/staff` found no live
+ * account for the `userId` / `email` (#460). The app branches on the code to
+ * offer a staff invitation instead; the message is the old plain 404's.
+ */
+export class StaffTargetNotFoundError extends DetailedError<Record<string, never>> {
+  constructor() {
+    super('staff_target_not_found', {}, 'User not found', 404);
+    Object.setPrototypeOf(this, StaffTargetNotFoundError.prototype);
+  }
+}
+
 export class ConflictError extends AppError {
   constructor(message: string = 'Conflict') {
     super(message, 409);
