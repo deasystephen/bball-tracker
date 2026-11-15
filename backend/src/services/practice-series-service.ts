@@ -91,13 +91,17 @@ function dateColumn(value: string): Date {
   return new Date(`${value}T00:00:00.000Z`);
 }
 
-async function findSeriesForWrite(
-  seriesId: string,
-  userId: string
-): Promise<{ id: string; teamId: string; cancelledAt: Date | null }> {
+const SERIES_WRITE_SELECT = {
+  id: true,
+  teamId: true,
+  cancelledAt: true,
+} satisfies Prisma.PracticeSeriesSelect;
+type SeriesForWrite = Prisma.PracticeSeriesGetPayload<{ select: typeof SERIES_WRITE_SELECT }>;
+
+async function findSeriesForWrite(seriesId: string, userId: string): Promise<SeriesForWrite> {
   const series = await prisma.practiceSeries.findUnique({
     where: { id: seriesId },
-    select: { id: true, teamId: true, cancelledAt: true },
+    select: SERIES_WRITE_SELECT,
   });
   if (!series) {
     throw new NotFoundError('Practice series not found');

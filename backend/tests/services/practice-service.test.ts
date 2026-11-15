@@ -304,8 +304,8 @@ describe('PracticeService.updatePractice', () => {
   it('refuses to move a practice to a mistyped year', async () => {
     mockPrisma.practiceSession.findUnique.mockResolvedValue(scheduled);
     await expect(
-      PracticeService.updatePractice(SESSION, { startsAt: '2031-02-01T23:00:00Z' }, USER)
-    ).rejects.toThrow('startsAt must be within the next 366 days');
+      PracticeService.updatePractice(SESSION, { startsAt: '2032-01-01T23:00:00Z' }, USER)
+    ).rejects.toThrow('startsAt must be within the next 732 days');
     await expect(
       PracticeService.updatePractice(SESSION, { startsAt: '2029-11-01T23:00:00Z' }, USER)
     ).rejects.toThrow('startsAt must be within the last 31 days');

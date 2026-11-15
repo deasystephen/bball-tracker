@@ -44,10 +44,12 @@ function formatterFor(timeZone: string): Intl.DateTimeFormat {
 }
 
 /**
- * A region zone ("America/New_York") or UTC. Never a fixed offset: a bare
- * "+05:30" or an "Etc/GMT+5" would silently ignore daylight saving.
+ * The resolved names refused: a bare UTC offset ("+05:30") and the
+ * fixed-offset `Etc/GMT±n` zones, which would silently ignore daylight saving.
+ * Every other name the runtime knows passes, aliases ("US/Eastern", "Japan",
+ * "EST5EDT") included, whether or not the runtime folds them to a region name.
  */
-const REGION_ZONE_RE = /^(?:UTC|(?!Etc\/GMT[+-])[A-Za-z]+(?:\/[A-Za-z0-9_+-]+)+)$/;
+const FIXED_OFFSET_RE = /^(?:[+-]\d|Etc\/GMT[+-])/;
 
 /**
  * The runtime's name for `timeZone`, case-normalized ("america/new_york" gives
@@ -64,7 +66,7 @@ export function canonicalTimeZone(timeZone: string): string | null {
   } catch {
     return null;
   }
-  return REGION_ZONE_RE.test(resolved) ? resolved : null;
+  return FIXED_OFFSET_RE.test(resolved) ? null : resolved;
 }
 
 /** True when `canonicalTimeZone` accepts `timeZone`. */

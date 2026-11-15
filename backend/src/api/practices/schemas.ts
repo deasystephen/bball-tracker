@@ -6,17 +6,22 @@
 
 import { z } from 'zod';
 import { PracticeFrequency, PracticeStatus, PracticeType, RsvpStatus } from '@prisma/client';
-import { canonicalTimeZone, isValidTimeZone, parseLocalDate, daysBetween } from '../../utils/zoned-time';
+import { canonicalTimeZone, parseLocalDate, daysBetween } from '../../utils/zoned-time';
 
 /** Most sessions one series may materialize. */
 export const MAX_SERIES_OCCURRENCES = 100;
 /** Furthest a series' endDate may be from its startDate, in days. */
 export const MAX_SERIES_SPAN_DAYS = 366;
-/** How far from now a single practice may be scheduled or moved, in days (a mistyped year is refused). */
-export const MAX_PRACTICE_PAST_DAYS = 31;
-export const MAX_PRACTICE_FUTURE_DAYS = 366;
 /** Furthest in the future a series may start, in days. */
 export const MAX_SERIES_LEAD_DAYS = 366;
+/**
+ * How far from now a single practice may be scheduled or moved, in days (a
+ * mistyped year is refused). The future bound reaches the last session a
+ * series can create (a start 366 days out plus a 366-day span), so any
+ * occurrence can be rescheduled.
+ */
+export const MAX_PRACTICE_PAST_DAYS = 31;
+export const MAX_PRACTICE_FUTURE_DAYS = MAX_SERIES_LEAD_DAYS + MAX_SERIES_SPAN_DAYS;
 /**
  * Furthest in the past a series may start, in days: room to record the last
  * few weeks, but not a year of past sessions that a series cancel (which
@@ -55,8 +60,14 @@ const timezoneSchema = z
   .string()
   .min(1, 'timezone is required')
   .max(64, TIMEZONE_MESSAGE)
-  .refine(isValidTimeZone, { message: TIMEZONE_MESSAGE })
-  .transform((value) => canonicalTimeZone(value) ?? value);
+  .transform((value, ctx) => {
+    const canonical = canonicalTimeZone(value);
+    if (canonical === null) {
+      ctx.addIssue({ code: 'custom', message: TIMEZONE_MESSAGE });
+      return z.NEVER;
+    }
+    return canonical;
+  });
 
 const durationSchema = z
   .number()

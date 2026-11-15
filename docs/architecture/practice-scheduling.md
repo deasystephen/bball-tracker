@@ -42,7 +42,8 @@ No team or league stores a time zone, and ECS runs in UTC, so a series carries i
 `timezone` (the client sends the device zone, `Intl.DateTimeFormat().resolvedOptions().timeZone`).
 The schema stores the runtime's canonical name (`zoned-time.ts#canonicalTimeZone`:
 `america/new_york` becomes `America/New_York`; Node 22 also folds aliases such as `US/Eastern`) and refuses
-a fixed offset (`-05:00`, `Etc/GMT+5`), which would ignore daylight saving. Only canonical names reach the formatter cache, so a
+a fixed offset (`-05:00`, `Etc/GMT+5`), which would ignore daylight saving; every other name the
+runtime knows passes, aliases included. Only canonical names reach the formatter cache, so a
 client cannot grow it by sending spellings.
 `utils/practice-recurrence.ts#expandRecurrence` walks the local calendar from `startDate`, keeps the
 chosen weekdays (BIWEEKLY: every other Monday-to-Sunday week, RFC 5545's default `WKST=MO`, so a
@@ -74,7 +75,7 @@ on, like games. The coach creates a new series on the new season's team.
 
 | Action | Effect |
 | --- | --- |
-| `PATCH /practices/:id` | Edits one session. On a series occurrence it sets `isException = true` and adds the edited field names to `exceptionFields`. `startsAt` must stay within 31 days back and 366 ahead of now (a mistyped year), on create too. A cancelled session is not editable (400). |
+| `PATCH /practices/:id` | Edits one session. On a series occurrence it sets `isException = true` and adds the edited field names to `exceptionFields`. `startsAt` must stay within 31 days back and 732 ahead of now (a mistyped year; 732 reaches the last session a series can create), on create too. A cancelled session is not editable (400). |
 | `PATCH /practice-series/:id` | "Edit all future": `type`, `title`, `location`, `notes` on the series and on every session with `startsAt > now` and `status = SCHEDULED`, in one transaction; an exception takes every edited field except the ones in its own `exceptionFields` (a notes-only exception still follows a new location). Dates, times and weekdays are not editable on a series (cancel it and create a new one). 400 on a cancelled series. Answers `{ series, updatedSessions }`. |
 | `POST /practices/:id/cancel` | `status = CANCELLED`, `cancelledAt`, optional `reason`. Status-guarded, so a repeat keeps the first time and reason. The row and its answers stay. |
 | `DELETE /practices/:id` | Deletes the session and its answers. |
@@ -163,6 +164,21 @@ child's availability answers but clears their free-text `comment`.
   The plan's targeted nudges and minimum-attendance alerts are #332 and need a job runner.
 - Mobile UI, `mobile/` types and the Maestro flow (the next PR).
 - Socket.io updates for practices.
+
+## Open questions for the owner
+
+Recorded on #33; each is a one-place change.
+
+- **Entitlement**: create is PREMIUM per caller, with no purchase path (#41); FREE coaches, and a FREE
+  assistant on a PREMIUM head coach's team, get 402.
+- **Series cancel** deletes future sessions (subscribers see them vanish) rather than marking them
+  `CANCELLED` with a reason.
+- **Calendar feed** carries practice `LOCATION` and notes; the feed URL is a bearer link a parent may
+  paste into a shared calendar.
+- **Late answers**: availability can still be set on a session that has already happened.
+- **Guardian-written comments** live on the child's row (keyed on the child), so they survive the
+  guardian's own account deletion and are not in the guardian's export; nothing records who wrote
+  an answer.
 
 ## What the mobile PR builds
 

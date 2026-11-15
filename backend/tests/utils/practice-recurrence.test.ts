@@ -84,6 +84,9 @@ describe('zoned-time helpers', () => {
     expect(canonicalTimeZone('america/NEW_york')).toBe('America/New_York');
     expect(canonicalTimeZone('Etc/GMT+5')).toBeNull(); // a fixed offset, no DST
     expect(isValidTimeZone('Etc/UTC')).toBe(true);
+    // Single-segment names that observe DST pass whether or not the runtime folds them.
+    expect(isValidTimeZone('EST5EDT')).toBe(true);
+    expect(isValidTimeZone('Japan')).toBe(true);
     expect(canonicalTimeZone('+05:30')).toBeNull();
   });
 
