@@ -83,13 +83,14 @@ describe('zoned-time helpers', () => {
     expect(canonicalTimeZone('america/NEW_york')).toBe('America/New_York');
     expect(canonicalTimeZone('Etc/GMT+5')).toBeNull(); // a fixed offset, no DST
     expect(canonicalTimeZone('Etc/UTC')).not.toBeNull();
-    // Single-segment names that observe DST pass whether or not the runtime folds them.
-    expect(canonicalTimeZone('EST5EDT')).not.toBeNull();
-    expect(canonicalTimeZone('Japan')).not.toBeNull();
-    // Bare abbreviations are ambiguous, and EST/MST/HST resolve to zones without DST.
+    // Only Area/Location (what devices report) or UTC/GMT, in any case: bare
+    // names are ambiguous, and est/mst/hst resolve to zones without DST.
     expect(canonicalTimeZone('EST')).toBeNull();
+    expect(canonicalTimeZone('est')).toBeNull();
     expect(canonicalTimeZone('HST')).toBeNull();
+    expect(canonicalTimeZone('Japan')).toBeNull();
     expect(canonicalTimeZone('GMT')).toBe('UTC');
+    expect(canonicalTimeZone('utc')).toBe('UTC');
     expect(canonicalTimeZone('+05:30')).toBeNull();
   });
 

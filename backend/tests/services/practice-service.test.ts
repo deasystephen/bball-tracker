@@ -349,13 +349,37 @@ describe('PracticeService.updatePractice', () => {
 
   it('refuses to move a practice to a mistyped year', async () => {
     mockPrisma.practiceSession.findUnique.mockResolvedValue(scheduled);
+    lockReads({ cancelledAt: null }, lockedRow());
     await expect(
       PracticeService.updatePractice(SESSION, { startsAt: '2032-01-01T23:00:00Z' }, USER)
     ).rejects.toThrow('startsAt must be within the next 732 days');
+    lockReads({ cancelledAt: null }, lockedRow());
     await expect(
       PracticeService.updatePractice(SESSION, { startsAt: '2029-11-01T23:00:00Z' }, USER)
     ).rejects.toThrow('startsAt must be within the last 31 days');
-    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    expect(mockPrisma.practiceSession.update).not.toHaveBeenCalled();
+  });
+
+  it('accepts an unchanged startsAt on an old session (a full-form save that only adds notes)', async () => {
+    const old = new Date('2029-10-01T23:00:00Z'); // 80 days before the frozen now
+    mockPrisma.practiceSession.findUnique.mockResolvedValue(scheduled);
+    lockReads({ cancelledAt: null }, lockedRow({ startsAt: old }));
+    mockPrisma.practiceSession.update.mockResolvedValue(practiceRow({ seriesId: SERIES }));
+    await PracticeService.updatePractice(SESSION, { startsAt: old.toISOString(), notes: 'Worked on zone defence' }, USER);
+    expect(mockPrisma.practiceSession.update.mock.calls[0][0].data.exceptionFields).toEqual(['notes']);
+  });
+
+  it('lets a descriptive field set back to the series value follow the series again', async () => {
+    mockPrisma.practiceSession.findUnique.mockResolvedValue(scheduled);
+    lockReads(
+      { cancelledAt: null, type: 'PRACTICE', title: null, location: 'Gym A', notes: null } as never,
+      lockedRow({ location: 'Gym B', exceptionFields: ['location', 'startsAt'] })
+    );
+    mockPrisma.practiceSession.update.mockResolvedValue(practiceRow({ seriesId: SERIES }));
+    await PracticeService.updatePractice(SESSION, { location: 'Gym A' }, USER);
+    expect(mockPrisma.practiceSession.update.mock.calls[0][0].data).toEqual(
+      expect.objectContaining({ isException: true, exceptionFields: ['startsAt'] })
+    );
   });
 
   it('refuses a session of a cancelled series, and one cancelled or deleted under the lock', async () => {

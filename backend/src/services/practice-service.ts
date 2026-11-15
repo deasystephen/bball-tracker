@@ -52,6 +52,15 @@ export const PRACTICE_EXCEPTION_FIELDS = [
   'timezone',
 ] as const;
 
+/** The series fields a session can inherit, as `updatePractice` reads them under the series lock. */
+const SERIES_DEFAULT_FIELDS = ['type', 'title', 'location', 'notes'] as const;
+type SeriesDefaults = {
+  type: string;
+  title: string | null;
+  location: string | null;
+  notes: string | null;
+};
+
 /** A session row as `updatePractice` reads it under its lock. */
 type LockedSession = {
   status: string;
@@ -314,17 +323,16 @@ export class PracticeService {
     if (session.status === 'CANCELLED') {
       throw new BadRequestError('A cancelled practice cannot be edited');
     }
-    if (data.startsAt !== undefined) {
-      assertPracticeStartInRange(new Date(data.startsAt));
-    }
-
     const practice = await prisma.$transaction(async (tx) => {
+      let seriesDefaults: SeriesDefaults | null = null;
       if (session.seriesId) {
-        const series = await tx.$queryRaw<Array<{ cancelledAt: Date | null }>>`
-          SELECT "cancelledAt" FROM "PracticeSeries" WHERE "id" = ${session.seriesId} FOR NO KEY UPDATE`;
+        const series = await tx.$queryRaw<Array<SeriesDefaults & { cancelledAt: Date | null }>>`
+          SELECT "cancelledAt", "type", "title", "location", "notes"
+          FROM "PracticeSeries" WHERE "id" = ${session.seriesId} FOR NO KEY UPDATE`;
         if (series[0]?.cancelledAt) {
           throw new BadRequestError('This practice series was cancelled');
         }
+        seriesDefaults = series[0] ?? null;
       }
       const rows = await tx.$queryRaw<Array<LockedSession>>`
         SELECT "status", "exceptionFields", "type", "title", "location", "notes", "startsAt",
@@ -338,7 +346,20 @@ export class PracticeService {
         throw new BadRequestError('A cancelled practice cannot be edited');
       }
 
-      const overrides = [...new Set([...locked.exceptionFields, ...changedFields(locked, data)])].sort();
+      // Range-check startsAt only when it moves: a full-form save of an old
+      // session sends its unchanged start back.
+      const changed = changedFields(locked, data);
+      if (changed.includes('startsAt')) {
+        assertPracticeStartInRange(new Date(data.startsAt as string));
+      }
+      // A descriptive field set back to the series' own value follows the
+      // series again; anything else edited stays overridden.
+      const backToSeries = seriesDefaults
+        ? SERIES_DEFAULT_FIELDS.filter((field) => data[field] !== undefined && data[field] === seriesDefaults[field])
+        : [];
+      const overrides = [...new Set([...locked.exceptionFields, ...changed])]
+        .filter((field) => !(backToSeries as string[]).includes(field))
+        .sort();
       return tx.practiceSession.update({
         where: { id: sessionId },
         data: {
@@ -486,7 +507,7 @@ export class PracticeService {
         // And the membership, so a concurrent removePlayer (which purges future
         // answers with the membership) cannot be undone by this write.
         const stillMember = await tx.$queryRaw<Array<{ id: string }>>`
-          SELECT "id" FROM "TeamMember" WHERE "teamId" = ${session.teamId} AND "playerId" = ${subjectId} FOR SHARE`;
+          SELECT "id" FROM "TeamMember" WHERE "teamId" = ${session.teamId} AND "playerId" = ${subjectId} FOR KEY SHARE`;
         if (!stillMember[0]) {
           throw new ForbiddenError('This player is not on the team for this practice');
         }

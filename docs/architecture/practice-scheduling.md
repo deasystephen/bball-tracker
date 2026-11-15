@@ -42,9 +42,10 @@ No team or league stores a time zone, and ECS runs in UTC, so a series carries i
 `timezone` (the client sends the device zone, `Intl.DateTimeFormat().resolvedOptions().timeZone`).
 The schema stores the runtime's canonical name (`zoned-time.ts#canonicalTimeZone`:
 `america/new_york` becomes `America/New_York`; Node 22 also folds aliases such as `US/Eastern`) and refuses
-a fixed offset (`-05:00`, `Etc/GMT+5`), which would ignore daylight saving, and bare upper-case
-abbreviations (`EST` resolves to America/Panama, which has none); every other name the runtime knows
-passes, aliases included. Create and answer bodies are `.strict()`: an unknown key is a 400. Only canonical names reach the formatter cache, so a
+a fixed offset (`-05:00`, `Etc/GMT+5`), which would ignore daylight saving. Input must be an
+`Area/Location` name (what every device reports) or UTC/GMT, in any case: bare names are refused,
+because abbreviations are ambiguous and several resolve to a zone without daylight saving (`est` is
+America/Panama). Create and answer bodies are `.strict()`: an unknown key is a 400. Only canonical names reach the formatter cache, so a
 client cannot grow it by sending spellings.
 `utils/practice-recurrence.ts#expandRecurrence` walks the local calendar from `startDate`, keeps the
 chosen weekdays (BIWEEKLY: every other Monday-to-Sunday week, RFC 5545's default `WKST=MO`, so a
@@ -76,7 +77,7 @@ on, like games. The coach creates a new series on the new season's team.
 
 | Action | Effect |
 | --- | --- |
-| `PATCH /practices/:id` | Edits one session. On a series occurrence it sets `isException = true` and adds to `exceptionFields` the fields whose value actually changed (a full-form submit that only moves the time pins only `startsAt`; a save that changed nothing leaves `isException` false). `startsAt` must stay within 31 days back and 732 ahead of now (a mistyped year; 732 reaches the last session a series can create), on create too. A cancelled session is not editable (400). |
+| `PATCH /practices/:id` | Edits one session. On a series occurrence it sets `isException = true` and adds to `exceptionFields` the fields whose value actually changed (a full-form submit that only moves the time pins only `startsAt`; a save that changed nothing leaves `isException` false; a `type`/`title`/`location`/`notes` set back to the series' own value drops out of `exceptionFields` and follows the series again). The `startsAt` window is checked only when the value moves, so an old session can still be saved with its unchanged start. A form loaded before a series-wide edit and saved after it can still pin the old value: there is no version precondition. `startsAt` must stay within 31 days back and 732 ahead of now (a mistyped year; 732 reaches the last session a series can create), on create too. A cancelled session is not editable (400). |
 | `PATCH /practice-series/:id` | "Edit all future": `type`, `title`, `location`, `notes` on the series and on every session with `startsAt > now` and `status = SCHEDULED`, in one transaction; an exception takes every edited field except the ones in its own `exceptionFields` (a notes-only exception still follows a new location). Dates, times and weekdays are not editable on a series (cancel it and create a new one). 400 on a cancelled series. Answers `{ series, updatedSessions }`. |
 | `POST /practices/:id/cancel` | `status = CANCELLED`, `cancelledAt`, optional `reason`. Status-guarded, so a repeat keeps the first time and reason. The row and its answers stay. |
 | `DELETE /practices/:id` | Deletes the session and its answers. |
@@ -91,7 +92,8 @@ session of a cancelled series (400), so history cannot be moved back into the sc
 edit also re-checks `exceptionFields` in each write's `WHERE`. An availability answer takes
 `SELECT status … FOR SHARE` on the session (and `FOR SHARE` on the player's `User` row, refusing a
 tombstone, so account deletion's purge cannot be undone by an in-flight answer, and `FOR SHARE` on
-the `TeamMember` row, so a concurrent roster removal's purge cannot be either) in the same
+the `TeamMember` row (`FOR KEY SHARE`, which fences the delete but not jersey/position edits), so a
+concurrent roster removal's purge cannot be either) in the same
 transaction as its write and its read-back, so a cancel or a
 delete either waits for it or is seen by it (400 / 404), never slips in between. Availability upserts carry no
 `include`, so Prisma compiles them to `INSERT … ON CONFLICT` and two first answers at once both land

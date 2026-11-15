@@ -44,20 +44,19 @@ function formatterFor(timeZone: string): Intl.DateTimeFormat {
 }
 
 /**
- * The resolved names refused: a bare UTC offset ("+05:30") and the
- * fixed-offset `Etc/GMT±n` zones, which would silently ignore daylight saving.
- * Every other name the runtime knows passes, aliases ("US/Eastern", "Japan",
- * "EST5EDT") included, whether or not the runtime folds them to a region name.
+ * The resolved names refused: the fixed-offset `Etc/GMT±n` zones, which would
+ * silently ignore daylight saving.
  */
 const FIXED_OFFSET_RE = /^(?:[+-]\d|Etc\/GMT[+-])/;
 
 /**
- * Bare upper-case abbreviations ("EST", "MST", "HST", "CET") are refused as
- * input: they are ambiguous, and several resolve to a zone without daylight
- * saving ("EST" is America/Panama), so a New York coach sending "EST" would
- * drift an hour every summer. UTC and GMT stay accepted.
+ * Accepted input: an "Area/Location" name (what every device reports) or
+ * UTC/GMT, in any case. Bare names are refused: abbreviations are ambiguous
+ * and several resolve to a zone without daylight saving ("est" is
+ * America/Panama), so a New York coach sending one would drift an hour every
+ * summer; offsets ("+05:30") have no DST at all.
  */
-const ABBREVIATION_RE = /^(?!UTC$|GMT$|UCT$)[A-Z]{2,5}$/;
+const ACCEPTED_INPUT_RE = /^(?:utc|gmt|[a-z_]+(?:\/[a-z0-9_+-]+)+)$/i;
 
 /**
  * The runtime's name for `timeZone`, case-normalized ("america/new_york" gives
@@ -67,7 +66,7 @@ const ABBREVIATION_RE = /^(?!UTC$|GMT$|UCT$)[A-Z]{2,5}$/;
  * uncached formatter, so arbitrary client input never grows the cache.
  */
 export function canonicalTimeZone(timeZone: string): string | null {
-  if (!timeZone || ABBREVIATION_RE.test(timeZone)) return null;
+  if (!timeZone || !ACCEPTED_INPUT_RE.test(timeZone)) return null;
   let resolved: string;
   try {
     resolved = new Intl.DateTimeFormat('en-US', { timeZone }).resolvedOptions().timeZone;
