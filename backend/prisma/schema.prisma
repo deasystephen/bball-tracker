@@ -691,8 +691,9 @@ enum PracticeStatus {
   CANCELLED
 }
 
-/// The simplified recurrence rule: every week, or every other week counted
-/// from the week (Monday to Sunday) that holds the series' startDate.
+/// The simplified recurrence rule: every week, or every other Monday-to-Sunday
+/// week counted from the week of the first chosen weekday on or after the
+/// series' startDate (`utils/practice-recurrence.ts`).
 enum PracticeFrequency {
   WEEKLY
   BIWEEKLY

@@ -267,8 +267,8 @@ export class PracticeService {
    * editable.
    *
    *   $transaction
-   *     SELECT … FROM "PracticeSeries" FOR UPDATE   (when in a series)
-   *     SELECT … FROM "PracticeSession" FOR UPDATE
+   *     SELECT … FROM "PracticeSeries" FOR NO KEY UPDATE   (when in a series)
+   *     SELECT … FROM "PracticeSession" FOR NO KEY UPDATE
    *     UPDATE, exceptionFields = locked ∪ edited
    *
    * Series first, then session: the order updateSeries and cancelSeries take,
@@ -292,13 +292,13 @@ export class PracticeService {
     const practice = await prisma.$transaction(async (tx) => {
       if (session.seriesId) {
         const series = await tx.$queryRaw<Array<{ cancelledAt: Date | null }>>`
-          SELECT "cancelledAt" FROM "PracticeSeries" WHERE "id" = ${session.seriesId} FOR UPDATE`;
+          SELECT "cancelledAt" FROM "PracticeSeries" WHERE "id" = ${session.seriesId} FOR NO KEY UPDATE`;
         if (series[0]?.cancelledAt) {
           throw new BadRequestError('This practice series was cancelled');
         }
       }
       const rows = await tx.$queryRaw<Array<{ status: string; exceptionFields: string[] }>>`
-        SELECT "status", "exceptionFields" FROM "PracticeSession" WHERE "id" = ${sessionId} FOR UPDATE`;
+        SELECT "status", "exceptionFields" FROM "PracticeSession" WHERE "id" = ${sessionId} FOR NO KEY UPDATE`;
       const locked = rows[0];
       if (!locked) {
         throw new NotFoundError('Practice not found');
@@ -435,22 +435,36 @@ export class PracticeService {
 
     let written: { id: string };
     try {
-      // No `include`: a plain upsert compiles to INSERT … ON CONFLICT, so two
-      // first answers at once (a double tap, a guardian and the player) both
-      // land instead of one failing on the unique key. No P2002 retry.
-      written = await prisma.practiceAvailability.upsert({
-        where: { sessionId_userId: { sessionId, userId: subjectId } },
-        create: { sessionId, userId: subjectId, status: data.status, comment: data.comment ?? null },
-        update: {
-          status: data.status,
-          ...(data.comment !== undefined ? { comment: data.comment } : {}),
-        },
-        select: { id: true },
+      written = await prisma.$transaction(async (tx) => {
+        // FOR SHARE: a cancel (an UPDATE) or a delete waits for this answer to
+        // commit, or this waits for them and then sees the new state, so an
+        // answer never lands on a session that was cancelled under it.
+        const locked = await tx.$queryRaw<Array<{ status: string }>>`
+          SELECT "status" FROM "PracticeSession" WHERE "id" = ${sessionId} FOR SHARE`;
+        if (!locked[0]) {
+          throw new NotFoundError('Practice not found');
+        }
+        if (locked[0].status === 'CANCELLED') {
+          throw new BadRequestError('This practice was cancelled');
+        }
+        // No `include`: a plain upsert compiles to INSERT … ON CONFLICT, so two
+        // first answers at once (a double tap, a guardian and the player) both
+        // land instead of one failing on the unique key. No P2002 retry.
+        return tx.practiceAvailability.upsert({
+          where: { sessionId_userId: { sessionId, userId: subjectId } },
+          create: { sessionId, userId: subjectId, status: data.status, comment: data.comment ?? null },
+          update: {
+            status: data.status,
+            ...(data.comment !== undefined ? { comment: data.comment } : {}),
+          },
+          select: { id: true },
+        });
       });
     } catch (err) {
-      // The session was deleted (series cancel, coach delete) after the read.
+      // The player's row was hard-deleted after the roster check (the session
+      // row is locked above, so it cannot be the one that vanished).
       if (isForeignKeyViolation(err)) {
-        throw new NotFoundError('Practice not found');
+        throw new NotFoundError('Player not found');
       }
       throw err;
     }

@@ -83,10 +83,12 @@ on, like games. The coach creates a new series on the new season's team.
 
 Both series writes are guarded on `cancelledAt IS NULL` inside the transaction, so a cancel that
 commits first wins and a concurrent series edit answers 400 instead of touching history. A single
-edit runs in a transaction that takes `SELECT … FOR UPDATE` on the series row and then the session
-row (the order the series writes take), merges `exceptionFields` from the locked row, and refuses a
+edit runs in a transaction that takes `SELECT … FOR NO KEY UPDATE` on the series row and then the
+session row (`NO KEY`, so it never blocks an availability insert's foreign-key check) (the order the series writes take), merges `exceptionFields` from the locked row, and refuses a
 session of a cancelled series (400), so history cannot be moved back into the schedule. The series
-edit also re-checks `exceptionFields` in each write's `WHERE`. Availability upserts carry no
+edit also re-checks `exceptionFields` in each write's `WHERE`. An availability answer takes
+`SELECT status … FOR SHARE` on the session in the same transaction as its write, so a cancel or a
+delete either waits for it or is seen by it (400 / 404), never slips in between. Availability upserts carry no
 `include`, so Prisma compiles them to `INSERT … ON CONFLICT` and two first answers at once both land
 (verified against Postgres in the real-database suite; there is no P2002 retry).
 
@@ -128,7 +130,8 @@ practices free is a one-line move of `PRACTICE_SCHEDULING` in `services/entitlem
 `CalendarService.buildFeed` lists every session of the team after the games:
 UID `practice-<id>@hooplings.com` (frozen, like `game-`), `DTSTART`/`DTEND` in UTC from `startsAt`
 and `durationMinutes`, `SUMMARY` `<team>: <title>` or `<team> practice` / `<team> team event`,
-`LOCATION`, notes in `DESCRIPTION`, `STATUS:CONFIRMED` or `STATUS:CANCELLED` with the reason.
+`LOCATION`, notes in `DESCRIPTION`, `STATUS:CONFIRMED` or `STATUS:CANCELLED` with the reason, and
+`SEQUENCE` / `LAST-MODIFIED` from `updatedAt`, so a client sees an edited practice as changed.
 Deleted sessions (a cancelled series' future) simply leave the feed.
 
 ## API

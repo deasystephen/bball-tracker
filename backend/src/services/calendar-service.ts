@@ -42,6 +42,7 @@ const FEED_PRACTICE_SELECT = {
   durationMinutes: true,
   status: true,
   cancelReason: true,
+  updatedAt: true,
 } satisfies Prisma.PracticeSessionSelect;
 
 function dateToDateArray(d: Date): DateArray {
@@ -285,6 +286,10 @@ export class CalendarService {
 
       events.push({
         uid: `practice-${practice.id}@${ICAL_UID_DOMAIN}`,
+        // Practices are edited one by one (time, place, cancel) under a fixed
+        // UID; a rising SEQUENCE tells a client the event changed.
+        sequence: Math.floor(practice.updatedAt.getTime() / 1000),
+        lastModified: dateToDateArray(practice.updatedAt),
         start: dateToDateArray(start),
         startInputType: 'utc',
         end: dateToDateArray(end),

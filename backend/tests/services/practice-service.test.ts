@@ -265,8 +265,8 @@ describe('PracticeService.updatePractice', () => {
 
     expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
     const sql = mockPrisma.$queryRaw.mock.calls.map((call) => (call[0] as TemplateStringsArray).join('?'));
-    expect(sql[0]).toMatch(/FROM "PracticeSeries" WHERE "id" = \? FOR UPDATE/);
-    expect(sql[1]).toMatch(/FROM "PracticeSession" WHERE "id" = \? FOR UPDATE/);
+    expect(sql[0]).toMatch(/FROM "PracticeSeries" WHERE "id" = \? FOR NO KEY UPDATE/);
+    expect(sql[1]).toMatch(/FROM "PracticeSession" WHERE "id" = \? FOR NO KEY UPDATE/);
     expect(mockPrisma.practiceSession.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: SESSION },
@@ -511,7 +511,21 @@ describe('PracticeService.upsertAvailability', () => {
     );
   });
 
-  it('maps a session deleted mid-request (P2003, or gone before the re-read) to 404 and rethrows the rest', async () => {
+  it('re-checks the session under FOR SHARE: cancelled meanwhile → 400, deleted meanwhile → 404', async () => {
+    mockPrisma.$queryRaw.mockResolvedValueOnce([{ status: 'CANCELLED' }]);
+    await expect(PracticeService.upsertAvailability(SESSION, USER, { status: 'YES' })).rejects.toThrow(
+      'This practice was cancelled'
+    );
+    mockPrisma.$queryRaw.mockResolvedValueOnce([]);
+    await expect(PracticeService.upsertAvailability(SESSION, USER, { status: 'YES' })).rejects.toThrow(
+      'Practice not found'
+    );
+    const sql = (mockPrisma.$queryRaw.mock.calls[0][0] as TemplateStringsArray).join('?');
+    expect(sql).toMatch(/FROM "PracticeSession" WHERE "id" = \? FOR SHARE/);
+    expect(mockPrisma.practiceAvailability.upsert).not.toHaveBeenCalled();
+  });
+
+  it('maps a session deleted mid-request (P2003 on the player key, or gone before the re-read) to 404 and rethrows the rest', async () => {
     mockPrisma.practiceAvailability.upsert.mockReset();
     mockPrisma.practiceAvailability.upsert.mockRejectedValueOnce(knownError('P2003'));
     await expect(PracticeService.upsertAvailability(SESSION, USER, { status: 'YES' })).rejects.toBeInstanceOf(
