@@ -46,13 +46,6 @@ export const REVOCATION_SWEEP_INTERVAL_MS = 10 * 1000;
 /** User ids per sweep query; more open users than this take more than one. */
 export const REVOCATION_SWEEP_CHUNK = 1000;
 /**
- * A sweep still running after this long no longer blocks the next one, so a
- * query that never settles (a half-open connection) cannot stop the sweep
- * for the life of the process.
- */
-export const REVOCATION_SWEEP_STALL_MS = 60 * 1000;
-
-/**
  * The columns the sweep reads: the handshake's (`AUTH_USER_SELECT`, so a
  * column added for a gate reaches the sweep too) plus the WorkOS id.
  */
@@ -99,25 +92,45 @@ export function sessionRevoked(socket: GameSocket, row: SocketRevocationRow | un
  * the sweep closes what it missed.
  */
 export function revokeLocalUserSockets(io: SocketServer, userId: string): number {
+  let closed = 0;
   try {
-    const sockets = localSockets(io).filter((socket) => socket.data.user.id === userId);
-    for (const socket of sockets) requireReauth(socket, 'revoked');
-    if (sockets.length > 0) {
-      logger.info('Socket sessions revoked', { userId, count: sockets.length });
+    for (const socket of localSockets(io)) {
+      if (socket.data.user.id === userId && cut(socket)) closed += 1;
     }
-    return sockets.length;
   } catch (error) {
-    logger.warn('Socket revocation failed; the sweep will close them', {
-      userId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return 0;
+    reportDefect(error, { userId });
+  }
+  if (closed > 0) {
+    logger.info('Socket sessions revoked', { userId, count: closed });
+  }
+  return closed;
+}
+
+/**
+ * Cut one socket; false if that threw. One socket's failure never stops the
+ * others being cut, and the next sweep retries it.
+ */
+function cut(socket: GameSocket): boolean {
+  try {
+    requireReauth(socket, 'revoked');
+    return true;
+  } catch (error) {
+    reportDefect(error, { socketId: socket.id, userId: socket.data.user?.id });
+    return false;
   }
 }
 
+/** A throw outside the database read is a defect, not an outage: log and report it. */
+function reportDefect(error: unknown, ids: Record<string, string | undefined>): void {
+  logger.error('Socket revocation error', {
+    ...ids,
+    error: error instanceof Error ? error.message : String(error),
+  });
+  captureException(error, { flow: 'socket-revocation', ...ids });
+}
+
 let sweepTimer: ReturnType<typeof setInterval> | null = null;
-/** When the sweep in flight started, or null when none is. */
-let sweepStartedAt: number | null = null;
+let sweepRunning = false;
 let sweepFailing = false;
 
 /**
@@ -128,6 +141,12 @@ let sweepFailing = false;
 export async function sweepRevokedSockets(io: SocketServer): Promise<number> {
   const sockets = localSockets(io);
   if (sockets.length === 0) return 0;
+  // What each socket was when the rows were read: a socket that changed user
+  // or WorkOS identity (an adopted refresh-auth) meanwhile is judged by the
+  // next sweep, never against a row read before the change.
+  const before = new Map(
+    sockets.map((socket) => [socket, `${socket.data.user.id}|${socket.data.workosUserId ?? ''}`])
+  );
   const queried = new Set(sockets.map((socket) => socket.data.user.id));
   const userIds = [...queried];
 
@@ -152,13 +171,11 @@ export async function sweepRevokedSockets(io: SocketServer): Promise<number> {
 
   let closed = 0;
   for (const socket of sockets) {
-    // A socket that left or was cut, or whose user was swapped, while the
-    // query ran is judged by the next sweep, not on a row read for someone else.
-    if (!isLive(socket) || !queried.has(socket.data.user.id)) continue;
-    if (sessionRevoked(socket, rows.get(socket.data.user.id))) {
-      requireReauth(socket, 'revoked');
-      closed += 1;
-    }
+    // A socket that left or was cut (by the in-process path, say) while the
+    // query ran, or whose identity changed, is left to the next sweep.
+    if (!isLive(socket)) continue;
+    if (before.get(socket) !== `${socket.data.user.id}|${socket.data.workosUserId ?? ''}`) continue;
+    if (sessionRevoked(socket, rows.get(socket.data.user.id)) && cut(socket)) closed += 1;
   }
   if (closed > 0) {
     logger.info('Socket revocation sweep closed sockets', { count: closed });
@@ -178,31 +195,21 @@ export function installSocketRevocation(io: SocketServer): void {
 
 /**
  * Start the periodic sweep for `io` (a second call replaces the first). The
- * timer is unref'd, so it never keeps the process alive. A tick is skipped
- * while the previous sweep runs, unless that one has been running for
- * `REVOCATION_SWEEP_STALL_MS`.
+ * timer is unref'd, so it never keeps the process alive, and a tick is
+ * skipped while the previous sweep is still running: one query in flight at
+ * most. A query that never settled would stop the sweep with it; the pool has
+ * no statement timeout, so that is the hazard every REST request shares, and
+ * the expiry re-check (`game-events.ts`) still bounds such a socket.
  */
 export function startRevocationSweep(io: SocketServer, intervalMs = REVOCATION_SWEEP_INTERVAL_MS): void {
   stopRevocationSweep();
   sweepTimer = setInterval(() => {
-    const now = Date.now();
-    if (sweepStartedAt !== null) {
-      if (now - sweepStartedAt < REVOCATION_SWEEP_STALL_MS) return;
-      logger.warn('Socket revocation sweep stalled; starting another', {
-        stalledMs: now - sweepStartedAt,
-      });
-    }
-    const startedAt = now;
-    sweepStartedAt = startedAt;
+    if (sweepRunning) return;
+    sweepRunning = true;
     void sweepRevokedSockets(io)
-      .catch((error: unknown) => {
-        logger.warn('Socket revocation sweep failed', {
-          error: error instanceof Error ? error.message : String(error),
-        });
-      })
+      .catch((error: unknown) => reportDefect(error, {}))
       .finally(() => {
-        // A stalled sweep that settles late must not clear a newer one's mark.
-        if (sweepStartedAt === startedAt) sweepStartedAt = null;
+        sweepRunning = false;
       });
   }, intervalMs);
   sweepTimer.unref();
@@ -212,5 +219,4 @@ export function startRevocationSweep(io: SocketServer, intervalMs = REVOCATION_S
 export function stopRevocationSweep(): void {
   if (sweepTimer) clearInterval(sweepTimer);
   sweepTimer = null;
-  sweepStartedAt = null;
 }

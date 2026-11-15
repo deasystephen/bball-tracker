@@ -53,7 +53,8 @@ tombstoned as described next and the response says `erased: false`. In ONE trans
   and Sentry gets an event tagged `flow: account-delete` — see "When WorkOS deletion fails".
 - **Live-game connections close within seconds (#1004).** A deletion through the app
   (`DELETE /auth/me`, `DELETE /players/:id/account`) closes the person's open Socket.io
-  connections at once, before the WorkOS call. A deletion by the operator script runs in another
+  connections at once, before the WorkOS call (one that was still connecting at that moment within
+  about 10 seconds). A deletion by the operator script runs in another
   process, so the API notices it on its next revocation sweep: within about 10 seconds
   (`REVOCATION_SWEEP_INTERVAL_MS`), whether or not Redis is up (the sweep reads the database). The
   bound holds while the API can read the database; during a database outage the connection stays

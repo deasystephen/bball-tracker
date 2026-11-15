@@ -18,7 +18,6 @@ import { REAUTH_REQUIRED_EVENT, type GameSocket } from '../../src/websocket/game
 import {
   REVOCATION_SWEEP_CHUNK,
   REVOCATION_SWEEP_INTERVAL_MS,
-  REVOCATION_SWEEP_STALL_MS,
   SOCKET_REVOCATION_SELECT,
   installSocketRevocation,
   revokeLocalUserSockets,
@@ -214,6 +213,29 @@ describe('sweepRevokedSockets', () => {
     expect(wasCut(socket)).toBe(false);
   });
 
+  it('leaves to the next sweep a socket whose WorkOS identity changed while the query ran', async () => {
+    const socket = fakeSocket('u1', 'wos_old');
+    findMany.mockImplementation(() => {
+      // An adopted refresh-auth for the relinked identity.
+      socket.data.workosUserId = 'wos_new';
+      return Promise.resolve([row('u1', { workosUserId: 'wos_old' })]);
+    });
+    expect(await sweepRevokedSockets(fakeIo([socket]))).toBe(0);
+    expect(wasCut(socket)).toBe(false);
+  });
+
+  it('keeps cutting the other sockets when one cut throws, and reports the defect', async () => {
+    const broken = fakeSocket('gone1');
+    broken.emit.mockImplementation(() => {
+      throw new Error('emit failed');
+    });
+    const other = fakeSocket('gone2');
+    findMany.mockResolvedValue([]);
+    expect(await sweepRevokedSockets(fakeIo([broken, other]))).toBe(1);
+    expect(wasCut(other)).toBe(true);
+    expect(captureException).toHaveBeenCalledWith(expect.any(Error), expect.objectContaining({ flow: 'socket-revocation' }));
+  });
+
   it('does not cut again a socket the in-process path cut while the query ran', async () => {
     const socket = fakeSocket('deleted');
     const io = fakeIo([socket]);
@@ -276,21 +298,6 @@ describe('startRevocationSweep', () => {
     socket.conn.readyState = 'open';
     await jest.advanceTimersByTimeAsync(REVOCATION_SWEEP_INTERVAL_MS * 3);
     expect(findMany).toHaveBeenCalledTimes(1);
-  });
-
-  it('starts another sweep once one has hung for REVOCATION_SWEEP_STALL_MS', async () => {
-    const socket = fakeSocket('u1');
-    findMany.mockImplementationOnce(() => new Promise(() => undefined));
-    findMany.mockResolvedValue([]);
-    startRevocationSweep(fakeIo([socket]));
-
-    await jest.advanceTimersByTimeAsync(REVOCATION_SWEEP_INTERVAL_MS);
-    expect(findMany).toHaveBeenCalledTimes(1);
-    await jest.advanceTimersByTimeAsync(REVOCATION_SWEEP_STALL_MS - REVOCATION_SWEEP_INTERVAL_MS);
-    expect(findMany).toHaveBeenCalledTimes(1);
-    await jest.advanceTimersByTimeAsync(REVOCATION_SWEEP_INTERVAL_MS);
-    expect(findMany).toHaveBeenCalledTimes(2);
-    expect(wasCut(socket)).toBe(true);
   });
 
   it('survives a sweep that throws', async () => {

@@ -516,10 +516,10 @@ export class AccountService {
       return { kind: 'unclaimed' as const, ...unclaimed, workosUserId: row.workosUserId, managedById };
     });
 
-    // An un-claimed row lost its login and a refused one is shut out by the
-    // gate: close this process's sockets now, as deletion does (#1004). The
-    // delete branch closes them inside deleteAccount.
-    if (decision.kind === 'unclaimed' || decision.kind === 'operator') {
+    // An un-claimed row lost its login: close this process's sockets now, as
+    // deletion does (#1004). The delete branch closes them inside
+    // deleteAccount, and handToOperator for a refused account.
+    if (decision.kind === 'unclaimed') {
       revokeUserSockets(userId);
     }
 
@@ -879,6 +879,9 @@ async function handToOperator(
   reason: 'adult_account' | 'last_head_coach',
   sessionId: string | undefined
 ): Promise<RefuseUnderageResult> {
+  // The gate now refuses the account (ageRefusedAt): close this process's
+  // sockets now, as deletion does (#1004).
+  revokeUserSockets(userId);
   let sessionRevoked = false;
   if (sessionId) {
     try {
