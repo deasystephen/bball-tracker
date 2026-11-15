@@ -159,6 +159,9 @@ function rawStatements(): string[] {
 }
 
 beforeEach(() => {
+  // No pending staff invitations to carry (#460) unless a test says so.
+  mockPrisma.staffInvitation.findMany.mockResolvedValue([]);
+  mockPrisma.staffInvitation.updateMany.mockResolvedValue({ count: 0 });
   spies.canManageStaff = jest.spyOn(permissions, 'canManageStaff').mockResolvedValue(true);
   spies.isLeagueAdmin = jest.spyOn(permissions, 'isLeagueAdmin').mockResolvedValue(true);
   spies.hasTeamPermission = jest.spyOn(permissions, 'hasTeamPermission').mockResolvedValue(true);

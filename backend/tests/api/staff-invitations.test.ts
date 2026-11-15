@@ -739,6 +739,15 @@ describe('staff invitations (#460) through the real StaffInvitationService', () 
 
     function givenAcceptable(): void {
       givenTeam();
+      // By token, the address's account is one nobody has signed in to yet
+      // (a claimed account must accept signed in).
+      mockPrisma.user.findUnique.mockImplementation(async ({ where }: { where: { id: string } }) =>
+        where.id === INVITEE_ID ? { ...USERS[INVITEE_ID], workosUserId: null } : USERS[where.id] ?? null
+      );
+      // The row is still on the team it was read with.
+      mockPrisma.staffInvitation.findUnique.mockImplementation(
+        async ({ select }: { select: Record<string, unknown> }) => applySelect(invitationRow(), select)
+      );
       mockPrisma.teamStaff.findUnique.mockResolvedValue(null);
       mockPrisma.staffInvitation.updateMany.mockResolvedValue({ count: 1 });
       mockPrisma.staffInvitation.findUniqueOrThrow.mockImplementation(
@@ -845,9 +854,9 @@ describe('staff invitations (#460) through the real StaffInvitationService', () 
       expect(userInserts()[0][4]).toBe('PLAYER');
     });
 
-    it('accept lands on the claimed account that holds the address', async () => {
+    it('accept lands on an unclaimed, unmanaged account that holds the address', async () => {
       givenAcceptable();
-      mockPrisma.user.findFirst.mockResolvedValue({ id: INVITEE_ID, workosUserId: 'wk-new', isManaged: false });
+      mockPrisma.user.findFirst.mockResolvedValue({ id: INVITEE_ID, workosUserId: null, isManaged: false });
 
       const res = await request(app).post(`/api/v1/invitations/by-token/${SECRET_TOKEN}/accept`);
 
@@ -856,6 +865,41 @@ describe('staff invitations (#460) through the real StaffInvitationService', () 
         expect.objectContaining({ data: expect.objectContaining({ userId: INVITEE_ID }) })
       );
       expect(userInserts()).toHaveLength(0);
+    });
+
+    it('a claimed account must accept signed in: the public link answers 409 sign_in_required', async () => {
+      givenAcceptable();
+      mockPrisma.user.findFirst.mockResolvedValue({ id: INVITEE_ID, workosUserId: 'wk-new', isManaged: false });
+      mockPrisma.user.findUnique.mockImplementation(async ({ where }: { where: { id: string } }) => USERS[where.id] ?? null);
+
+      const res = await request(app).post(`/api/v1/invitations/by-token/${SECRET_TOKEN}/accept`);
+
+      expect(res.status).toBe(409);
+      expect(res.body.code).toBe('sign_in_required');
+      expect(mockPrisma.teamStaff.create).not.toHaveBeenCalled();
+      expect(mockPrisma.user.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('a row a rollover moved after the unlocked read is accepted on the new team-season, never cancelled', async () => {
+      givenAcceptable();
+      mockPrisma.user.findFirst.mockResolvedValue({ id: INVITEE_ID, workosUserId: null, isManaged: false });
+      // Read with the old team; under the lock it already sits on OTHER_TEAM_ID, the lineage's latest.
+      mockPrisma.staffInvitation.findUnique
+        .mockImplementationOnce(async ({ select }: { select: Record<string, unknown> }) => applySelect(invitationRow(), select))
+        .mockImplementation(async ({ select }: { select: Record<string, unknown> }) =>
+          applySelect(invitationRow({ teamId: OTHER_TEAM_ID }), select)
+        );
+      mockPrisma.team.findFirst.mockResolvedValue({ id: OTHER_TEAM_ID });
+
+      const res = await request(app).post(`/api/v1/invitations/by-token/${SECRET_TOKEN}/accept`);
+
+      expect(res.status).toBe(200);
+      expect(mockPrisma.teamStaff.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ teamId: OTHER_TEAM_ID }) })
+      );
+      expect(mockPrisma.staffInvitation.updateMany).not.toHaveBeenCalledWith(
+        expect.objectContaining({ data: { status: 'CANCELLED' } })
+      );
     });
 
     it('refuses 409 sign_in_required on an unclaimed managed roster record, writing nothing', async () => {
@@ -919,7 +963,7 @@ describe('staff invitations (#460) through the real StaffInvitationService', () 
         expect.objectContaining({ data: expect.objectContaining({ status: 'ACCEPTED' }) })
       );
       expect(mockPrisma.staffInvitation.updateMany).toHaveBeenCalledWith({
-        where: { id: INVITATION_ID, status: 'PENDING' },
+        where: { id: INVITATION_ID, status: 'PENDING', teamId: TEAM_ID },
         data: { status: 'CANCELLED' },
       });
       expect(mockPrisma.teamStaff.create).not.toHaveBeenCalled();
@@ -939,7 +983,7 @@ describe('staff invitations (#460) through the real StaffInvitationService', () 
         expect.objectContaining({ data: expect.objectContaining({ status: 'ACCEPTED' }) })
       );
       expect(mockPrisma.staffInvitation.updateMany).toHaveBeenCalledWith({
-        where: { id: INVITATION_ID, status: 'PENDING' },
+        where: { id: INVITATION_ID, status: 'PENDING', teamId: TEAM_ID },
         data: { status: 'CANCELLED' },
       });
     });
@@ -959,7 +1003,7 @@ describe('staff invitations (#460) through the real StaffInvitationService', () 
         expect.objectContaining({ data: expect.objectContaining({ status: 'ACCEPTED' }) })
       );
       expect(mockPrisma.staffInvitation.updateMany).toHaveBeenCalledWith({
-        where: { id: INVITATION_ID, status: 'PENDING' },
+        where: { id: INVITATION_ID, status: 'PENDING', teamId: TEAM_ID },
         data: { status: 'CANCELLED' },
       });
     });

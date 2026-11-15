@@ -1142,10 +1142,26 @@ export class TeamService {
           // Pending staff invitations follow the team into the new season
           // (#460): accept only lands on a lineage's latest team-season, so
           // left on this row they would die. Their links keep working.
+          const pendingInviters = await tx.staffInvitation.findMany({
+            where: { teamId, status: 'PENDING' },
+            select: { invitedById: true },
+            distinct: ['invitedById'],
+          });
           await tx.staffInvitation.updateMany({
             where: { teamId, status: 'PENDING' },
             data: { teamId: created.id },
           });
+          // A sender who cannot manage the new team-season's staff (not
+          // carried, or no longer an admin) cannot back theirs: cancel those
+          // now rather than let the invitee meet a dead link.
+          for (const { invitedById } of pendingInviters) {
+            if (!(await canManageStaff(invitedById, created.id, tx))) {
+              await tx.staffInvitation.updateMany({
+                where: { teamId: created.id, invitedById, status: 'PENDING' },
+                data: { status: 'CANCELLED' },
+              });
+            }
+          }
 
           return {
             teamId: created.id,
@@ -1437,10 +1453,19 @@ export class TeamService {
     } else if (target.email) {
       // Never build the filter from a missing email: Prisma drops an
       // `undefined` condition, and the lookup would match the first user.
-      user = await prisma.user.findFirst({
+      const row = await prisma.user.findFirst({
         where: { email: emailEquals(target.email), deletedAt: null },
-        select: { id: true, name: true },
+        select: { id: true, name: true, workosUserId: true, isManaged: true },
       });
+      // An unclaimed managed roster record is not a staff target (#460): its
+      // managing coach may rewrite its email (B2.10) and claim the role. A
+      // staff invitation, accepted after signing in, is the way.
+      if (row && row.workosUserId === null && row.isManaged) {
+        throw new BadRequestError(
+          'This address belongs to a roster record that has not signed in. Send a staff invitation instead.'
+        );
+      }
+      user = row ? { id: row.id, name: row.name } : null;
     }
 
     if (!user) {

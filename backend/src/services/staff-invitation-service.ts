@@ -37,7 +37,7 @@ import {
 import { canManageStaff } from '../utils/permissions';
 import { assertResendCooldown } from '../utils/resend-cooldown';
 import { createOrConflict, orNotFound } from '../utils/prisma-errors';
-import { emailEquals, isSameEmail } from '../utils/email-match';
+import { emailEquals, isSameEmail, normaliseEmail } from '../utils/email-match';
 import { hashRecipient } from '../utils/hash-recipient';
 import { lockTeamRow } from '../utils/team-row-lock';
 import { lockUsers } from '../utils/user-row-lock';
@@ -69,7 +69,12 @@ const PAST_SEASON =
  * stops showing as pending anywhere.
  */
 class DeadStaffInvitationError extends BadRequestError {
-  constructor(message: string, readonly reason: 'inviter_lost_right' | 'past_season') {
+  constructor(
+    message: string,
+    readonly reason: 'inviter_lost_right' | 'past_season',
+    /** The team-season the checks ran on; the cancel applies only while the row is still there. */
+    readonly teamId: string
+  ) {
     super(message);
     Object.setPrototypeOf(this, DeadStaffInvitationError.prototype);
   }
@@ -199,7 +204,7 @@ export class StaffInvitationService {
     }
 
     const role = await TeamService.findRoleByType(teamId, data.roleType);
-    const email = data.email.trim().toLowerCase();
+    const email = normaliseEmail(data.email);
     const recipientHash = hashRecipient(email);
 
     const existingAccount = await prisma.user.findFirst({
@@ -602,14 +607,16 @@ export class StaffInvitationService {
       return await run();
     } catch (err) {
       if (err instanceof DeadStaffInvitationError) {
+        // Guarded on the team the checks ran on: a row a rollover has moved
+        // since is a different, live invitation.
         const { count } = await prisma.staffInvitation.updateMany({
-          where: { id: invitation.id, status: 'PENDING' },
+          where: { id: invitation.id, status: 'PENDING', teamId: err.teamId },
           data: { status: 'CANCELLED' },
         });
         if (count > 0) {
           logger.info('Staff invitation cancelled', {
             invitationId: invitation.id,
-            teamId: invitation.teamId,
+            teamId: err.teamId,
             reason: err.reason,
           });
         }
@@ -676,19 +683,32 @@ export class StaffInvitationService {
               where: { id: account.id },
               select: { workosUserId: true, isManaged: true },
             });
-            if (fresh && fresh.workosUserId === null && fresh.isManaged) {
+            // A claimed account accepts signed in: a forwarded link must not
+            // put a role (and a global role change) on someone's login.
+            if (fresh && (fresh.workosUserId !== null || fresh.isManaged)) {
               throw new SignInRequiredError();
             }
           }
-          if (!(await lockTeamRow(tx, invitation.teamId))) {
+          // The invitation's team as it is under the lock: a season rollover
+          // that committed after the unlocked read moved a PENDING row onto
+          // the new team-season (it holds the old team's lock while it does).
+          let teamId = invitation.teamId;
+          if (!(await lockTeamRow(tx, teamId))) {
             throw new NotFoundError('Team not found');
           }
-          const inviterLive = await tx.user.count({ where: { id: invitation.invitedById, deletedAt: null } });
-          if (inviterLive === 0 || !(await canManageStaff(invitation.invitedById, invitation.teamId, tx))) {
-            throw new DeadStaffInvitationError(INVITER_LOST_RIGHT, 'inviter_lost_right');
+          const current = await tx.staffInvitation.findUnique({ where: { id: invitation.id }, select: { teamId: true } });
+          if (current && current.teamId !== teamId) {
+            teamId = current.teamId;
+            if (!(await lockTeamRow(tx, teamId))) {
+              throw new NotFoundError('Team not found');
+            }
           }
-          if (!(await isLatestTeamSeason(tx, invitation.teamId))) {
-            throw new DeadStaffInvitationError(PAST_SEASON, 'past_season');
+          const inviterLive = await tx.user.count({ where: { id: invitation.invitedById, deletedAt: null } });
+          if (inviterLive === 0 || !(await canManageStaff(invitation.invitedById, teamId, tx))) {
+            throw new DeadStaffInvitationError(INVITER_LOST_RIGHT, 'inviter_lost_right', teamId);
+          }
+          if (!(await isLatestTeamSeason(tx, teamId))) {
+            throw new DeadStaffInvitationError(PAST_SEASON, 'past_season', teamId);
           }
 
           const { count } = await tx.staffInvitation.updateMany({
@@ -700,21 +720,21 @@ export class StaffInvitationService {
           }
 
           const existing = await tx.teamStaff.findUnique({
-            where: { teamId_userId: { teamId: invitation.teamId, userId: account.id } },
+            where: { teamId_userId: { teamId, userId: account.id } },
             include: TEAM_STAFF_INCLUDE,
           });
           let staff: TeamStaffWithRelations;
           if (existing) {
             staff = existing;
           } else {
-            const role = await TeamService.findRoleByType(invitation.teamId, roleType, tx).catch((err: unknown) => {
+            const role = await TeamService.findRoleByType(teamId, roleType, tx).catch((err: unknown) => {
               // Not "invitation not found": the public route maps a 404 to that.
               throw err instanceof NotFoundError
                 ? new BadRequestError('This team no longer has the role this invitation was for')
                 : err;
             });
             staff = await tx.teamStaff.create({
-              data: { teamId: invitation.teamId, userId: account.id, roleId: role.id },
+              data: { teamId, userId: account.id, roleId: role.id },
               include: TEAM_STAFF_INCLUDE,
             });
           }
@@ -749,7 +769,7 @@ export class StaffInvitationService {
     // After COMMIT: a rolled-back accept must not log a role that never landed.
     logger.info('Staff invitation accepted', {
       invitationId: invitation.id,
-      teamId: invitation.teamId,
+      teamId: result.staff.teamId,
       staffUserId: account.id,
       roleType: result.staff.role.type,
       alreadyStaff: result.alreadyStaff,
