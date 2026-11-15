@@ -138,8 +138,6 @@ export interface InvitationResponse {
     jerseyNumber?: number | null;
     position?: string | null;
   };
-  /** Present on `kind: 'staff'` accepts (#460): the caller's staff row on the team. */
-  staff?: { id: string; teamId: string; userId: string };
   /** `kind: 'staff'`: the caller already held a staff row, left unchanged. */
   alreadyStaff?: boolean;
   message?: string;

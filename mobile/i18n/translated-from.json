@@ -795,6 +795,8 @@
     "teams.removeStaffMessage": "bd7f52e6f3ad",
     "teams.removeStaffTitle": "58c89a9db719",
     "teams.resendStaffInvitation": "6402d96e5fc7",
+    "teams.resendStaffInvitationConfirm": "1f94843777ae",
+    "teams.resendStaffInvitationMessage": "46056cbbc27f",
     "teams.roleAssistantCoach": "5cf227fbdc9a",
     "teams.roleHeadCoach": "25bf832d26db",
     "teams.roleTeamManager": "f9af4c295773",

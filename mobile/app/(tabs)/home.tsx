@@ -89,6 +89,8 @@ export default function Home() {
   } = useInvitations({ status: 'PENDING' });
 
   const pendingInvitations = invitationsData?.invitations || [];
+  // The bell counts staff invitations too (#460); they are accepted on the Invitations tab.
+  const pendingCount = pendingInvitations.length + (invitationsData?.staffInvitations?.length ?? 0);
   const isLoading = teamsLoading || invitationsLoading;
   const isRefetching =
     teamsRefetching ||
@@ -162,20 +164,20 @@ export default function Home() {
             </ThemedText>
           </View>
           <View style={styles.greetingRight}>
-            {pendingInvitations.length > 0 && (
+            {pendingCount > 0 && (
               <TouchableOpacity
                 onPress={() => router.push('/invitations')}
                 style={styles.bellButton}
                 hitSlop={BELL_HIT_SLOP}
                 accessibilityRole="button"
-                accessibilityLabel={t('home.pendingInvitationsA11y', { count: pendingInvitations.length })}
+                accessibilityLabel={t('home.pendingInvitationsA11y', { count: pendingCount })}
               >
                 <Ionicons name="notifications" size={BELL_ICON_SIZE} color={colors.text} />
                 <View
                   style={[styles.bellBadge, { backgroundColor: colors.error }]}
                 >
                   <ThemedText variant="footnote" style={styles.bellBadgeText}>
-                    {pendingInvitations.length}
+                    {pendingCount}
                   </ThemedText>
                 </View>
               </TouchableOpacity>

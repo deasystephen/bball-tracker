@@ -240,7 +240,9 @@
     "pendingStaffInvitations": "Pending invitations",
     "pendingStaffInvitationLabel": "Invitation to {{email}}, {{role}}",
     "resendStaffInvitation": "Resend invitation",
-    "staffMember": "Staff member"
+    "staffMember": "Staff member",
+    "resendStaffInvitationMessage": "A new link goes to {{email}} and the one they have stops working.",
+    "resendStaffInvitationConfirm": "Resend"
   },
   "players": {
     "title": "Players",

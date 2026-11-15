@@ -320,13 +320,15 @@ for every address match and the address stored trimmed and lower-cased; the shar
   as a team invitation: it shows "join <team>" without a role and its Accept calls
   `POST /invitations/:id/accept`, which accepts the staff invitation correctly (the response's
   `kind: 'staff'` is ignored). The web page (`web/app/invite/[token]/`) renders the role.
-- **Mobile.** The staff screen (`app/teams/[id]/staff.tsx`) turns the add's 404 into an offer: the hint
-  "No account uses that email yet" and a **Send invitation** button (`useInviteStaff`, `emailSent: false`
-  is an error toast, never silent); editing the address withdraws the offer. Callers who may manage staff
+- **Mobile.** The staff screen (`app/teams/[id]/staff.tsx`) turns the add's 404 `staff_target_not_found`
+  (only that code: a gone team is a 404 too) into an offer: the hint "No account uses that email yet" and
+  a **Send invitation** button (`useInviteStaff`, `emailSent: false` is an error toast, never silent).
+  The offer holds only while the field shows the address the 404 was for. Callers who may manage staff
   see **Pending invitations** (`useStaffInvitations`, requested only for them) with Resend (the same call
-  with `supersede: true`) and Cancel (`useCancelStaffInvitation`, confirm dialog). The Invitations tab
+  with `supersede: true`, after a confirm, because it kills the invitee's link) and Cancel
+  (`useCancelStaffInvitation`, confirm dialog). Home's invitations bell counts staff invitations. The Invitations tab
   renders `staffInvitations` cards (Accept / Decline), and the deep-link screen renders `kind: 'staff'`
-  (team and role rows, the sign-in hint names the invited address). Role labels come from
+  (team and role rows; the sign-in hint asks for the address the invitation was sent to). Role labels come from
   `utils/staff-role.ts`. Accept invalidates teams, games, staff and usage. Events: `staff_invited`,
   `staff_invitation_cancelled`, and `invitation_accepted` with `kind: 'staff'`. Maestro:
   `.maestro/staff-invitation.yaml` (invite and cancel on the Lakers; the seed deletes every Lakers

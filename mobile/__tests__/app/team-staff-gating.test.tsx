@@ -199,7 +199,7 @@ describe('TeamStaffScreen permission gating', () => {
 
     // 404 → the form offers an invitation instead of a dead end (#460).
     mockAddStaff.mutateAsync.mockRejectedValueOnce(
-      Object.assign(new Error('User not found'), { apiError: { status: 404, error: 'User not found' } })
+      Object.assign(new Error('User not found'), { apiError: { status: 404, error: 'User not found', code: 'staff_target_not_found' } })
     );
     fireEvent.changeText(input, 'nobody@example.com');
     submit();
@@ -308,7 +308,7 @@ describe('TeamStaffScreen permission gating', () => {
     fireEvent.changeText(getByTestId('staff-email-input'), 'new.coach@example.com');
     fireEvent.press(getByText('Team Manager'));
     mockAddStaff.mutateAsync.mockRejectedValueOnce(
-      Object.assign(new Error('User not found'), { apiError: { status: 404, error: 'User not found' } })
+      Object.assign(new Error('User not found'), { apiError: { status: 404, error: 'User not found', code: 'staff_target_not_found' } })
     );
     fireEvent.press(getByTestId('staff-add-submit'));
 
@@ -349,7 +349,13 @@ describe('TeamStaffScreen permission gating', () => {
     expect(getByText('pending.coach@example.com')).toBeTruthy();
 
     mockInviteStaff.mutateAsync.mockResolvedValueOnce({ invitation: { id: 'si-2' }, emailSent: true });
+    const resendSpy = jest.spyOn(Alert, 'alert');
     fireEvent.press(getByLabelText('Resend invitation: pending.coach@example.com'));
+    // Resend replaces the invitee's link, so it asks first.
+    expect(mockInviteStaff.mutateAsync).not.toHaveBeenCalled();
+    const resendButtons = resendSpy.mock.calls[0][2] as { text: string; onPress?: () => void }[];
+    resendButtons.find((b) => b.text === 'Resend')!.onPress!();
+    resendSpy.mockClear();
     await waitFor(() => expect(mockShowToast).toHaveBeenCalledWith('Invitation sent', 'success'));
     expect(mockInviteStaff.mutateAsync).toHaveBeenCalledWith({
       teamId: 't1',
@@ -362,6 +368,26 @@ describe('TeamStaffScreen permission gating', () => {
     await buttons.find((b) => b.text === 'Cancel invitation')!.onPress!();
     expect(mockCancelInvitation.mutateAsync).toHaveBeenCalledWith({ teamId: 't1', invitationId: 'si-1' });
     expect(mockShowToast).toHaveBeenCalledWith('Invitation cancelled', 'success');
+  });
+
+  it('an offer is withdrawn when the field changed while the add was in flight', async () => {
+    signIn({ id: 'coach-1', role: 'COACH' });
+    const { getByText, getByTestId, queryByTestId } = render(<TeamStaffScreen />);
+    fireEvent.press(getByText('Add staff'));
+    const input = getByTestId('staff-email-input');
+    fireEvent.changeText(input, 'jon@exmaple.com');
+    let reject: (e: unknown) => void = () => undefined;
+    mockAddStaff.mutateAsync.mockReturnValueOnce(new Promise((_, r) => { reject = r; }));
+    fireEvent.press(getByTestId('staff-add-submit'));
+    // The coach fixes the typo before the 404 comes back.
+    fireEvent.changeText(input, 'jon@example.com');
+    reject(Object.assign(new Error('User not found'), {
+      apiError: { status: 404, error: 'User not found', code: 'staff_target_not_found' },
+    }));
+    await waitFor(() => expect(mockAddStaff.mutateAsync).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(queryByTestId('staff-invite-submit')).toBeNull();
+    expect(getByTestId('staff-add-submit')).toBeTruthy();
   });
 
   it('a 404 that is not "User not found" (a gone team) is an error toast, not an invitation offer', async () => {

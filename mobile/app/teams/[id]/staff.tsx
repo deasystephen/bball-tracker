@@ -50,6 +50,7 @@ import { spacing, borderRadius } from '../../../theme';
 import { getHorizontalPadding } from '../../../utils/responsive';
 import { useAuthUser } from '../../../store/auth-store';
 import { getApiErrorMessage } from '../../../services/api-client';
+import { apiErrorCode } from '../../../utils/api-error-code';
 import { displayName } from '../../../utils/display-name';
 import { useGoBack } from '../../../hooks/useGoBack';
 import { MIN_TOUCH_TARGET } from '../../../utils/touch-target';
@@ -85,6 +86,9 @@ export default function TeamStaffScreen() {
   const [inviteOffer, setInviteOffer] = useState<string | null>(null);
 
   const canManage = canManageStaff(team, user?.id, user?.role, user?.leagueAdminOf);
+  // The offer stands only while the field still shows the address the 404 was
+  // for: an edit made while the add was in flight withdraws it.
+  const offeredAddress = inviteOffer !== null && inviteOffer === email.trim() ? inviteOffer : null;
   const {
     data: pendingInvitations,
     error: invitationsError,
@@ -112,9 +116,8 @@ export default function TeamStaffScreen() {
       setShowAddForm(false);
       toast.showToast(t('teams.staffAdded'), 'success');
     } catch (err) {
-      const apiError = (err as { apiError?: { status?: number; error?: string } }).apiError;
-      // Only the target lookup's 404 means "no account" (a gone team is a 404 too).
-      if (apiError?.status === 404 && apiError.error === 'User not found') {
+      // Only the target lookup's coded 404 means "no account" (a gone team is a 404 too).
+      if (apiErrorCode(err) === 'staff_target_not_found') {
         setInviteOffer(trimmed);
         return;
       }
@@ -144,6 +147,17 @@ export default function TeamStaffScreen() {
     } catch (err) {
       toast.showToast(getApiErrorMessage(err, t('teams.staffInviteFailed')), 'error');
     }
+  };
+
+  /** Resend replaces the link the invitee holds, so it asks first, like Cancel. */
+  const confirmResend = (row: StaffInvitationRow) => {
+    Alert.alert(t('teams.resendStaffInvitation'), t('teams.resendStaffInvitationMessage', { email: row.invitedEmail }), [
+      { text: t('common.cancel'), style: 'cancel' },
+      {
+        text: t('teams.resendStaffInvitationConfirm'),
+        onPress: () => void sendInvitation(row.invitedEmail, row.roleType, true),
+      },
+    ]);
   };
 
   const handleCancelInvitation = (row: StaffInvitationRow) => {
@@ -305,7 +319,7 @@ export default function TeamStaffScreen() {
                     );
                   })}
                 </View>
-                {inviteOffer !== null && (
+                {offeredAddress !== null && (
                   <ThemedText variant="caption" color="textSecondary" style={styles.inviteHint}>
                     {t('teams.staffNoAccountInvite')}
                   </ThemedText>
@@ -317,10 +331,10 @@ export default function TeamStaffScreen() {
                     variant="outline"
                     style={styles.actionButton}
                   />
-                  {inviteOffer !== null ? (
+                  {offeredAddress !== null ? (
                     <Button
                       title={t('teams.sendStaffInvitation')}
-                      onPress={() => void sendInvitation(inviteOffer, roleType)}
+                      onPress={() => void sendInvitation(offeredAddress, roleType)}
                       loading={inviteStaff.isPending}
                       disabled={inviteStaff.isPending}
                       style={styles.actionButton}
@@ -434,7 +448,7 @@ export default function TeamStaffScreen() {
                 rightElement={
                   <View style={styles.rowActions}>
                     <TouchableOpacity
-                      onPress={() => void sendInvitation(row.invitedEmail, row.roleType, true)}
+                      onPress={() => confirmResend(row)}
                       style={styles.rowButton}
                       accessibilityRole="button"
                       accessibilityLabel={`${t('teams.resendStaffInvitation')}: ${row.invitedEmail}`}

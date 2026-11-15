@@ -20,7 +20,7 @@ import {
   type GuardianInvitationView,
   type StaffInvitationView,
 } from '../../hooks/useInvitations';
-import { staffRoleLabel } from '../../utils/staff-role';
+import { staffAcceptedMessage, staffRoleLabel } from '../../utils/staff-role';
 import { relationshipNoun } from '../../utils/guardian';
 import { apiClient, getApiErrorMessage } from '../../services/api-client';
 import { useQueryErrorState } from '../../hooks/useQueryErrorState';
@@ -245,12 +245,7 @@ export default function InvitationsScreen() {
   const handleAcceptStaff = async (invitation: StaffInvitationView) => {
     try {
       const accepted = await acceptInvitation.mutateAsync(invitation.id);
-      toast.showToast(
-        accepted.alreadyStaff
-          ? t('invite.alreadyStaff', { team: invitation.teamName })
-          : t('invite.joinedStaff', { team: invitation.teamName, role: staffRoleLabel(t, invitation.roleType) }),
-        'success'
-      );
+      toast.showToast(staffAcceptedMessage(t, invitation, accepted.alreadyStaff), 'success');
     } catch (error) {
       // Through getApiErrorMessage, so `error_shown` fires (#967).
       toast.showToast(getApiErrorMessage(error, t('invitations.acceptFailed')), 'error');

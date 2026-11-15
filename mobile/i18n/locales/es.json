@@ -240,7 +240,9 @@
     "pendingStaffInvitations": "Invitaciones pendientes",
     "pendingStaffInvitationLabel": "Invitación a {{email}}, {{role}}",
     "resendStaffInvitation": "Reenviar invitación",
-    "staffMember": "Miembro del cuerpo técnico"
+    "staffMember": "Miembro del cuerpo técnico",
+    "resendStaffInvitationMessage": "Se enviará un enlace nuevo a {{email}} y el que tiene dejará de funcionar.",
+    "resendStaffInvitationConfirm": "Reenviar"
   },
   "players": {
     "title": "Jugadores",

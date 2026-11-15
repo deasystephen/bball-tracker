@@ -20,7 +20,7 @@ import {
 } from '../../services/api-client';
 import { useAuthStore } from '../../store/auth-store';
 import { useInvitationByToken, isGuardianInvitation, isStaffInvitation } from '../../hooks/useInvitationByToken';
-import { staffRoleLabel } from '../../utils/staff-role';
+import { staffAcceptedMessage, staffRoleLabel } from '../../utils/staff-role';
 import { relationshipLabel, relationshipNoun } from '../../utils/guardian';
 import { childDisplayName, inviterDisplayName } from '../../utils/display-name';
 import type { User } from '../../../shared/types';
@@ -131,12 +131,7 @@ export default function InviteDeepLinkScreen() {
         }
         if (staff) {
           // An existing staff row is left as it was (never re-roled): say so.
-          toast.showToast(
-            accepted.alreadyStaff
-              ? t('invite.alreadyStaff', { team: staff.teamName })
-              : t('invite.joinedStaff', { team: staff.teamName, role: staffRole }),
-            'success'
-          );
+          toast.showToast(staffAcceptedMessage(t, staff, accepted.alreadyStaff), 'success');
           router.replace('/(tabs)/teams');
           return;
         }

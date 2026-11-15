@@ -11,7 +11,7 @@ const ROLE_LABEL_KEY: Record<StaffRoleType, string> = {
   TEAM_MANAGER: 'teams.roleTeamManager',
 };
 
-export function staffRoleLabelKey(type: string): string | null {
+function staffRoleLabelKey(type: string): string | null {
   return Object.prototype.hasOwnProperty.call(ROLE_LABEL_KEY, type)
     ? ROLE_LABEL_KEY[type as StaffRoleType]
     : null;
@@ -21,4 +21,18 @@ export function staffRoleLabelKey(type: string): string | null {
 export function staffRoleLabel(t: (key: string) => string, type: string, fallback?: string): string {
   const key = staffRoleLabelKey(type);
   return key ? t(key) : (fallback ?? t('teams.staffMember'));
+}
+
+/**
+ * What a staff accept tells the invitee (#460): the team and role joined, or
+ * that an account already on the staff kept its role (accept never re-roles).
+ */
+export function staffAcceptedMessage(
+  t: (key: string, options?: Record<string, unknown>) => string,
+  invitation: { teamName: string; roleType: string },
+  alreadyStaff: boolean | undefined
+): string {
+  return alreadyStaff
+    ? t('invite.alreadyStaff', { team: invitation.teamName })
+    : t('invite.joinedStaff', { team: invitation.teamName, role: staffRoleLabel(t, invitation.roleType) });
 }
