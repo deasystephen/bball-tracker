@@ -16,5 +16,3 @@ export function setupWebSocketHandlers(io: SocketServer): void {
 
 export { getIo, setIo } from './io-registry';
 export { emitGameEvent, emitGameStatusChange } from './emit';
-export { stopRevocationSweep } from './revocation';
-export { revokeUserSockets } from './io-registry';

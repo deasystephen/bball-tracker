@@ -65,6 +65,19 @@ function isLive(socket: GameSocket): boolean {
   return socket.connected && socket.conn.readyState === 'open' && Boolean(socket.data.user?.id);
 }
 
+interface SocketIdentity {
+  userId: string;
+  workosUserId: string | null | undefined;
+}
+
+function identityOf(socket: GameSocket): SocketIdentity {
+  return { userId: socket.data.user.id, workosUserId: socket.data.workosUserId };
+}
+
+function sameIdentity(a: SocketIdentity | undefined, b: SocketIdentity): boolean {
+  return a !== undefined && a.userId === b.userId && a.workosUserId === b.workosUserId;
+}
+
 /** This process's live sockets (local even with the Redis adapter on). */
 function localSockets(io: SocketServer): GameSocket[] {
   return ([...io.of('/').sockets.values()] as GameSocket[]).filter(isLive);
@@ -144,20 +157,18 @@ export async function sweepRevokedSockets(io: SocketServer): Promise<number> {
   // What each socket was when the rows were read: a socket that changed user
   // or WorkOS identity (an adopted refresh-auth) meanwhile is judged by the
   // next sweep, never against a row read before the change.
-  const before = new Map(
-    sockets.map((socket) => [socket, `${socket.data.user.id}|${socket.data.workosUserId ?? ''}`])
-  );
-  const queried = new Set(sockets.map((socket) => socket.data.user.id));
-  const userIds = [...queried];
+  const before = new Map(sockets.map((socket) => [socket, identityOf(socket)]));
+  const userIds = [...new Set(sockets.map((socket) => socket.data.user.id))];
 
-  const rows = new Map<string, SocketRevocationRow>();
+  const chunks: SocketRevocationRow[][] = [];
   try {
     for (let i = 0; i < userIds.length; i += REVOCATION_SWEEP_CHUNK) {
-      const found = await prisma.user.findMany({
-        where: { id: { in: userIds.slice(i, i + REVOCATION_SWEEP_CHUNK) }, deletedAt: null },
-        select: SOCKET_REVOCATION_SELECT,
-      });
-      for (const row of found) rows.set(row.id, row);
+      chunks.push(
+        await prisma.user.findMany({
+          where: { id: { in: userIds.slice(i, i + REVOCATION_SWEEP_CHUNK) }, deletedAt: null },
+          select: SOCKET_REVOCATION_SELECT,
+        })
+      );
     }
   } catch (error) {
     logger.warn('Socket revocation sweep failed', {
@@ -168,13 +179,14 @@ export async function sweepRevokedSockets(io: SocketServer): Promise<number> {
     return 0;
   }
   sweepFailing = false;
+  const rows = new Map(chunks.flat().map((row) => [row.id, row]));
 
   let closed = 0;
   for (const socket of sockets) {
     // A socket that left or was cut (by the in-process path, say) while the
     // query ran, or whose identity changed, is left to the next sweep.
     if (!isLive(socket)) continue;
-    if (before.get(socket) !== `${socket.data.user.id}|${socket.data.workosUserId ?? ''}`) continue;
+    if (!sameIdentity(before.get(socket), identityOf(socket))) continue;
     if (sessionRevoked(socket, rows.get(socket.data.user.id)) && cut(socket)) closed += 1;
   }
   if (closed > 0) {

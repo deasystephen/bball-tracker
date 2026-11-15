@@ -36,8 +36,8 @@
  *   │    nothing ───────────► DELETE the User row (erased: true)    │
  *   │    anything ──────────► tombstone, deletedAt = now()          │
  *   └─────────────────────────────────────────────────────────────┘
- *   after commit: close the account's open sockets (#1004), then best-effort:
- *   delete the S3 avatar, delete the WorkOS user
+ *   after commit, best-effort: delete the S3 avatar, delete the WorkOS user;
+ *   then close the account's open sockets (#1004)
  *
  * KEPT, de-identified: TeamMember, GameEvent, PlayerStats, Announcement, AnnouncementReply
  * (author), TeamInvitation rows the user SENT. Any of these (or any other
@@ -332,11 +332,6 @@ export class AccountService {
       return { previousAvatar: row.profilePictureUrl, workosUserId: row.workosUserId, adminlessLeagueIds, erased };
     });
 
-    // Close this process's live sockets for the account now (#1004). An
-    // operator script has no Socket.io server, so there the API's revocation
-    // sweep closes them (`websocket/revocation.ts`).
-    revokeUserSockets(userId);
-
     // 5. After commit: best-effort external cleanup. The local row is already
     // unreachable, so a failure here never fails the request.
     await deletePreviousAvatar(committed.previousAvatar, null);
@@ -364,6 +359,12 @@ export class AccountService {
         }
       }
     }
+
+    // Close this process's live sockets for the account (#1004), after the
+    // WorkOS user is gone so the client's refresh on `reauth_required` fails
+    // too. An operator script has no Socket.io server, so there the API's
+    // revocation sweep closes them (`websocket/revocation.ts`).
+    revokeUserSockets(userId);
 
     logger.info('Account deleted', {
       userId,
@@ -516,13 +517,6 @@ export class AccountService {
       return { kind: 'unclaimed' as const, ...unclaimed, workosUserId: row.workosUserId, managedById };
     });
 
-    // An un-claimed row lost its login: close this process's sockets now, as
-    // deletion does (#1004). The delete branch closes them inside
-    // deleteAccount, and handToOperator for a refused account.
-    if (decision.kind === 'unclaimed') {
-      revokeUserSockets(userId);
-    }
-
     if (decision.kind === 'already_refused') {
       logger.info('Under-age answer refused', { userId, outcome: 'pending_operator', identityDeleted: false, repeat: true });
       return { outcome: 'pending_operator', identityDeleted: false };
@@ -565,6 +559,10 @@ export class AccountService {
       decision.workosUserId === null
         ? { identityDeleted: true, sessions: null }
         : await deleteIdentityOrRevokeSessions(decision.workosUserId, { userId, flow: 'age-refusal' });
+    // The row lost its login: close this process's sockets, as deletion does
+    // (#1004). The delete branch closes them inside deleteAccount, and
+    // handToOperator for a refused account.
+    revokeUserSockets(userId);
 
     logger.info('Under-age answer refused', {
       userId,
@@ -680,11 +678,10 @@ export class AccountService {
    *   └──────────────────────────────────────────────────────────────────┘
    *   after commit, best-effort, both reported: delete the cleared photo's
    *   S3 object (photoDeletion), delete the WorkOS user (a 404 counts as
-   *   gone) (ends its WorkOS sessions and refresh tokens; open Socket.io
-   *   connections are closed by `revokeUserSockets` right after commit, or
-   *   by the API's revocation sweep when an operator script ran this, #1004);
-   *   if that fails, revoke every active session and report
-   *   identityDeleted: false
+   *   gone) (ends its WorkOS sessions and refresh tokens); if that fails,
+   *   revoke every active session and report identityDeleted: false; then
+   *   close open Socket.io connections (`revokeUserSockets`, or the API's
+   *   revocation sweep when an operator script ran this, #1004)
    *
    * Locks. The player and the coach are locked FOR UPDATE in ONE statement in
    * id order, the order and strength account deletion uses for a user and
@@ -748,9 +745,6 @@ export class AccountService {
       return { ...unclaimed, workosUserId: row.workosUserId, managedById };
     });
 
-    // As in deleteAccount: this process's sockets now, the sweep elsewhere (#1004).
-    revokeUserSockets(userId);
-
     // The photo is a picture of the child that nobody could find once the row
     // lets go of it: its deletion is reported, never silent.
     const photoDeletion: PhotoDeletion =
@@ -767,6 +761,9 @@ export class AccountService {
       userId,
       flow: 'convert-to-managed',
     });
+    // As in deleteAccount: this process's sockets, after the identity is
+    // gone; the sweep when an operator script ran this (#1004).
+    revokeUserSockets(userId);
 
     logger.info('Account converted to managed', {
       userId,

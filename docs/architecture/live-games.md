@@ -208,18 +208,22 @@ current score so a client can drop events and still converge.
   can be a whole token lifetime away, so an account deleted (`AccountService.deleteAccount`) or
   converted to a managed record (`convertToManaged`) while a device sits in a game room is cut off
   by two other paths, both through the same `requireReauth` (`reason: 'revoked'`: `reauth_required`,
-  then a transport close; the client's reconnect is then refused `Unauthorized` and its refresh
-  fails, because the row is gone or no longer carries the WorkOS id):
+  then a transport close). The client's reconnect is then refused: `Unauthorized` for a deleted or
+  un-claimed account (the row is gone or no longer carries the WorkOS id, and the WorkOS user is
+  already deleted when the in-process cut runs, so the refresh fails too), and
+  `age_confirmation_required` for an under-age answer handed to the operator (`ageRefusedAt`), which
+  sends the app back to the age screen. The paths:
   - **In-process, immediate.** Both service methods (and `refuseUnderage`: its un-claim branch,
-    and `handToOperator` for a refused account; its delete branch goes through `deleteAccount`) call
-    `io-registry.ts#revokeUserSockets(userId)` right after their transaction commits, before the
-    WorkOS call. `setupWebSocketHandlers` registers `revocation.ts#revokeLocalUserSockets` there
+    and `handToOperator` for a refused account; its delete branch goes through `deleteAccount`;
+    and `PlayerService.deletePlayer`) call `io-registry.ts#revokeUserSockets(userId)` after their
+    transaction commits and after the WorkOS teardown, so the client's refresh fails as well. `setupWebSocketHandlers` registers `revocation.ts#revokeLocalUserSockets` there
     (`installSocketRevocation`), so services import only the leaf `io-registry` and never the
     socket handler graph. It walks this process's live sockets (`io.of('/').sockets`, transport
     still `open`, so a socket already being cut is never cut twice) for that user id: no
     database, no Redis, never throws. In an operator script (`scripts/data-subject-request.ts
     delete`, `scripts/convert-to-managed.ts`) no server or revoker is registered, so it returns 0.
-  - **The sweep, the guarantee.** `setupWebSocketHandlers` starts `startRevocationSweep`: every
+  - **The sweep, the guarantee.** `setupWebSocketHandlers` starts `startRevocationSweep` (the
+    shutdown routine stops it before `io.close()`): every
     `REVOCATION_SWEEP_INTERVAL_MS` (10 s, unref'd timer) it collects the distinct user ids of this
     process's live sockets and reads their live rows in one `user.findMany` (`id in …`,
     `deletedAt: null`, `SOCKET_REVOCATION_SELECT` = `AUTH_USER_SELECT` plus `workosUserId`, so a
@@ -230,14 +234,16 @@ current score so a client can drop events and still converge.
     socket). `sessionRevoked` cuts a socket whose row is missing (erased or tombstoned), whose
     row no longer carries the WorkOS id its token was verified for (`socket.data.workosUserId`, set
     at the handshake and on every adopted `refresh-auth`; null for a dev token, which is checked on
-    the row only; unset fails closed), or whom the handshake's gate refuses (`socketUserAllowed`).
+    the row only, exactly as its handshake is; unset fails closed), or whom the handshake's gate
+    refuses (`socketUserAllowed`).
     A WorkOS relink at the production cutover changes the id too, which cuts staging-token sockets
     once; their REST calls already fail the same way. It catches the operator scripts, which run in another process, and the
     race the in-process call misses (a handshake that read the row just before the commit). A
     socket that disconnected or was cut while the query ran, or whose user or WorkOS id changed
     (an adopted `refresh-auth`), is left to the next sweep rather than judged on a row read
     before the change. A cut that throws is logged at `error` and reported (`flow:
-    'socket-revocation'`) and does not stop the others. A database failure keeps every
+    'socket-revocation'`) and does not stop the others. Only the query itself counts as a
+    database failure, which keeps every
     socket, logs `warn` and reports the first failure of a streak to Sentry
     (`flow: 'socket-revocation-sweep'`). A per-user room was considered for the in-process path
     (the adapter would fan a cut out to other tasks) and left out: the sweep already bounds every
