@@ -328,6 +328,16 @@ describe('PracticeService.updatePractice', () => {
     expect(mockPrisma.practiceSession.update.mock.calls[0][0].data.exceptionFields).toEqual(['startsAt']);
   });
 
+  it('leaves an occurrence following its series when a save changed nothing', async () => {
+    mockPrisma.practiceSession.findUnique.mockResolvedValue(scheduled);
+    lockReads({ cancelledAt: null }, lockedRow());
+    mockPrisma.practiceSession.update.mockResolvedValue(practiceRow({ seriesId: SERIES }));
+    await PracticeService.updatePractice(SESSION, { location: 'Gym' }, USER);
+    expect(mockPrisma.practiceSession.update.mock.calls[0][0].data).toEqual(
+      expect.objectContaining({ isException: false, exceptionFields: [] })
+    );
+  });
+
   it('does not lock a series or mark a standalone session, and writes only the fields given', async () => {
     mockPrisma.practiceSession.findUnique.mockResolvedValue({ ...scheduled, seriesId: null });
     mockPrisma.$queryRaw.mockResolvedValueOnce([lockedRow()]);
@@ -574,6 +584,15 @@ describe('PracticeService.upsertAvailability', () => {
       .mockResolvedValueOnce([{ deletedAt: new Date() }]);
     await expect(PracticeService.upsertAvailability(SESSION, USER, { status: 'YES' })).rejects.toThrow(
       'Player not found'
+    );
+
+    // Removed from the roster between the check and the write: the locked re-check refuses.
+    mockPrisma.$queryRaw
+      .mockResolvedValueOnce([{ status: 'SCHEDULED' }])
+      .mockResolvedValueOnce([{ deletedAt: null }])
+      .mockResolvedValueOnce([]);
+    await expect(PracticeService.upsertAvailability(SESSION, USER, { status: 'YES' })).rejects.toThrow(
+      'This player is not on the team for this practice'
     );
 
     // No P2002 retry (CLAUDE.md): the upsert is native INSERT … ON CONFLICT.

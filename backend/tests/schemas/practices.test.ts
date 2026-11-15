@@ -75,6 +75,8 @@ describe('createPracticeSchema', () => {
     ['a missing zone', { timezone: undefined }],
     ['type GAME (games stay in /games)', { type: 'GAME' }],
     ['a 101-character title', { title: 'x'.repeat(101) }],
+    ['an unknown key', { startTime: '18:00' }],
+    ['an abbreviation zone', { timezone: 'EST' }],
     ['a 201-character location', { location: 'x'.repeat(201) }],
     ['1001 characters of notes', { notes: 'x'.repeat(1001) }],
   ])('rejects %s', (_label, patch) => {
@@ -137,6 +139,7 @@ describe('createPracticeSeriesSchema', () => {
     ['weekday 7', { weekdays: [7] }],
     ['a repeated weekday', { weekdays: [2, 2] }],
     ['frequency DAILY', { frequency: 'DAILY' }],
+    ['an unknown key', { interval: 2 }],
     ['an unknown zone', { timezone: 'Nowhere/Town' }],
   ])('rejects %s', (_label, patch) => {
     expect(createPracticeSeriesSchema.safeParse({ ...validSeries, ...patch }).success).toBe(false);
@@ -211,5 +214,7 @@ describe('upsertAvailabilitySchema', () => {
     expect(upsertAvailabilitySchema.safeParse({ status: 'LATE' }).success).toBe(false);
     expect(upsertAvailabilitySchema.safeParse({ status: 'YES', comment: 'x'.repeat(501) }).success).toBe(false);
     expect(upsertAvailabilitySchema.safeParse({ status: 'YES', playerId: 'kid' }).success).toBe(false);
+    // A misspelt key is a 400 naming it, not a silent self-answer.
+    expect(upsertAvailabilitySchema.safeParse({ status: 'YES', playerID: TEAM_ID }).success).toBe(false);
   });
 });

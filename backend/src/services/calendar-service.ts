@@ -276,8 +276,8 @@ export class CalendarService {
     for (const practice of practices) {
       const start = new Date(practice.startsAt);
       const end = new Date(start.getTime() + practice.durationMinutes * 60 * 1000);
-      const label = practice.type === 'PRACTICE' ? 'Practice' : 'Team event';
-      const title = practice.title ? `${team.name}: ${practice.title}` : `${team.name} ${label.toLowerCase()}`;
+      const label = practice.type === 'PRACTICE' ? 'Practice' : 'Event';
+      const title = `${team.name}: ${practice.title ?? label}`;
       const descriptionLines = [
         practice.status === 'CANCELLED' ? 'Cancelled' : null,
         practice.status === 'CANCELLED' && practice.cancelReason ? `Reason: ${practice.cancelReason}` : null,

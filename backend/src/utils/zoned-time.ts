@@ -52,6 +52,14 @@ function formatterFor(timeZone: string): Intl.DateTimeFormat {
 const FIXED_OFFSET_RE = /^(?:[+-]\d|Etc\/GMT[+-])/;
 
 /**
+ * Bare upper-case abbreviations ("EST", "MST", "HST", "CET") are refused as
+ * input: they are ambiguous, and several resolve to a zone without daylight
+ * saving ("EST" is America/Panama), so a New York coach sending "EST" would
+ * drift an hour every summer. UTC and GMT stay accepted.
+ */
+const ABBREVIATION_RE = /^(?!UTC$|GMT$|UCT$)[A-Z]{2,5}$/;
+
+/**
  * The runtime's name for `timeZone`, case-normalized ("america/new_york" gives
  * "America/New_York"; Node 22 also folds aliases such as "US/Eastern", newer
  * ECMA-402 runtimes may keep them), or null when it is unknown or a fixed
@@ -59,7 +67,7 @@ const FIXED_OFFSET_RE = /^(?:[+-]\d|Etc\/GMT[+-])/;
  * uncached formatter, so arbitrary client input never grows the cache.
  */
 export function canonicalTimeZone(timeZone: string): string | null {
-  if (!timeZone) return null;
+  if (!timeZone || ABBREVIATION_RE.test(timeZone)) return null;
   let resolved: string;
   try {
     resolved = new Intl.DateTimeFormat('en-US', { timeZone }).resolvedOptions().timeZone;

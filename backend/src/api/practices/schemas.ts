@@ -112,13 +112,15 @@ const practiceFields = {
 };
 
 /** POST /practices: one practice that belongs to no series. */
-export const createPracticeSchema = z.object({
-  teamId: z.uuid('Invalid team ID format'),
-  ...practiceFields,
-  startsAt: instantSchema,
-  durationMinutes: durationSchema,
-  timezone: timezoneSchema,
-});
+export const createPracticeSchema = z
+  .object({
+    teamId: z.uuid('Invalid team ID format'),
+    ...practiceFields,
+    startsAt: instantSchema,
+    durationMinutes: durationSchema,
+    timezone: timezoneSchema,
+  })
+  .strict();
 
 /** PATCH /practices/:id: edits one session; on a series occurrence it becomes an exception. */
 export const updatePracticeSchema = z
@@ -177,6 +179,7 @@ export const createPracticeSeriesSchema = z
       .max(MAX_SERIES_OCCURRENCES, `occurrenceCount must be at most ${MAX_SERIES_OCCURRENCES}`)
       .optional(),
   })
+  .strict()
   .superRefine((data, ctx) => {
     if ((data.endDate === undefined) === (data.occurrenceCount === undefined)) {
       ctx.addIssue({
@@ -241,7 +244,7 @@ export const upsertAvailabilitySchema = z.object({
    * and the player is rostered on the session's team (same rule as game RSVP).
    */
   playerId: z.uuid('Invalid player ID format').optional(),
-});
+}).strict();
 
 export type CreatePracticeInput = z.infer<typeof createPracticeSchema>;
 export type UpdatePracticeInput = z.infer<typeof updatePracticeSchema>;

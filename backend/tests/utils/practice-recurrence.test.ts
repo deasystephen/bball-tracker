@@ -86,6 +86,10 @@ describe('zoned-time helpers', () => {
     // Single-segment names that observe DST pass whether or not the runtime folds them.
     expect(canonicalTimeZone('EST5EDT')).not.toBeNull();
     expect(canonicalTimeZone('Japan')).not.toBeNull();
+    // Bare abbreviations are ambiguous, and EST/MST/HST resolve to zones without DST.
+    expect(canonicalTimeZone('EST')).toBeNull();
+    expect(canonicalTimeZone('HST')).toBeNull();
+    expect(canonicalTimeZone('GMT')).toBe('UTC');
     expect(canonicalTimeZone('+05:30')).toBeNull();
   });
 

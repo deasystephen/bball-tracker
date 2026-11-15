@@ -338,6 +338,7 @@ export class PracticeService {
         throw new BadRequestError('A cancelled practice cannot be edited');
       }
 
+      const overrides = [...new Set([...locked.exceptionFields, ...changedFields(locked, data)])].sort();
       return tx.practiceSession.update({
         where: { id: sessionId },
         data: {
@@ -348,14 +349,8 @@ export class PracticeService {
           ...(data.startsAt !== undefined ? { startsAt: new Date(data.startsAt) } : {}),
           ...(data.durationMinutes !== undefined ? { durationMinutes: data.durationMinutes } : {}),
           ...(data.timezone !== undefined ? { timezone: data.timezone } : {}),
-          ...(session.seriesId
-            ? {
-                isException: true,
-                exceptionFields: [
-                  ...new Set([...locked.exceptionFields, ...changedFields(locked, data)]),
-                ].sort(),
-              }
-            : {}),
+          // A save that changed nothing leaves the occurrence following its series.
+          ...(session.seriesId ? { isException: overrides.length > 0, exceptionFields: overrides } : {}),
         },
         include: PRACTICE_INCLUDE,
       });
@@ -487,6 +482,13 @@ export class PracticeService {
           SELECT "deletedAt" FROM "User" WHERE "id" = ${subjectId} FOR SHARE`;
         if (!player[0] || player[0].deletedAt) {
           throw new NotFoundError('Player not found');
+        }
+        // And the membership, so a concurrent removePlayer (which purges future
+        // answers with the membership) cannot be undone by this write.
+        const stillMember = await tx.$queryRaw<Array<{ id: string }>>`
+          SELECT "id" FROM "TeamMember" WHERE "teamId" = ${session.teamId} AND "playerId" = ${subjectId} FOR SHARE`;
+        if (!stillMember[0]) {
+          throw new ForbiddenError('This player is not on the team for this practice');
         }
         // No `include`: a plain upsert compiles to INSERT … ON CONFLICT, so two
         // first answers at once (a double tap, a guardian and the player) both

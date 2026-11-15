@@ -510,7 +510,7 @@ describe('CalendarService', () => {
 
       expect((ics.match(/BEGIN:VEVENT/g) || []).length).toBe(3);
       expect(ics).toContain(`UID:practice-11111111-1111-4111-8111-111111111111@${ICAL_UID_DOMAIN}`);
-      expect(ics).toContain('SUMMARY:Lakers practice');
+      expect(ics).toContain('SUMMARY:Lakers: Practice');
       expect(ics).toContain('LOCATION:Main gym');
       // A fixed UID with LAST-MODIFIED from updatedAt, as an absolute instant.
       expect(ics).toContain('LAST-MODIFIED:20291201T120000Z');
