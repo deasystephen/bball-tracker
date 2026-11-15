@@ -305,6 +305,28 @@ describe('StaffInvitationService (real Postgres, #460)', () => {
     expect((await prisma.staffInvitation.findUniqueOrThrow({ where: { id: kept.id } })).status).toBe('PENDING');
   });
 
+  it('a season rollover carries a pending staff invitation onto the new team-season, where it is accepted', async () => {
+    const coachId = await fx.user('rollover-head', 'COACH');
+    const club = await fx.org('rollover-club');
+    await fx.staff(coachId, club);
+    await fx.leagueAdmin(coachId, club);
+    await prisma.teamRole.create({
+      data: { teamId: club.teamId, type: 'ASSISTANT_COACH', name: 'Assistant Coach', canManageRoster: true },
+    });
+    const invitation = await StaffInvitationService.inviteStaff(
+      club.teamId,
+      { email: address('rollover-invitee'), roleType: 'ASSISTANT_COACH' },
+      coachId
+    );
+
+    const { team } = await TeamService.rolloverTeam(club.teamId, { seasonName: `S2-${fx.run}` }, coachId);
+
+    const moved = await prisma.staffInvitation.findUniqueOrThrow({ where: { id: invitation.id } });
+    expect(moved).toMatchObject({ teamId: team.id, status: 'PENDING' });
+    const result = await StaffInvitationService.acceptInvitationByToken(await tokenOf(invitation.id));
+    expect(result.staff.teamId).toBe(team.id);
+  });
+
   it('a team manager invitation creates a PLAYER account (the app asks the role step)', async () => {
     const email = address('manager');
     await prisma.teamRole.create({

@@ -165,10 +165,6 @@ function toPublic(row: PublicStaffInvitationSummary): PublicStaffInvitation {
   };
 }
 
-/** The per-row address that replaces `invitedEmail` when it is stripped (`utils/stripped-email.ts`). */
-export function strippedStaffInvitationEmail(invitationId: string): string {
-  return strippedEmailFor(invitationId);
-}
 
 export class StaffInvitationService {
   private static generateToken(): string {
@@ -227,6 +223,13 @@ export class StaffInvitationService {
     const { invitation, expiredCount } = await createOrConflict(
       () =>
         prisma.$transaction(async (tx) => {
+          // The inviter's row first, then the team: account deletion's order
+          // (the new row's foreign key would otherwise take the inviter's row
+          // after the team lock, the reverse, and could deadlock with it).
+          const [inviterRow] = await lockUsers(tx, [userId]);
+          if (!inviterRow || inviterRow.deletedAt !== null) {
+            throw new NotFoundError('Account not found');
+          }
           if (!(await lockTeamRow(tx, teamId))) {
             throw new NotFoundError('Team not found');
           }
@@ -243,20 +246,22 @@ export class StaffInvitationService {
             throw new BadRequestError(PENDING_STAFF_CONFLICT);
           }
 
-          // Resend only (the shared helper's contract): the newest row for the
-          // address, any status, so a cancel or decline between resends does
-          // not reset the window. A plain invite after a cancel is not held.
-          if (data.supersede) {
-            const latest = await tx.staffInvitation.findFirst({
-              where: { teamId, recipientHash },
-              orderBy: { createdAt: 'desc' },
-              select: { createdAt: true },
-            });
-            assertResendCooldown(latest?.createdAt, 'address', {
-              onRefused: (retryAfterSeconds) =>
-                logger.info('Staff invitation resend refused (cooldown)', { teamId, invitedById: userId, retryAfterSeconds }),
-            });
-          }
+          // Every create, not only Resend: the newest row for the address (any
+          // status, kept by its hash even after a decline strips the address)
+          // must be outside the window, so cancel-and-reinvite or re-inviting
+          // someone who just declined cannot email the address again at once.
+          // (Team invitations hold the same cap through supersede alone,
+          // because a player's address lives on the User row; here only the
+          // invitation rows know it.) A role correction waits the 2 minutes.
+          const latest = await tx.staffInvitation.findFirst({
+            where: { teamId, recipientHash },
+            orderBy: { createdAt: 'desc' },
+            select: { createdAt: true },
+          });
+          assertResendCooldown(latest?.createdAt, 'address', {
+            onRefused: (retryAfterSeconds) =>
+              logger.info('Staff invitation resend refused (cooldown)', { teamId, invitedById: userId, retryAfterSeconds }),
+          });
 
           // Lazy expiry: a lapsed PENDING row never blocks; with supersede the
           // live one is expired too, so the old link dies.
@@ -464,7 +469,7 @@ export class StaffInvitationService {
     if (!invitation) {
       return null;
     }
-    if (invitation.status !== 'PENDING' && invitation.invitedEmail === strippedStaffInvitationEmail(invitation.id)) {
+    if (invitation.status !== 'PENDING' && invitation.invitedEmail === strippedEmailFor(invitation.id)) {
       return null;
     }
     if (!isSameEmail(callerEmail, invitation.invitedEmail)) {
@@ -510,7 +515,7 @@ export class StaffInvitationService {
           data: {
             status: 'REJECTED',
             rejectedAt: new Date(),
-            invitedEmail: strippedStaffInvitationEmail(invitation.id),
+            invitedEmail: strippedEmailFor(invitation.id),
           },
           select: STAFF_INVITATION_SELECT,
         }),
@@ -714,12 +719,14 @@ export class StaffInvitationService {
             });
           }
 
-          // A coaching role makes a bare PLAYER account a COACH, the global role
-          // that gates team creation (an account created above already is one;
-          // the guardian accept promotes PLAYER to PARENT the same way).
-          if (roleType !== 'TEAM_MANAGER') {
+          // A coaching staff row (the one that exists after this accept, which
+          // for an account already on the staff is its own) makes a PLAYER or
+          // PARENT account a COACH: the global role gates team creation. The
+          // guardian accept promotes PLAYER to PARENT the same way; a coach
+          // who is also a parent stays COACH there.
+          if (staff.role.type === 'HEAD_COACH' || staff.role.type === 'ASSISTANT_COACH') {
             await tx.user.updateMany({
-              where: { id: account.id, role: 'PLAYER', deletedAt: null },
+              where: { id: account.id, role: { in: ['PLAYER', 'PARENT'] }, deletedAt: null },
               data: { role: 'COACH' },
             });
           }

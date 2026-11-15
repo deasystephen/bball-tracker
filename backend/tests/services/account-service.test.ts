@@ -187,15 +187,16 @@ describe('AccountService.deleteAccount', () => {
     // D17: every matching invitedEmail is scrubbed, not just PENDING rows:
     // guardian invitations, then staff invitations (#460: PENDING expired
     // first so the link cannot be accepted for the sentinel, then the scrub)
-    expect(mockPrisma.$executeRaw).toHaveBeenCalledTimes(3);
+    expect(mockPrisma.$executeRaw).toHaveBeenCalledTimes(2);
     const scrubSql = (mockPrisma.$executeRaw as jest.Mock).mock.calls.map((call) =>
       (call[0] as TemplateStringsArray).join('?')
     );
     expect(scrubSql[0]).toContain('UPDATE "GuardianInvitation"');
-    expect(scrubSql[1]).toMatch(/UPDATE "StaffInvitation"\s+SET "status" = 'EXPIRED'/);
-    expect(scrubSql[2]).toMatch(/UPDATE "StaffInvitation"\s+SET "invitedEmail" = \? \|\| "id" \|\| \?/);
+    // One statement for staff invitations: PENDING → EXPIRED, address and hash scrubbed.
+    expect(scrubSql[1]).toMatch(/UPDATE "StaffInvitation"\s+SET "status" = CASE WHEN "status" = 'PENDING' THEN 'EXPIRED'/);
+    expect(scrubSql[1]).toMatch(/"invitedEmail" = \? \|\| "id" \|\| \?/);
     // The sentinel's parts come from utils/stripped-email.ts, one definition with the TypeScript writers.
-    expect((mockPrisma.$executeRaw as jest.Mock).mock.calls[2].slice(1, 3)).toEqual(['deleted-', '@invalid']);
+    expect((mockPrisma.$executeRaw as jest.Mock).mock.calls[1].slice(1, 3)).toEqual(['deleted-', '@invalid']);
     expect(mockPrisma.user.updateMany).toHaveBeenCalledWith({
       where: { managedById: USER_ID },
       data: { managedById: null },

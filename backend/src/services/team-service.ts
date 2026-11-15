@@ -1138,6 +1138,14 @@ export class TeamService {
             });
           }
 
+          // Pending staff invitations follow the team into the new season
+          // (#460): accept only lands on a lineage's latest team-season, so
+          // left on this row they would die. Their links keep working.
+          await tx.staffInvitation.updateMany({
+            where: { teamId, status: 'PENDING' },
+            data: { teamId: created.id },
+          });
+
           return {
             teamId: created.id,
             created: true,
