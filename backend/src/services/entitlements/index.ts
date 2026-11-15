@@ -17,7 +17,7 @@
  *   CALENDAR_SYNC          | PREMIUM
  *   STATS_EXPORT           | PREMIUM
  *   ADVANCED_STATS         | PREMIUM
- *   PRACTICE_SCHEDULING    | PREMIUM
+ *   PRACTICE_SCHEDULING    | FREE (every tier; decided 2026-11-15, #33)
  *   AD_FREE                | PREMIUM
  *   REGISTRATION_PAYMENTS  | LEAGUE
  *   TOURNAMENT_BRACKETS    | LEAGUE
@@ -75,13 +75,22 @@ export enum Feature {
   MASTER_CALENDAR = 'MASTER_CALENDAR',
 }
 
+/**
+ * Features every tier has. Practice scheduling is table stakes for a team
+ * (owner decision 2026-11-15, #33): it stays a named feature behind
+ * `requireEntitlement` on the create routes, so making it paid again is a
+ * one-line move from here to `PREMIUM_FEATURES`, as the usage caps stay
+ * mounted at `Infinity`.
+ */
+const FREE_FEATURES = new Set<Feature>([Feature.PRACTICE_SCHEDULING]);
+
 const PREMIUM_FEATURES = new Set<Feature>([
+  ...FREE_FEATURES,
   Feature.UNLIMITED_TEAMS,
   Feature.FULL_SEASON_HISTORY,
   Feature.CALENDAR_SYNC,
   Feature.STATS_EXPORT,
   Feature.ADVANCED_STATS,
-  Feature.PRACTICE_SCHEDULING,
   Feature.AD_FREE,
 ]);
 
@@ -98,7 +107,7 @@ const LEAGUE_FEATURES = new Set<Feature>([
  * Canonical tier -> entitled-features map.
  */
 const TIER_ENTITLEMENTS: Record<SubscriptionTier, Set<Feature>> = {
-  FREE: new Set<Feature>(),
+  FREE: FREE_FEATURES,
   PREMIUM: PREMIUM_FEATURES,
   LEAGUE: LEAGUE_FEATURES,
 };
@@ -177,6 +186,7 @@ export function getEffectiveTier(user: EntitlementUser): SubscriptionTier {
  * Get the minimum tier required for a feature.
  */
 export function getRequiredTier(feature: Feature): SubscriptionTier {
+  if (TIER_ENTITLEMENTS.FREE.has(feature)) return 'FREE';
   if (TIER_ENTITLEMENTS.PREMIUM.has(feature)) return 'PREMIUM';
   if (TIER_ENTITLEMENTS.LEAGUE.has(feature)) return 'LEAGUE';
   return 'FREE';

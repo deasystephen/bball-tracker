@@ -4,10 +4,11 @@
  *   /api/v1/practices          single sessions and per-session availability
  *   /api/v1/practice-series    recurring series
  *
- * Creating a practice or a series needs the PRACTICE_SCHEDULING entitlement
- * (402 otherwise); editing, cancelling and deleting what exists do not, so a
- * lapsed subscription never strands a coach with a schedule they cannot
- * cancel. Detail: docs/architecture/practice-scheduling.md.
+ * Creating a practice or a series sits behind the PRACTICE_SCHEDULING
+ * entitlement, which every tier has (FREE since 2026-11-15, #33); the gate
+ * stays mounted so a paid tier is a one-line change in
+ * services/entitlements. Editing, cancelling and deleting what exists are
+ * never gated. Detail: docs/architecture/practice-scheduling.md.
  */
 
 import { Request, Router } from 'express';

@@ -36,7 +36,13 @@ jest.mock('../../src/utils/permissions', () => ({
   readableTeamsWhere: jest.fn().mockResolvedValue({ OR: [] }),
 }));
 
-const PREMIUM = { subscriptionTier: 'PREMIUM' as const, subscriptionExpiresAt: new Date('2099-01-01T00:00:00Z') };
+/** A FREE assistant coach on someone else's team: no subscription, only the staff flag. */
+const FREE_ASSISTANT: Partial<AuthUser> = {
+  id: 'f1a2b3c4-d5e6-4f70-8a91-b2c3d4e5f601',
+  role: 'COACH',
+  subscriptionTier: 'FREE',
+  subscriptionExpiresAt: null,
+};
 
 function practiceRow(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -63,7 +69,8 @@ function practiceRow(overrides: Record<string, unknown> = {}): Record<string, un
 }
 
 beforeEach(() => {
-  mockCaller = { ...PREMIUM };
+  // Every caller is FREE: practices are free on every tier (2026-11-15, #33).
+  mockCaller = {};
   (canAccessTeam as jest.Mock).mockResolvedValue(true);
   (hasTeamPermission as jest.Mock).mockResolvedValue(true);
   (isGuardianOf as jest.Mock).mockResolvedValue(false);
@@ -83,7 +90,7 @@ describe('POST /api/v1/practices', () => {
     timezone: 'America/New_York',
   };
 
-  it('creates a practice for an entitled coach', async () => {
+  it('creates a practice for a FREE coach', async () => {
     mockPrisma.practiceSession.create.mockResolvedValue(practiceRow());
 
     const res = await request(app).post('/api/v1/practices').send(body);
@@ -97,17 +104,15 @@ describe('POST /api/v1/practices', () => {
     );
   });
 
-  it('answers 402 upgrade_required on the FREE tier, before any lookup', async () => {
-    mockCaller = {};
+  it('lets a FREE assistant coach on another coach’s team create one (no 402 on any tier)', async () => {
+    mockCaller = FREE_ASSISTANT;
+    mockPrisma.practiceSession.create.mockResolvedValue(practiceRow());
     const res = await request(app).post('/api/v1/practices').send(body);
-    expect(res.status).toBe(402);
-    expect(res.body).toEqual(
-      expect.objectContaining({ code: 'upgrade_required', feature: 'practice_scheduling', requiredTier: 'PREMIUM' })
-    );
-    expect(mockPrisma.practiceSession.create).not.toHaveBeenCalled();
+    expect(res.status).toBe(201);
+    expect(hasTeamPermission).toHaveBeenCalledWith(FREE_ASSISTANT.id, TEAM_ID, 'canManageTeam');
   });
 
-  it('answers 403 to an entitled caller without canManageTeam', async () => {
+  it('answers 403 to a caller without canManageTeam', async () => {
     (hasTeamPermission as jest.Mock).mockResolvedValue(false);
     const res = await request(app).post('/api/v1/practices').send(body);
     expect(res.status).toBe(403);
@@ -399,11 +404,14 @@ describe('/api/v1/practice-series', () => {
     ]);
   });
 
-  it('POST answers 402 on FREE, 400 for an invalid rule and for one that is too long', async () => {
-    mockCaller = {};
-    expect((await request(app).post('/api/v1/practice-series').send(body)).status).toBe(402);
+  it('POST is open to a FREE assistant coach, and answers 400 for an invalid rule and one that is too long', async () => {
+    mockCaller = FREE_ASSISTANT;
+    mockPrisma.practiceSeries.create.mockResolvedValue({ id: SERIES_ID });
+    mockPrisma.practiceSession.createMany.mockResolvedValue({ count: 4 });
+    mockPrisma.practiceSeries.findUniqueOrThrow.mockResolvedValue(seriesRow());
+    expect((await request(app).post('/api/v1/practice-series').send(body)).status).toBe(201);
+    mockPrisma.practiceSeries.create.mockClear();
 
-    mockCaller = { ...PREMIUM };
     const both = await request(app).post('/api/v1/practice-series').send({ ...body, occurrenceCount: 3 });
     expect(both.status).toBe(400);
     expect(both.body.error).toMatch(/exactly one of endDate or occurrenceCount/);

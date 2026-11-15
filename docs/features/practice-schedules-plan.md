@@ -52,8 +52,9 @@ target exactly these gaps.
 
 ## 3. Architecture Fit (high reuse)
 
-`Feature.PRACTICE_SCHEDULING` already exists in the entitlements enum (PREMIUM
-tier) — no entitlement plumbing needed. Confirmed reusable assets:
+`Feature.PRACTICE_SCHEDULING` already exists in the entitlements enum — no
+entitlement plumbing needed. (Built: every tier has it, owner decision
+2026-11-15; see `docs/architecture/practice-scheduling.md#entitlement`.) Confirmed reusable assets:
 
 | Need | Reuse | Location |
 | --- | --- | --- |
@@ -279,8 +280,9 @@ fallback: compute nudges/alerts lazily on read + a single periodic sweep.
     breakdown (coach), carpool section, cancel/edit (coach).
   - `practices/create.tsx` — coach form (one-off or recurring, min-attendance).
   - `availability-defaults.tsx` — "I can never make…" standing rules.
-- Permissions gate coach-only UI via `hasTeamPermission`. Coach create UI shows
-  the upgrade prompt path on `402` (PREMIUM gate).
+- Permissions gate coach-only UI via `hasTeamPermission`. (Planned as a PREMIUM
+  gate with an upgrade prompt on `402`; built free for every tier, so no
+  upgrade path.)
 - **Maestro E2E** in `.maestro/` (repo requires it for major mobile features):
   login → team → create practice → set availability → assert headcount.
 

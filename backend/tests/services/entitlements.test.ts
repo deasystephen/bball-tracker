@@ -20,9 +20,9 @@ import {
 import { TEST_TEAM_LIMIT, withFiniteFreeTeamLimit } from '../helpers';
 
 describe('entitlements service (source of truth)', () => {
-  it('FREE tier has no gated features', () => {
+  it('FREE tier has practice scheduling (2026-11-15, #33) and no other feature', () => {
     for (const f of Object.values(Feature)) {
-      expect(hasFeature('FREE', f)).toBe(false);
+      expect(hasFeature('FREE', f)).toBe(f === Feature.PRACTICE_SCHEDULING);
     }
   });
 
@@ -98,6 +98,6 @@ describe('entitlements service (source of truth)', () => {
   it('getAllFeatures returns availability for every feature', () => {
     const free = getAllFeatures('FREE');
     expect(Object.keys(free).length).toBe(Object.values(Feature).length);
-    expect(Object.values(free).every((v) => v === false)).toBe(true);
+    expect(Object.entries(free).every(([f, v]) => v === (f === Feature.PRACTICE_SCHEDULING))).toBe(true);
   });
 });

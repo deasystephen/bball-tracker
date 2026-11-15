@@ -22,10 +22,11 @@ feature->tier map (FREE / PREMIUM / LEAGUE) and the usage limits
 (`USAGE_LIMITS`). Do not redefine tier rules elsewhere — import from there
 (issue #43's usage metering reuses them).
 
-**What FREE gets today (#445):** unlimited teams and seasons; none of the gated
-features (team season-stats CSV export and calendar subscribe are PREMIUM and
-answer 402 — neither has a client entry point). There is no `FREE_TEAM_LIMIT`
-any more.
+**What FREE gets today (#445):** unlimited teams and seasons, and practice
+scheduling (`PRACTICE_SCHEDULING` is in `FREE_FEATURES` since 2026-11-15, #33:
+table stakes for a team); none of the other gated features (team season-stats
+CSV export and calendar subscribe are PREMIUM and answer 402 — neither has a
+client entry point). There is no `FREE_TEAM_LIMIT` any more.
 
 Enforcement lives in `backend/src/api/middleware/entitlements.ts` (the only entitlement middleware —
 the old unmounted `requireFeature` / `requireUsageLimit` in `api/auth/middleware.ts`, which answered
@@ -33,7 +34,8 @@ the old unmounted `requireFeature` / `requireUsageLimit` in `api/auth/middleware
 
 - `requireEntitlement(feature)` — gates a route behind a feature. On denial it
   returns **HTTP 402** with `{ code: 'upgrade_required', feature, currentTier, requiredTier }`.
-  Applied to practice and practice-series create (`PRACTICE_SCHEDULING`, #33;
+  Applied to practice and practice-series create (`PRACTICE_SCHEDULING`, #33, which every tier has, so
+  it never denies today; it stays mounted like the `Infinity` caps;
   `docs/architecture/practice-scheduling.md#entitlement`), team season-stats CSV export (`STATS_EXPORT`) and calendar
   subscribe (`CALENDAR_SYNC`). System `ADMIN`s bypass all checks. Expired paid
   subscriptions resolve to an effective FREE tier.

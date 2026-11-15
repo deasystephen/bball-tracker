@@ -127,12 +127,15 @@ All through `utils/permissions.ts`, never a copy:
 
 ## Entitlement
 
-Creating a practice (`POST /practices`) or a series (`POST /practice-series`) requires
-`Feature.PRACTICE_SCHEDULING` (PREMIUM; `requireEntitlement`, 402 `upgrade_required`, ADMIN
-bypass). Editing, cancelling, deleting, reading and answering are not gated, so a lapsed
-subscription never leaves a coach unable to cancel what they scheduled. Practices count against no
-usage meter (`USAGE_LIMITS` has none that fits). FREE has no purchase path today (#41), so making
-practices free is a one-line move of `PRACTICE_SCHEDULING` in `services/entitlements/index.ts`.
+**Practices are free on every tier (owner decision, 2026-11-15: table stakes for a team).**
+`Feature.PRACTICE_SCHEDULING` is in `FREE_FEATURES` in `services/entitlements/index.ts`, so every
+tier has it, and `requireEntitlement(Feature.PRACTICE_SCHEDULING)` stays mounted on the two create
+routes (`POST /practices`, `POST /practice-series`). That mirrors the usage caps, which stay mounted
+at `Infinity`: making practices paid again is a one-line move to `PREMIUM_FEATURES` with no route
+change. The gate is per caller, so a FREE assistant coach can create on any team they manage.
+`GET /auth/entitlements` reports `PRACTICE_SCHEDULING: true` for FREE; no client reads the feature
+list today (`docs/architecture/entitlements-and-usage.md`). Editing, cancelling, deleting, reading
+and answering were never gated. Practices count against no usage meter.
 
 ## Calendar feed
 
@@ -182,8 +185,6 @@ child's availability answers but clears their free-text `comment`.
 
 Recorded on #33; each is a one-place change.
 
-- **Entitlement**: create is PREMIUM per caller, with no purchase path (#41); FREE coaches, and a FREE
-  assistant on a PREMIUM head coach's team, get 402.
 - **Series cancel** deletes future sessions (subscribers see them vanish) rather than marking them
   `CANCELLED` with a reason.
 - **Calendar feed** carries practice `LOCATION` and notes; the feed URL is a bearer link a parent may
@@ -205,7 +206,7 @@ Recorded on #33; each is a one-place change.
   end date or count), sending the device zone; "edit this practice" vs "edit all future practices";
   cancel one / cancel series. Coach UI gates on `hasTeamPermission(…, 'canManageTeam')`.
 - Dates through `utils/format-date.ts` in the session's `timezone`; the create form through
-  `DateTimePickerSheet`; 402 handling on create (or the entitlement decision above first).
+  `DateTimePickerSheet`. Create is open to every tier, so no upgrade path is needed.
 - A Maestro flow (create a series, answer availability, cancel), with a seed reset if it mutates.
 
 ## Tests
@@ -213,7 +214,7 @@ Recorded on #33; each is a one-place change.
 `tests/utils/practice-recurrence.test.ts` (zones, both DST directions, both hemispheres, the
 skipped and repeated hour, BIWEEKLY, both end conditions, the cap), `tests/schemas/practices.test.ts`,
 `tests/services/practice-service.test.ts` (both services against the Prisma mock, domain events),
-`tests/api/practices.test.ts` (routes with the real services, 402/403/400/404), and the real-database
+`tests/api/practices.test.ts` (routes with the real services, a FREE coach and a FREE assistant creating, 403/400/404), and the real-database
 `tests/integration/practice-schedule.db.test.ts` (a year-long series materialized in Postgres at
 18:00 local on both sides of DST, access through the real predicates for staff, member, guardian and
 outsider, exceptions surviving a series edit, series cancel keeping history, the ICS feed, account
