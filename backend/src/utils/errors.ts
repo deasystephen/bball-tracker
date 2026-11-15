@@ -300,6 +300,23 @@ export class StaffTargetNotFoundError extends DetailedError<Record<string, never
   }
 }
 
+/**
+ * 400 `staff_target_needs_invitation` — `POST /teams/:teamId/staff` was given
+ * an unclaimed managed roster record (#460). The app offers a staff invitation
+ * for the address instead, as for an unknown one.
+ */
+export class StaffTargetNeedsInvitationError extends DetailedError<Record<string, never>> {
+  constructor() {
+    super(
+      'staff_target_needs_invitation',
+      {},
+      'This address belongs to a roster record that has not signed in. Send a staff invitation instead.',
+      400
+    );
+    Object.setPrototypeOf(this, StaffTargetNeedsInvitationError.prototype);
+  }
+}
+
 export class ConflictError extends AppError {
   constructor(message: string = 'Conflict') {
     super(message, 409);
