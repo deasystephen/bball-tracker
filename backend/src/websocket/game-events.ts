@@ -86,6 +86,12 @@ export interface GameSocketData {
   expiryDeferred?: boolean;
   /** The current token's lifetime (`exp - iat`) in ms, when known; bounds an outage hold. */
   tokenLifetimeMs?: number | null;
+  /**
+   * The WorkOS user id the held token was verified for; null for a dev token.
+   * The revocation sweep (`websocket/revocation.ts`, #1004) cuts the socket
+   * once the row no longer carries it (conversion to managed, deletion).
+   */
+  workosUserId?: string | null;
 }
 
 // We intentionally keep the event-map generics at their default (untyped) and
@@ -104,6 +110,8 @@ export interface SocketSession {
   expiresAt: number | null;
   /** `exp - iat` in ms; null when the token carries no `iat` (dev tokens). */
   lifetimeMs: number | null;
+  /** The WorkOS user id the token names; null for a dev token. */
+  workosUserId: string | null;
 }
 
 /**
@@ -190,7 +198,7 @@ async function resolveSessionFromToken(
       if (!user) return null;
       if (!socketUserAllowed(user)) throw new AgeConfirmationRequiredError();
       // Dev token `exp` is epoch milliseconds.
-      return { user: sessionUser(user), expiresAt: decoded.exp, lifetimeMs: null };
+      return { user: sessionUser(user), expiresAt: decoded.exp, lifetimeMs: null, workosUserId: null };
     } catch {
       return null;
     }
@@ -213,7 +221,12 @@ async function resolveSessionFromToken(
       : null;
   if (!user) return null;
   if (!socketUserAllowed(user)) throw new AgeConfirmationRequiredError();
-  return { user: sessionUser(user), expiresAt: workosUser.expiresAt * 1000, lifetimeMs };
+  return {
+    user: sessionUser(user),
+    expiresAt: workosUser.expiresAt * 1000,
+    lifetimeMs,
+    workosUserId: workosUser.id,
+  };
 }
 
 /**
@@ -272,6 +285,7 @@ export async function authenticateSocket(
     socket.data.user = session.user;
     socket.data.tokenExpiresAt = session.expiresAt;
     socket.data.tokenLifetimeMs = session.lifetimeMs;
+    socket.data.workosUserId = session.workosUserId;
     socket.data.authToken = handshakeToken(socket);
     next();
   } catch (error) {
@@ -433,10 +447,19 @@ function heldToken(socket: GameSocket): string | undefined {
   return socket.data.authToken ?? handshakeToken(socket);
 }
 
-/** Why a socket was cut off. Only `expired` is the expected cycle. */
-export type ReauthReason = 'expired' | 'rejected' | 'user_changed';
+/**
+ * Why a socket was cut off. Only `expired` is the expected cycle; `revoked` is
+ * an account deleted or converted while connected (`websocket/revocation.ts`,
+ * #1004).
+ */
+export type ReauthReason = 'expired' | 'rejected' | 'user_changed' | 'revoked';
 
-function requireReauth(socket: GameSocket, reason: ReauthReason): void {
+/**
+ * Cut a socket off: emit `reauth_required`, then close the Engine.IO transport
+ * (see the section comment for why not `socket.disconnect()`). Exported for
+ * the revocation paths in `websocket/revocation.ts`.
+ */
+export function requireReauth(socket: GameSocket, reason: ReauthReason): void {
   clearSocketReauth(socket.id);
   const meta = { socketId: socket.id, userId: socket.data.user?.id, reason };
   // An expired token on a client that never sent `refresh-auth` is the
@@ -507,6 +530,7 @@ async function adoptSession(socket: GameSocket, session: SocketSession): Promise
   socket.data.user = session.user;
   socket.data.tokenExpiresAt = session.expiresAt;
   socket.data.tokenLifetimeMs = session.lifetimeMs;
+  socket.data.workosUserId = session.workosUserId;
   socket.data.expiryDeferred = false;
   await pruneGameRooms(socket);
   if (socket.connected) scheduleSocketReauth(socket);

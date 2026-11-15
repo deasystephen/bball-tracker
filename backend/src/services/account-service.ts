@@ -36,7 +36,8 @@
  *   │    nothing ───────────► DELETE the User row (erased: true)    │
  *   │    anything ──────────► tombstone, deletedAt = now()          │
  *   └─────────────────────────────────────────────────────────────┘
- *   after commit, best-effort: delete the S3 avatar, delete the WorkOS user
+ *   after commit: close the account's open sockets (#1004), then best-effort:
+ *   delete the S3 avatar, delete the WorkOS user
  *
  * KEPT, de-identified: TeamMember, GameEvent, PlayerStats, Announcement, AnnouncementReply
  * (author), TeamInvitation rows the user SENT. Any of these (or any other
@@ -76,6 +77,7 @@ import {
 } from './upload-service';
 import { GuardianService } from './guardian-service';
 import { WorkOSService } from './workos-service';
+import { revokeUserSockets } from '../websocket/revocation';
 
 /** The tombstone's display name. Clients render their own localized label from `deletedAt`. */
 export const DELETED_USER_NAME = 'Deleted user';
@@ -329,6 +331,11 @@ export class AccountService {
 
       return { previousAvatar: row.profilePictureUrl, workosUserId: row.workosUserId, adminlessLeagueIds, erased };
     });
+
+    // Close this process's live sockets for the account now (#1004). An
+    // operator script has no Socket.io server, so there the API's revocation
+    // sweep closes them (`websocket/revocation.ts`).
+    revokeUserSockets(userId);
 
     // 5. After commit: best-effort external cleanup. The local row is already
     // unreachable, so a failure here never fails the request.
@@ -666,9 +673,10 @@ export class AccountService {
    *   └──────────────────────────────────────────────────────────────────┘
    *   after commit, best-effort, both reported: delete the cleared photo's
    *   S3 object (photoDeletion), delete the WorkOS user (a 404 counts as
-   *   gone) (ends its WorkOS sessions and refresh tokens;
-   *   an open Socket.io connection lasts until its access token expires,
-   *   #1004); if that fails, revoke every active session and report
+   *   gone) (ends its WorkOS sessions and refresh tokens; open Socket.io
+   *   connections are closed by `revokeUserSockets` right after commit, or
+   *   by the API's revocation sweep when an operator script ran this, #1004);
+   *   if that fails, revoke every active session and report
    *   identityDeleted: false
    *
    * Locks. The player and the coach are locked FOR UPDATE in ONE statement in
@@ -732,6 +740,9 @@ export class AccountService {
       const unclaimed = await unclaimManagedRow(tx, row, managedById);
       return { ...unclaimed, workosUserId: row.workosUserId, managedById };
     });
+
+    // As in deleteAccount: this process's sockets now, the sweep elsewhere (#1004).
+    revokeUserSockets(userId);
 
     // The photo is a picture of the child that nobody could find once the row
     // lets go of it: its deletion is reported, never silent.

@@ -20,7 +20,11 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   rule is "nothing references this row", never "no game events". `GameEvent`, `PlayerStats`,
   `TeamMember`, authored announcements and announcement replies stay so other members' stats and
   threads remain coherent, and any of them keeps the tombstone. The result carries `erased: boolean` (both routes and the operator
-  script return it; the runbook's request log records it). After commit, best-effort: S3 avatar
+  script return it; the runbook's request log records it). After commit: the account's open
+  Socket.io connections are closed (`websocket/revocation.ts#revokeUserSockets` at once in the API
+  process, the revocation sweep within `REVOCATION_SWEEP_INTERVAL_MS` (10 s) for the operator
+  script; `docs/architecture/live-games.md`, "Revocation on deletion or conversion", #1004), then,
+  best-effort: S3 avatar
   delete and `WorkOSService.deleteUser` (response `identityDeleted: false` on failure, Sentry
   `flow: account-delete`; the runbook finishes it in the dashboard). **Never read the tombstone
   state from `name`/`email` — `deletedAt` is the signal.**
@@ -84,7 +88,7 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   `workosUserId` null, refuses with 401 instead of writing the email, verified flag or photo
   back, or falling through to a claim or create. A tombstoned row (D9) or one relinked to another
   identity meanwhile continues to the email branches as before. Other requests authenticated just before the commit can still finish a write, bounded by
-  the access-token lifetime (#1004).
+  the access-token lifetime.
 
   After commit, best-effort and reported: the S3 delete of the cleared photo through
   `upload-service.ts#deleteAvatarObject` (`photoDeletion`: `none`, `deleted`, `not_ours` or
@@ -95,8 +99,10 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   or a Staging id after the #24 cutover) and no alarm. On `false`: Sentry `flow: convert-to-managed`, then
   `WorkOSService.revokeAllSessions` (one client, `Promise.allSettled`, `{ revoked, failed }`); the
   result carries `workosUserId` and `sessions`, the error lines and the domain event log the
-  `workosUserId`, and the script exits 3. Open Socket.io connections are not closed: they last
-  until their access token expires, the same as after `deleteAccount` (#1004). Domain event
+  `workosUserId`, and the script exits 3. Open Socket.io connections are closed with
+  `reauth_required` right after commit, the same as after `deleteAccount`: at once when the API
+  process ran it, within about 10 s by the API's revocation sweep when the script did (the row no
+  longer carries the WorkOS id the socket was verified for; #1004). Domain event
   `Account converted to managed` (`userId`, `actorId`, `managedById`, `identityDeleted`,
   `photoDeletion`, `deletedReplyCount`, plus `identityNote` on a 404 and `workosUserId` on
   failure). Procedure:
