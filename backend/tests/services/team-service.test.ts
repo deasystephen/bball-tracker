@@ -1871,7 +1871,8 @@ describe('TeamService', () => {
 
       expect(mockPrisma.user.findFirst).toHaveBeenCalledWith({
         where: { email: { equals: targetUser.email!.toUpperCase(), mode: 'insensitive' }, deletedAt: null },
-        select: { id: true, name: true },
+        // workosUserId / isManaged: an unclaimed managed record is refused (#460).
+        select: { id: true, name: true, workosUserId: true, isManaged: true },
       });
       expect(mockPrisma.user.create).not.toHaveBeenCalled();
       expect(result.userId).toBe(targetUser.id);

@@ -210,7 +210,8 @@ on `deletedAt IS NULL`, so a request that raced the deletion cannot re-identify 
    file to the verified address and delete your local copy. Never commit it or upload it to S3.
    The export contains: `user`, `personalLeague`, `teamMembers`, `teamStaff`, `leagueAdmins`,
    `guardiansAsParent`, `guardiansAsChild`, `receivedInvitations`, `sentInvitations`,
-   `guardianInvitations`, `sentGuardianInvitations`, `gameRsvps`, `gameEvents`, `playerStats`,
+   `guardianInvitations`, `sentGuardianInvitations`, `staffInvitations`, `sentStaffInvitations`,
+   `gameRsvps`, `gameEvents`, `playerStats`,
    `pushTokens`, `calendarFeedTokens`, `announcements`, `announcementReplies`
    (`AccountService.exportUserData`; the integration test asserts this list).
 4. **Delete:**

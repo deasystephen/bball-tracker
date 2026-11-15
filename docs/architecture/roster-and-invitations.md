@@ -22,7 +22,9 @@ eng-review amendments recorded there).
     row, `workosUserId` null; `managedById` set only if null, name/role never touched): managed
     `User` (`isManaged: true`, `managedById` = coach — deliberate authz statement, B2.10 edit
     rights until claim) + `TeamMember` + `TeamInvitation` in one transaction, "added" email copy.
-    **The player is on the roster immediately**; accept only activates their login. On a reused
+    **The player is on the roster immediately**; accept only activates their login. A row that
+    holds a staff role (an accepted staff invitation not yet signed in, #460) is never reused this
+    way: it goes to case 3. On a reused
     row a supplied `profilePictureUrl` is written only when the row has none (a second
     `updateMany` guarded on `profilePictureUrl: null` inside the transaction, so a race cannot
     overwrite); when the row keeps its own photo the upload is discarded after commit with
@@ -109,8 +111,9 @@ eng-review amendments recorded there).
   run: a lookup for `first_last@x.com` also returned the account `firstXlast@x.com`, and an
   invitation, a staff role or a guardian link could land on a stranger. `emailEquals` escapes
   `\`, `_` and `%`. It covers `User.email` (Add Player, guardian
-  find-or-create, add staff by email, SES events) and `GuardianInvitation.invitedEmail`
-  (pending list, account deletion, export). `tests/utils/email-match-guard.test.ts` fails on any
+  find-or-create, add staff by email, SES events), `GuardianInvitation.invitedEmail`
+  (pending list, account deletion, export) and `StaffInvitation.invitedEmail` (dedupe, supersede,
+  the invitee's pending list, export; #460). `tests/utils/email-match-guard.test.ts` fails on any
   innermost object literal in `backend/src/` or `backend/scripts/` (`.ts`, `.js`, `.mjs`) outside the
   helper that pairs `equals` with an explicit `mode`, whatever its value: the `'insensitive'` literal,
   `Prisma.QueryMode.insensitive`, a constant or the shorthand (#696). Outside `emailEquals` there is no
@@ -188,6 +191,159 @@ eng-review amendments recorded there).
   `inviteAcceptRateLimit` and `apiRateLimit` (the browser calls it directly).
 - Mobile expiry copy comes from `utils/invitation-expiry.ts` (`formatInvitationExpiry` /
   `isInvitationExpired`, timestamp compare — no `Math.ceil` → `-0` "Expires today" on a dead invite, #59).
+
+### Staff invitations by email (#460, club coach onboarding)
+
+`POST /teams/:teamId/staff` still adds an **existing** account only (404 for an unknown address,
+with code `staff_target_not_found` since #460 so the app can offer an invitation instead). It refuses
+(400 `staff_target_needs_invitation`) an unclaimed **managed** roster record, named by address or by id:
+its managing coach could rewrite that email (B2.10) and claim the role, so such an address is invited
+instead (the app offers the invitation on either code).
+`services/staff-invitation-service.ts` invites any address to a staff role through a
+**`StaffInvitation`** row, the third invitation kind next to `TeamInvitation` and
+`GuardianInvitation`. It reuses the same machinery rather than copying it: a random bearer-secret
+token read back only through `STAFF_INVITATION_SELECT` / `STAFF_INVITATION_LIST_SELECT` (no `token`,
+no `recipientHash`) and stripped again by `omitToken` at every route; lazy expiry; Resend =
+supersede in one transaction; a hand-written partial unique index
+`StaffInvitation_pending_teamId_invitedEmail_key ON (teamId, invitedEmail) WHERE status = 'PENDING'`
+(migration `20261115120000_staff_invitation`, mapped to a 400 by `createOrConflict`); `emailEquals`
+for every address match and the address stored trimmed and lower-cased; the shared
+`assertResendCooldown` window; awaited sends bounded at 5 s with a per-send `emailSent` flag.
+
+- **Why a separate table, not a nullable `TeamInvitation.playerId`.** `TeamInvitation` rows are
+  player invitations everywhere they are read (`GET /invitations`, the roster chips, the case-3
+  "Invited" section, old app builds that dereference `invitation.player`); a staff row in that
+  table would reach all of them. A new kind, like the guardian one, is invisible to every reader
+  that does not ask for it.
+- **The consent rule (claim-by-email hazard).** `WorkOSService.syncUser` claims any `User` row
+  holding an address with a null `workosUserId` on the first sign-in with that address, so a
+  pre-provisioned row is a standing grant of whatever hangs off it. **Invite time creates no
+  `User` row**: the invitation holds only the address and the role type. The account (when the
+  address has none) and the `TeamStaff` row are created **on accept**, by the person holding the
+  emailed link or signed in with the address. A new account is `COACH` for a coaching role and
+  `PLAYER` (the default, so the app's role step asks) for a team manager, not managed,
+  `emailVerified: false`, named with the email local part (the placeholder the app's one-time name
+  prompt replaces) and `ageConfirmedAt` null (the age screen runs at its first sign-in, and a staff
+  row is an adult signal for the under-age branches, `children-and-age.md`). An account whose staff
+  row after the accept is a coaching one (head or assistant coach; for an account already on the
+  staff, its own row) is made `COACH` from `PLAYER` or `PARENT`: the global role gates team
+  creation. A team-manager row promotes nothing.
+- **`POST /teams/:teamId/staff-invitations { email, roleType, supersede? }`** (`inviteRateLimit`).
+  Gate: **`canManageStaff`**, the predicate `POST /staff` uses (head coach, league admin, system
+  admin; an assistant coach gets 403). `roleType` is `HEAD_COACH | ASSISTANT_COACH | TEAM_MANAGER`
+  (`staffRoleTypeSchema`), resolved to the team's default role (404 when the team lacks it). Refused
+  before anything is written: team 404, 403, role 404, 400 `This person is already a staff member of
+  this team` when the address belongs to a live account on the team's staff. Then one transaction
+  that locks the inviter's `User` row and then the team row (`lockTeamRow`, the lock every staff
+  mutation takes; account deletion's user-then-team order, so the two cannot deadlock): a team-season that
+  is not its lineage's latest (`latestTeamSeasonId`, #461) answers 400 (invite the team's current
+  season); a live PENDING row for the team + address answers 400 `A pending staff invitation already
+  exists for this email` unless `supersede`; the `canManageStaff` gate is checked again behind the lock
+  (a head coach removed meanwhile, whose invitations that removal cancels under the same lock, cannot
+  slip one in after it); on **every** create the cooldown reads the newest row for the address's
+  `recipientHash` within the team's **lineage** (so a rollover, which moves only PENDING rows, does
+  not reset it; any status, so a cancel or a decline, whose hash outlives its stripped
+  address, does not reset it) and answers 429 `resend_cooldown`. Team invitations get the same cap
+  from supersede alone because a player's address lives on the `User` row; here only the invitation
+  rows know it, so cancel-and-reinvite would otherwise email the address at once. A role correction
+  waits the 2 minutes. Then lapsed PENDING
+  rows (and with `supersede` the live one, so the old link dies) are flipped to EXPIRED; the new row
+  is created (7-day expiry). 201 `{ invitation, emailSent }`. Template:
+  `services/mailer/templates/staff-invitation.ts`, link `${PUBLIC_APP_URL}/invite/<token>`; when the
+  address already belongs to a claimed account or a managed record (`acceptInApp`), the email says to
+  open the link in the app signed in with the address, since the public accept refuses it.
+- **`GET /teams/:teamId/staff-invitations`** lists the team's pending, unexpired rows (with
+  `invitedEmail` and `invitedBy { id, name, deletedAt }`) to `canManageStaff` callers only (403
+  otherwise: an invitee's address is not a staff email until they accept).
+  **`DELETE /teams/:teamId/staff-invitations/:invitationId`** cancels (same gate; 404 for another
+  team's id, checked after the 403 so a non-manager learns nothing about ids; a status-guarded
+  update, so a cancel that loses to an accept is a 400). Cancel keeps the address, like the player
+  flow.
+- **Accept, three paths.** `GET /invitations` (no `teamId`/`playerId`, status unset or PENDING)
+  carries `staffInvitations` for the caller: pending, unexpired rows whose address `emailEquals` the
+  account's, as `{ kind: 'staff', id, status, teamName, roleType, inviterName, inviterDeletedAt,
+  expiresAt }` (no token, no address). `POST /invitations/:id/accept|reject` try the id as a
+  guardian invitation, then a staff invitation (the caller's email must match `invitedEmail`, 403
+  otherwise; a declined or scrubbed row has no address to match and reads as no staff invitation,
+  so the fall-through answers 404), then a team invitation. The public `GET /invitations/by-token/:token` falls through
+  team → guardian → staff and returns the same `kind: 'staff'` view; `POST …/by-token/:token/accept`
+  accepts it. Accept answers `{ kind: 'staff', invitation, staff, alreadyStaff }` (the by-token
+  answer trims `invitation` to `{ id, status }` and `staff` to `{ teamId, roleType }`: a forwarded
+  link never reveals the invited address, the inviter's id or the account's id, name or email) and invalidates the account's usage cache. With `alreadyStaff` the web page and
+  the app say the role was not changed.
+  - **Which account:** the verified caller on the authenticated path (never a second lookup by
+    address); by token, the live account holding the address (`emailEquals`) **only if nobody has
+    signed in to it**, else a new one,
+    created **inside the accept transaction** with a native `INSERT … ON CONFLICT ("email") DO
+    NOTHING` and the same lookup, so a refused or failed accept leaves no account behind and two
+    concurrent accepts converge on one row. **By token, a claimed account or an unclaimed *managed*
+    roster record holding the address is refused 409 `sign_in_required`** (`SignInRequiredError`):
+    a forwarded link must not put a role (and a global role change) on someone's login, and a
+    managed record's coach may still rewrite its email (`PATCH /players/:id`, B2.10) and take the
+    role by pointing it at their own address. The invitee signs in with the address (which claims a
+    managed row) and accepts in the app. The check runs again on the row
+    read **after** the transaction's row lock, and Add Player's adoption locks the same row before
+    its guarded update, so an adoption racing the accept either commits first (409 here) or waits
+    and then sees the staff row (case 3).
+  - **The transaction** reads the invitation's team again under the team lock (a season rollover
+    that committed after the unlocked read moved the row onto the new team-season; the accept then
+    locks and uses that one, and a dead-invitation cancel is guarded on the team it checked), and
+    locks the account's `User` row, then the `Team` row (account deletion's
+    order: user first, teams after), so a tombstone never gets a staff row (404) and the accept
+    serialises with staff removal and re-role; **re-checks that the inviter is a live account that may
+    still manage the team's staff** (`deletedAt` null and `canManageStaff(invitedById)` behind the
+    lock; 400 otherwise; `isSystemAdmin` alone would pass a deleted ADMIN's tombstone), so a head coach
+    who is removed, demoted or deleted after sending cannot come back through an invitation sent to
+    an address they control, and a club that changes head coach re-sends (removing or demoting a head
+    coach also cancels the PENDING staff invitations they sent on that team, in the same transaction,
+    when `canManageStaff` no longer holds for them, so a league or system admin keeps theirs); refuses
+    an invitation whose team-season is no longer its lineage's latest (the staff row would land on
+    last season's team; a season rollover moves the team's PENDING staff invitations onto the new
+    team-season, and cancels the ones whose sender cannot manage the new team-season's staff, so
+    this catches only an invitation that slipped past that); and in both of those cases cancels the row after the rollback
+    (`Staff invitation cancelled` with a `reason`), so it stops showing as pending. A team that no
+    longer has the invited default role answers 400. It then flips PENDING → ACCEPTED
+    guarded on the status (the loser of a race gets 400); and creates the `TeamStaff` row with the
+    invited role **unless the account already holds one**, which is left unchanged
+    (`alreadyStaff: true`). Accepting never re-roles, so it can never demote the last head coach.
+    `POST /staff` takes no team lock, so a direct add racing the accept can hit
+    `TeamStaff_teamId_userId_key`; that P2002 rolls the accept back and answers 400 (a retry finds
+    the row and reports `alreadyStaff`).
+- `GET /invitations/:id` reads team invitations only (guardian and staff ids answer 404 there, as
+  before for guardians); the app never fetches a staff invitation by id.
+- A lazily expired staff invitation logs `Staff invitation expired`.
+- **Rejection strips the address** (the rejection-only strip of the player flow): the invitee's
+  decline sets `invitedEmail` to the per-row sentinel `deleted-<id>@invalid` in the same guarded
+  update (the sentinel and the raw-SQL scrub share `utils/stripped-email.ts`); `recipientHash`
+  stays, so the cooldown still applies to a re-invite. Cancel and expiry
+  keep the address. With no `User` row created at invite time there is nothing else to strip.
+- **A staff role's email is not the managing coach's to rewrite.** `PATCH /players/:id { email }`
+  answers 403 for a non-admin when the row holds any `TeamStaff` row, checked before the write and
+  again in the write's `where` (`teamStaff: { none: {} }`): with the email pointed at their own
+  address, signing in would claim the row and its role. This is the root guard; the ones below keep
+  such rows from arising.
+- **An accepted-but-unclaimed staff account stays unmanaged.** Add Player's case 2 never adopts a
+  row that holds a `TeamStaff` row (`teamStaff: { none: {} }` on its claim-guarded `updateMany`):
+  it re-branches to case 3 like a claimed account, because a managing coach could otherwise rewrite
+  the row's email (B2.10) and claim the staff role. For the same reason a player-invitation
+  rejection never strips the address of a row that holds a staff role (`stripUnclaimedEmail`).
+  Proven in `tests/integration/staff-invitation.db.test.ts`.
+- **Account deletion and the under-13 un-claim** expire every PENDING staff invitation to the
+  address and scrub `invitedEmail` (sentinel) and `recipientHash` on every one, in
+  `account-service.ts#scrubInvitedEmail` (D17, with the guardian invitations). Deleting an account
+  also cancels the PENDING staff invitations it sent. The data-subject
+  export carries `staffInvitations` (sent to the address) and `sentStaffInvitations`; sent staff
+  invitations that are not CANCELLED are an adult signal.
+- **App builds that predate staff invitations** never list one (`staffInvitations` is a key they
+  do not read). Opened from a link, their deep-link screen treats any `kind` other than `guardian`
+  as a team invitation: it shows "join <team>" without a role and its Accept calls
+  `POST /invitations/:id/accept`, which accepts the staff invitation correctly (the response's
+  `kind: 'staff'` is ignored). The web page (`web/app/invite/[token]/`) renders the role.
+- Tests: `tests/api/staff-invitations.test.ts` (route → real service → Prisma mock),
+  `tests/schemas/staff-invitation.test.ts`, `tests/integration/staff-invitation.db.test.ts`
+  (no `User` row at invite, the partial index and its reported name, the `first_last` look-alike,
+  account creation, the managed-record refusal, two concurrent accepts, the strip, deletion),
+  `web/__tests__/invite-page.test.tsx`.
 
 ### Mobile roster & invite-status chips (roster/invite unification)
 

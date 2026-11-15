@@ -5,6 +5,7 @@
 import { Router } from 'express';
 import { InvitationService } from '../../services/invitation-service';
 import { GuardianService } from '../../services/guardian-service';
+import { StaffInvitationService } from '../../services/staff-invitation-service';
 import {
   invitationQuerySchema,
 } from './schemas';
@@ -13,6 +14,7 @@ import { BadRequestError } from '../../utils/errors';
 import { validateUuidParams } from '../middleware/validate-params';
 import { respondWithError } from '../../utils/respond-with-error';
 import { omitToken } from './serializers';
+import { invalidateUsage } from '../../services/usage-service';
 
 const router = Router();
 
@@ -41,15 +43,22 @@ router.get('/', async (req, res) => {
     // "Accept for <child>". Team/player-scoped listings are coach views.
     const includeGuardian =
       !query.teamId && !query.playerId && (!query.status || query.status === 'PENDING');
-    const guardianInvitations = includeGuardian
-      ? await GuardianService.listPendingForUser(req.user!.id)
-      : [];
+    // Staff invitations addressed to the caller (#460) ride along the same
+    // way, under their own key: a build that predates them ignores it, so a
+    // staff invitation is never mis-rendered as a player invitation there.
+    const [guardianInvitations, staffInvitations] = includeGuardian
+      ? await Promise.all([
+          GuardianService.listPendingForUser(req.user!.id),
+          StaffInvitationService.listPendingForEmail(req.user!.email),
+        ])
+      : [[], []];
 
     res.json({
       success: true,
       ...result,
       invitations: result.invitations.map(omitToken),
       guardianInvitations: guardianInvitations.map(omitToken),
+      staffInvitations: staffInvitations.map(omitToken),
     });
   } catch (error) {
     respondWithError(res, error, { log: 'Error listing invitations', fallback: 'Failed to list invitations' });
@@ -100,6 +109,25 @@ router.post('/:id/accept', validateUuidParams('id'), async (req, res) => {
       return;
     }
 
+    // Staff invitation (#460) addressed to the signed-in account? Tried
+    // before the team kind: its accept creates a TeamStaff row. An app build
+    // that predates staff invitations reaches here from its deep-link screen.
+    const staffInvitation = await StaffInvitationService.findInvitationForUser(id, req.user!.email);
+    if (staffInvitation) {
+      const accepted = await StaffInvitationService.acceptInvitation(id, req.user!.id, staffInvitation);
+      // Joining a team's staff changes the caller's metered team count.
+      await invalidateUsage(req.user!.id);
+      res.json({
+        success: true,
+        kind: 'staff',
+        invitation: omitToken(accepted.invitation),
+        staff: accepted.staff,
+        alreadyStaff: accepted.alreadyStaff,
+        message: 'Invitation accepted. You have been added to the team staff.',
+      });
+      return;
+    }
+
     const result = await InvitationService.acceptInvitation(id, req.user!.id);
 
     res.json({
@@ -128,6 +156,18 @@ router.post('/:id/reject', validateUuidParams('id'), async (req, res) => {
       res.json({
         success: true,
         kind: 'guardian',
+        invitation: omitToken(rejected),
+        message: 'Invitation rejected.',
+      });
+      return;
+    }
+
+    const staffInvitation = await StaffInvitationService.findInvitationForUser(id, req.user!.email);
+    if (staffInvitation) {
+      const rejected = await StaffInvitationService.rejectInvitation(id, req.user!.id, staffInvitation);
+      res.json({
+        success: true,
+        kind: 'staff',
         invitation: omitToken(rejected),
         message: 'Invitation rejected.',
       });

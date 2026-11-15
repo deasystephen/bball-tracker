@@ -177,6 +177,12 @@ checked again behind the team row lock; the target season must be in the team's 
 league, which `canManageStaff` there already lets the caller write, and creating the
 season needs `isLeagueAdmin`; detail in `stats-and-lineage.md`).
 
+**Inviting staff by email (#460)** goes through the same gate: `POST /teams/:teamId/staff-invitations`,
+its list and its cancel all require `canManageStaff` (an assistant coach gets 403), never a roster
+or read predicate. Accepting never re-roles an existing staff row, so it cannot remove a head coach;
+it takes the team row lock like every staff mutation. Flow, consent rule and the old-build
+behaviour: `roster-and-invitations.md`, Staff invitations.
+
 **One role per user per team (#463).** `TeamStaff` is `@@unique([teamId, userId])`
 (index `TeamStaff_teamId_userId_key`): a user holds at most one staff row, and so one
 role, on a team. `getTeamPermissions` reads that one row by the compound key and returns

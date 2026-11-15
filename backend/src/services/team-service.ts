@@ -26,6 +26,8 @@ import {
   NotLatestSeasonError,
   SeasonArchivedError,
   SeasonNotAfterSourceError,
+  StaffTargetNotFoundError,
+  StaffTargetNeedsInvitationError,
 } from '../utils/errors';
 import {
   Feature,
@@ -62,7 +64,7 @@ const TEAM_SUMMARY_SELECT = {
   name: true,
 } satisfies Prisma.TeamSelect;
 
-const TEAM_STAFF_INCLUDE = {
+export const TEAM_STAFF_INCLUDE = {
   user: { select: USER_SUMMARY_WITH_EMAIL_SELECT },
   role: true,
 } satisfies Prisma.TeamStaffInclude;
@@ -1138,6 +1140,30 @@ export class TeamService {
             });
           }
 
+          // Pending staff invitations follow the team into the new season
+          // (#460): accept only lands on a lineage's latest team-season, so
+          // left on this row they would die. Their links keep working.
+          const pendingInviters = await tx.staffInvitation.findMany({
+            where: { teamId, status: 'PENDING' },
+            select: { invitedById: true },
+            distinct: ['invitedById'],
+          });
+          await tx.staffInvitation.updateMany({
+            where: { teamId, status: 'PENDING' },
+            data: { teamId: created.id },
+          });
+          // A sender who cannot manage the new team-season's staff (not
+          // carried, or no longer an admin) cannot back theirs: cancel those
+          // now rather than let the invitee meet a dead link.
+          for (const { invitedById } of pendingInviters) {
+            if (!(await canManageStaff(invitedById, created.id, tx))) {
+              await tx.staffInvitation.updateMany({
+                where: { teamId: created.id, invitedById, status: 'PENDING' },
+                data: { status: 'CANCELLED' },
+              });
+            }
+          }
+
           return {
             teamId: created.id,
             created: true,
@@ -1419,29 +1445,54 @@ export class TeamService {
   private static async resolveStaffTarget(
     target: Pick<AddStaffInput, 'userId' | 'email'>
   ): Promise<{ id: string; name: string }> {
-    let user: { id: string; name: string } | null = null;
+    const select = { id: true, name: true, workosUserId: true, isManaged: true } as const;
+    let row: { id: string; name: string; workosUserId: string | null; isManaged: boolean } | null = null;
     if (target.userId) {
-      user = await prisma.user.findUnique({
-        where: { id: target.userId, deletedAt: null },
-        select: { id: true, name: true },
-      });
+      row = await prisma.user.findUnique({ where: { id: target.userId, deletedAt: null }, select });
     } else if (target.email) {
       // Never build the filter from a missing email: Prisma drops an
       // `undefined` condition, and the lookup would match the first user.
-      user = await prisma.user.findFirst({
-        where: { email: emailEquals(target.email), deletedAt: null },
-        select: { id: true, name: true },
-      });
+      row = await prisma.user.findFirst({ where: { email: emailEquals(target.email), deletedAt: null }, select });
     }
 
-    if (!user) {
-      throw new NotFoundError('User not found');
+    if (!row) {
+      // A coded 404: the app offers a staff invitation for an unknown address (#460).
+      throw new StaffTargetNotFoundError();
     }
-    return user;
+    // An unclaimed managed roster record is not a staff target, by id or by
+    // address (#460): a staff invitation, accepted after signing in, is the
+    // way. (Its email cannot be re-addressed while it holds a staff role
+    // anyway: PlayerService.updatePlayer.)
+    if (row.workosUserId === null && row.isManaged) {
+      throw new StaffTargetNeedsInvitationError();
+    }
+    return { id: row.id, name: row.name };
+  }
+
+
+  /**
+   * Run after a staff row is removed or re-roled, inside that transaction:
+   * when the user can no longer manage the team's staff (`canManageStaff`,
+   * read through the transaction), the PENDING staff invitations they sent on
+   * it are cancelled (#460). Accept re-checks the inviter anyway; this keeps
+   * the pending lists honest. An admin who still manages staff keeps theirs.
+   */
+  private static async cancelSentStaffInvitations(
+    tx: Prisma.TransactionClient,
+    teamId: string,
+    staffUserId: string
+  ): Promise<void> {
+    if (await canManageStaff(staffUserId, teamId, tx)) {
+      return;
+    }
+    await tx.staffInvitation.updateMany({
+      where: { teamId, invitedById: staffUserId, status: 'PENDING' },
+      data: { status: 'CANCELLED' },
+    });
   }
 
   /** Find the team's default role row for a role type (e.g. HEAD_COACH). */
-  private static async findRoleByType(
+  static async findRoleByType(
     teamId: string,
     roleType: StaffRoleType,
     db: Prisma.TransactionClient = prisma
@@ -1609,6 +1660,10 @@ export class TeamService {
           }),
         new NotFoundError('User is not a staff member of this team')
       );
+      // A demoted head coach's pending staff invitations die with the right (#460).
+      if (current.role.type === 'HEAD_COACH') {
+        await TeamService.cancelSentStaffInvitations(tx, teamId, staffUserId);
+      }
       return { current, updated };
     });
 
@@ -1669,10 +1724,15 @@ export class TeamService {
 
       // Account deletion removes a non-head-coach's staff rows without this
       // lock, so the row can still vanish under us: 404, not a P2025 500.
-      return orNotFound(
+      const deleted = await orNotFound(
         () => tx.teamStaff.delete({ where: { id: existing.id } }),
         new NotFoundError('User is not a staff member of this team')
       );
+      // A removed head coach's pending staff invitations die with the right (#460).
+      if (existing.role.type === 'HEAD_COACH') {
+        await TeamService.cancelSentStaffInvitations(tx, teamId, staffUserId);
+      }
+      return deleted;
     });
 
     logger.info('Staff removed', {

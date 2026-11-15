@@ -50,6 +50,10 @@ const ALLOWED: Record<string, string> = {
     'runs inside guardian unlink and account deletion, which log `Guardian unlinked` / the deletion',
   'guardian-service.ts#findOrCreateParent':
     'provisions the invited adult for inviteGuardian (plain and Resend), which logs `Guardian invitation sent` with parentId',
+  'team-service.ts#cancelSentStaffInvitations':
+    'cancels a removed or demoted head coach\'s pending staff invitations inside removeStaffMember / changeStaffRole, which log `Staff removed` / `Staff role changed`',
+  'staff-invitation-service.ts#resolveAcceptingUser':
+    'provisions the invitee account inside staff accept, which logs `Staff invitation accepted` with accountCreated',
   'guardian-service.ts#resolveAcceptingParent':
     'provisions the parent row inside guardian accept, which logs `Guardian linked`',
   'invitation-service.ts#createInvitationRow':

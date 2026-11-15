@@ -24,7 +24,7 @@ import { AccountService } from '../../src/services/account-service';
 import { GuardianService } from '../../src/services/guardian-service';
 import { InvitationService } from '../../src/services/invitation-service';
 import { TeamService } from '../../src/services/team-service';
-import { NotFoundError } from '../../src/utils/errors';
+import { StaffTargetNotFoundError } from '../../src/utils/errors';
 import { emailEquals } from '../../src/utils/email-match';
 import { logger } from '../../src/utils/logger';
 import { spyOnInfo } from '../support/domain-events';
@@ -224,7 +224,7 @@ describe('Add staff by email', () => {
 
     await expect(
       TeamService.addStaffMember(teamId, { email: address('staff_coach'), roleType: 'ASSISTANT_COACH' }, coachId)
-    ).rejects.toBeInstanceOf(NotFoundError);
+    ).rejects.toBeInstanceOf(StaffTargetNotFoundError);
 
     expect(await prisma.teamStaff.count({ where: { teamId, userId: decoy } })).toBe(0);
   });

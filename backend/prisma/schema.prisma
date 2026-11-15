@@ -157,6 +157,7 @@ model User {
   guardiansAsChild           Guardian[]           @relation("GuardianChild")
   guardianInvitationsAsChild GuardianInvitation[] @relation("GuardianInvitationChild")
   sentGuardianInvitations    GuardianInvitation[] @relation("GuardianInvitationInviter")
+  sentStaffInvitations       StaffInvitation[]    @relation("StaffInvitationInviter")
   playerStats                PlayerStats[]
   gameRsvps                  GameRsvp[]
   pushTokens                 PushToken[]
@@ -314,6 +315,7 @@ model Team {
   games               Game[]
   invitations         TeamInvitation[]
   guardianInvitations GuardianInvitation[]
+  staffInvitations    StaffInvitation[]
   teamStats           TeamStats[]
   announcements       Announcement[]
   calendarFeedTokens  CalendarFeedToken[]
@@ -451,6 +453,47 @@ model GuardianInvitation {
   // WHERE status = 'PENDING' — see migration 20260823120000_guardian_invitation.
   // Do not add a plain @@unique here.
   @@index([childId, invitedEmail])
+  @@index([invitedEmail])
+  @@index([status])
+  @@index([expiresAt])
+}
+
+/// Staff invitation by email (#460): a head coach (canManageStaff) invites an
+/// address to a staff role on a team. Unlike Add Player, NO `User` row is
+/// created at invite time, so the address is never a standing grant that
+/// `syncUser`'s claim-by-email could hand to whoever signs up with it. The
+/// account (when the address has none) and the `TeamStaff` row are created
+/// only when the invitee accepts. docs/architecture/roster-and-invitations.md.
+model StaffInvitation {
+  id            String           @id @default(uuid())
+  token         String           @unique
+  teamId        String
+  /// Lower-cased at write. Replaced by a per-row sentinel when the invitee
+  /// declines (the rejection-only strip) and by account deletion.
+  invitedEmail  String
+  /// hashRecipient() of the address at creation; survives the strip and keys
+  /// the resend cooldown (#715 window).
+  recipientHash String
+  /// One of HEAD_COACH, ASSISTANT_COACH, TEAM_MANAGER (staffRoleTypeSchema);
+  /// resolved to the team's default TeamRole on accept.
+  roleType      TeamRoleType
+  invitedById   String
+  status        InvitationStatus @default(PENDING)
+  expiresAt     DateTime
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  acceptedAt    DateTime?
+  rejectedAt    DateTime?
+
+  team      Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  invitedBy User @relation("StaffInvitationInviter", fields: [invitedById], references: [id])
+
+  // Like TeamInvitation: one PENDING invitation per (teamId, invitedEmail) is
+  // a hand-written PARTIAL unique index Prisma cannot express:
+  // "StaffInvitation_pending_teamId_invitedEmail_key" ... WHERE status =
+  // 'PENDING' (migration 20261115120000_staff_invitation). No plain @@unique.
+  @@index([teamId, invitedEmail])
+  @@index([teamId, recipientHash])
   @@index([invitedEmail])
   @@index([status])
   @@index([expiresAt])

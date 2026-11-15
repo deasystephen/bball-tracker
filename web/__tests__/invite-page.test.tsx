@@ -1,7 +1,11 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import InvitePage from '../app/invite/[token]/page';
-import type { GuardianInvitationDetails, TeamInvitationDetails } from '../lib/invitation-types';
+import type {
+  GuardianInvitationDetails,
+  StaffInvitationDetails,
+  TeamInvitationDetails,
+} from '../lib/invitation-types';
 import { getInvitation } from '../lib/invitation-lookup';
 import { STRINGS } from '../lib/strings';
 
@@ -250,5 +254,51 @@ describe('invite page inviter tombstone (#814)', () => {
     const html = await renderPage();
     expect(html).toContain(STRINGS.deletedUser);
     expect(html).not.toContain('Stored Child Literal');
+  });
+});
+
+describe('invite page staff invitation (#460)', () => {
+  function staffInvitation(overrides: Partial<StaffInvitationDetails> = {}): StaffInvitationDetails {
+    return {
+      kind: 'staff',
+      id: 'sinv-1',
+      status: 'PENDING',
+      teamName: 'Rockets',
+      roleType: 'ASSISTANT_COACH',
+      inviterName: 'Coach Carter',
+      inviterDeletedAt: null,
+      expiresAt: future(),
+      ...overrides,
+    };
+  }
+
+  it('names the team and the role, never as a player invitation', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(jsonResponse(200, { success: true, invitation: staffInvitation() }))
+    );
+    const html = await renderPage();
+    expect(html).toContain('invited to join a team as Assistant Coach');
+    expect(html).toContain('Role');
+    expect(html).toContain('Rockets');
+    expect(html).toContain('Coach Carter');
+    expect(html).not.toContain('Position');
+    expect(html).not.toContain('Jersey');
+  });
+
+  it('labels a tombstoned inviter from inviterDeletedAt', async () => {
+    const invitation = staffInvitation({ inviterName: 'Stored Literal Name', inviterDeletedAt: '2026-10-01T00:00:00.000Z' });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, { success: true, invitation })));
+    const html = await renderPage();
+    expect(html).toContain(STRINGS.deletedUser);
+    expect(html).not.toContain('Stored Literal Name');
+  });
+
+  it('renders the cancelled card for a cancelled staff invitation', async () => {
+    const invitation = staffInvitation({ status: 'CANCELLED', roleType: 'HEAD_COACH' });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, { success: true, invitation })));
+    const html = await renderPage();
+    expect(html).toContain('Invitation Cancelled');
+    expect(html).toContain('Rockets');
   });
 });

@@ -268,6 +268,55 @@ export class UploadExpiredError extends DetailedError<Record<string, unknown>> {
   }
 }
 
+/**
+ * 409 `sign_in_required` — a staff invitation (#460) cannot be accepted from
+ * the public link because the address belongs to an account: a claimed one
+ * (a forwarded link must not act on someone's login) or an unclaimed managed
+ * roster record (its managing coach may still rewrite that email, B2.10, so a
+ * staff role on the row would be a grant the coach could claim). The invitee
+ * signs in with the address and accepts in the app instead.
+ */
+export class SignInRequiredError extends DetailedError<Record<string, never>> {
+  constructor() {
+    super(
+      'sign_in_required',
+      {},
+      'Sign in to the app with this email address to accept this invitation',
+      409
+    );
+    Object.setPrototypeOf(this, SignInRequiredError.prototype);
+  }
+}
+
+/**
+ * 404 `staff_target_not_found` — `POST /teams/:teamId/staff` found no live
+ * account for the `userId` / `email` (#460). The app branches on the code to
+ * offer a staff invitation instead; the message is the old plain 404's.
+ */
+export class StaffTargetNotFoundError extends DetailedError<Record<string, never>> {
+  constructor() {
+    super('staff_target_not_found', {}, 'User not found', 404);
+    Object.setPrototypeOf(this, StaffTargetNotFoundError.prototype);
+  }
+}
+
+/**
+ * 400 `staff_target_needs_invitation` — `POST /teams/:teamId/staff` was given
+ * an unclaimed managed roster record (#460). The app offers a staff invitation
+ * for the address instead, as for an unknown one.
+ */
+export class StaffTargetNeedsInvitationError extends DetailedError<Record<string, never>> {
+  constructor() {
+    super(
+      'staff_target_needs_invitation',
+      {},
+      'This address belongs to a roster record that has not signed in. Send a staff invitation instead.',
+      400
+    );
+    Object.setPrototypeOf(this, StaffTargetNeedsInvitationError.prototype);
+  }
+}
+
 export class ConflictError extends AppError {
   constructor(message: string = 'Conflict') {
     super(message, 409);

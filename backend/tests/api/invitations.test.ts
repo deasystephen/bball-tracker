@@ -30,9 +30,12 @@ jest.mock('../../src/api/auth/middleware', () => ({
 // Mock the service
 jest.mock('../../src/services/invitation-service');
 jest.mock('../../src/services/guardian-service');
+jest.mock('../../src/services/staff-invitation-service');
 
 import { GuardianService } from '../../src/services/guardian-service';
 const mockGuardianService = GuardianService as jest.Mocked<typeof GuardianService>;
+import { StaffInvitationService } from '../../src/services/staff-invitation-service';
+const mockStaffInvitationService = StaffInvitationService as jest.Mocked<typeof StaffInvitationService>;
 
 const mockInvitationService = InvitationService as jest.Mocked<typeof InvitationService>;
 
@@ -72,6 +75,10 @@ describe('Invitations API', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockGuardianService.listPendingForUser.mockResolvedValue([]);
+    // Staff invitations (#460) are their own suite (staff-invitations.test.ts):
+    // here no id is a staff invitation and the caller has none pending.
+    mockStaffInvitationService.listPendingForEmail.mockResolvedValue([]);
+    mockStaffInvitationService.findInvitationForUser.mockResolvedValue(null);
   });
 
   describe('GET /api/v1/invitations', () => {

@@ -12,11 +12,25 @@ describe('acceptInvitation (the browser "Accept without app")', () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { success: true }));
     vi.stubGlobal('fetch', fetchMock);
 
-    expect(await acceptInvitation(API, 'a/b')).toEqual({ ok: true });
+    expect(await acceptInvitation(API, 'a/b')).toEqual({ ok: true, alreadyStaff: false });
     expect(fetchMock).toHaveBeenCalledWith(`${API}/api/v1/invitations/by-token/a%2Fb/accept`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Hooplings-Client': 'web' },
     });
+  });
+
+  it('passes on alreadyStaff from a staff accept (#460): the role was left unchanged', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(jsonResponse(200, { success: true, kind: 'staff', alreadyStaff: true }))
+    );
+    expect(await acceptInvitation(API, 'tok')).toEqual({ ok: true, alreadyStaff: true });
+  });
+
+  it('shows the 409 sign_in_required message for a staff link that must be accepted in the app', async () => {
+    const error = 'Sign in to the app with this email address to accept this invitation';
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(409, { error, code: 'sign_in_required' })));
+    expect(await acceptInvitation(API, 'tok')).toEqual({ ok: false, message: error });
   });
 
   it("shows the API's error message on a 4xx, or the fallback when there is none", async () => {

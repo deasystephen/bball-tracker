@@ -125,6 +125,21 @@ export const addStaffSchema = z
   });
 
 /**
+ * Schema for inviting an address to a staff role (#460):
+ * `POST /teams/:teamId/staff-invitations`. The address may have no account;
+ * none is created until the invitee accepts. Trimmed and lower-cased here,
+ * the form every invitation stores.
+ */
+export const inviteStaffSchema = z.object({
+  email: z.string().trim().toLowerCase().email('Invalid email format').max(255),
+  roleType: staffRoleTypeSchema,
+  // Resend: expire the live PENDING invitation for this team + address and
+  // create a fresh one (new token) in one transaction. Without it a live
+  // PENDING invitation is a 400 (dedupe).
+  supersede: z.boolean().default(false),
+});
+
+/**
  * Schema for changing a staff member's role
  */
 export const updateStaffRoleSchema = z.object({
@@ -210,6 +225,8 @@ export type AddPlayerInput = z.infer<typeof addPlayerSchema>;
 export type UpdateTeamMemberInput = z.infer<typeof updateTeamMemberSchema>;
 export type StaffRoleType = z.infer<typeof staffRoleTypeSchema>;
 export type AddStaffInput = z.infer<typeof addStaffSchema>;
+// Input shape (supersede optional) so service callers, tests included, can omit it.
+export type InviteStaffInput = z.input<typeof inviteStaffSchema>;
 export type UpdateStaffRoleInput = z.infer<typeof updateStaffRoleSchema>;
 export type CreateRoleInput = z.infer<typeof createRoleSchema>;
 export type TeamQueryParams = z.infer<typeof teamQuerySchema>;

@@ -635,7 +635,8 @@ describe('AccountService.deleteAccount (real Postgres)', () => {
       [
         'announcementReplies', 'announcements', 'calendarFeedTokens', 'exportedAt', 'gameEvents', 'gameRsvps',
         'guardianInvitations', 'guardiansAsChild', 'guardiansAsParent', 'leagueAdmins', 'personalLeague', 'playerStats',
-        'pushTokens', 'receivedInvitations', 'sentGuardianInvitations', 'sentInvitations', 'teamMembers', 'teamStaff', 'user',
+        'pushTokens', 'receivedInvitations', 'sentGuardianInvitations', 'sentInvitations', 'sentStaffInvitations', 'staffInvitations',
+        'teamMembers', 'teamStaff', 'user',
       ].sort()
     );
     expect(data.gameEvents).toHaveLength(1);

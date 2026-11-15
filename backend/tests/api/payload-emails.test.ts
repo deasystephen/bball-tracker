@@ -579,6 +579,7 @@ describe('Emails in payloads (#654 #661 #679 #683)', () => {
       (mockPrisma.teamInvitation.findMany as jest.Mock).mockResolvedValue([]);
       (mockPrisma.teamInvitation.count as jest.Mock).mockResolvedValue(0);
       (mockPrisma.guardian.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.staffInvitation.findMany as jest.Mock).mockResolvedValue([]);
       (mockPrisma.guardianInvitation.findMany as jest.Mock).mockImplementation((args: Spec) =>
         Promise.resolve([
           project(
