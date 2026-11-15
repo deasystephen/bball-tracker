@@ -187,7 +187,19 @@ describe('PATCH /api/v1/practices/:id', () => {
     // The two FOR UPDATE reads: the series, then the session.
     mockPrisma.$queryRaw
       .mockResolvedValueOnce([{ cancelledAt: null }])
-      .mockResolvedValueOnce([{ status: 'SCHEDULED', exceptionFields: [] }]);
+      .mockResolvedValueOnce([
+        {
+          status: 'SCHEDULED',
+          exceptionFields: [],
+          type: 'PRACTICE',
+          title: null,
+          location: 'Main gym',
+          notes: null,
+          startsAt: new Date('2030-01-15T23:00:00Z'),
+          durationMinutes: 90,
+          timezone: 'America/New_York',
+        },
+      ]);
 
     const res = await request(app).patch(`/api/v1/practices/${SESSION_ID}`).send({ location: 'Gym B' });
 
@@ -264,7 +276,7 @@ describe('availability', () => {
     (hasTeamPermission as jest.Mock).mockResolvedValue(false);
     mockPrisma.teamMember.findUnique.mockResolvedValue({ id: 'm' });
     mockPrisma.practiceAvailability.upsert.mockResolvedValue({ id: 'av' });
-    mockPrisma.practiceAvailability.findUnique.mockResolvedValue({
+    mockPrisma.practiceAvailability.findUniqueOrThrow.mockResolvedValue({
       id: 'av',
       sessionId: SESSION_ID,
       userId: CHILD_ID,

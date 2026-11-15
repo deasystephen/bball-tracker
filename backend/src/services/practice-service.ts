@@ -52,6 +52,36 @@ export const PRACTICE_EXCEPTION_FIELDS = [
   'timezone',
 ] as const;
 
+/** A session row as `updatePractice` reads it under its lock. */
+type LockedSession = {
+  status: string;
+  exceptionFields: string[];
+  type: string;
+  title: string | null;
+  location: string | null;
+  notes: string | null;
+  startsAt: Date;
+  durationMinutes: number;
+  timezone: string;
+};
+
+/**
+ * The fields of `data` whose value differs from the stored row: only those
+ * become overrides, so a client that sends the whole form after changing the
+ * start time pins the start time, not the location.
+ */
+export function changedFields(
+  stored: LockedSession,
+  data: UpdatePracticeInput
+): Array<(typeof PRACTICE_EXCEPTION_FIELDS)[number]> {
+  return PRACTICE_EXCEPTION_FIELDS.filter((field) => {
+    const next = data[field];
+    if (next === undefined) return false;
+    if (field === 'startsAt') return new Date(next as string).getTime() !== stored.startsAt.getTime();
+    return next !== stored[field];
+  });
+}
+
 /** The team and series context every session payload carries. */
 export const PRACTICE_INCLUDE = {
   team: { select: { id: true, name: true } },
@@ -287,7 +317,6 @@ export class PracticeService {
     if (data.startsAt !== undefined) {
       assertPracticeStartInRange(new Date(data.startsAt));
     }
-    const edited = PRACTICE_EXCEPTION_FIELDS.filter((field) => data[field] !== undefined);
 
     const practice = await prisma.$transaction(async (tx) => {
       if (session.seriesId) {
@@ -297,8 +326,10 @@ export class PracticeService {
           throw new BadRequestError('This practice series was cancelled');
         }
       }
-      const rows = await tx.$queryRaw<Array<{ status: string; exceptionFields: string[] }>>`
-        SELECT "status", "exceptionFields" FROM "PracticeSession" WHERE "id" = ${sessionId} FOR NO KEY UPDATE`;
+      const rows = await tx.$queryRaw<Array<LockedSession>>`
+        SELECT "status", "exceptionFields", "type", "title", "location", "notes", "startsAt",
+               "durationMinutes", "timezone"
+        FROM "PracticeSession" WHERE "id" = ${sessionId} FOR NO KEY UPDATE`;
       const locked = rows[0];
       if (!locked) {
         throw new NotFoundError('Practice not found');
@@ -320,7 +351,9 @@ export class PracticeService {
           ...(session.seriesId
             ? {
                 isException: true,
-                exceptionFields: [...new Set([...locked.exceptionFields, ...edited])].sort(),
+                exceptionFields: [
+                  ...new Set([...locked.exceptionFields, ...changedFields(locked, data)]),
+                ].sort(),
               }
             : {}),
         },
@@ -433,9 +466,9 @@ export class PracticeService {
       throw new BadRequestError('This practice was cancelled');
     }
 
-    let written: { id: string };
+    let row: AvailabilityWithUser;
     try {
-      written = await prisma.$transaction(async (tx) => {
+      row = await prisma.$transaction(async (tx) => {
         // FOR SHARE: a cancel (an UPDATE) or a delete waits for this answer to
         // commit, or this waits for them and then sees the new state, so an
         // answer never lands on a session that was cancelled under it.
@@ -447,10 +480,18 @@ export class PracticeService {
         if (locked[0].status === 'CANCELLED') {
           throw new BadRequestError('This practice was cancelled');
         }
+        // FOR SHARE on the player too: account deletion locks the User row
+        // FOR UPDATE and purges answers, so it either waits for this write
+        // (and purges it) or has tombstoned the row, which is refused here.
+        const player = await tx.$queryRaw<Array<{ deletedAt: Date | null }>>`
+          SELECT "deletedAt" FROM "User" WHERE "id" = ${subjectId} FOR SHARE`;
+        if (!player[0] || player[0].deletedAt) {
+          throw new NotFoundError('Player not found');
+        }
         // No `include`: a plain upsert compiles to INSERT … ON CONFLICT, so two
         // first answers at once (a double tap, a guardian and the player) both
         // land instead of one failing on the unique key. No P2002 retry.
-        return tx.practiceAvailability.upsert({
+        const written = await tx.practiceAvailability.upsert({
           where: { sessionId_userId: { sessionId, userId: subjectId } },
           create: { sessionId, userId: subjectId, status: data.status, comment: data.comment ?? null },
           update: {
@@ -459,22 +500,18 @@ export class PracticeService {
           },
           select: { id: true },
         });
+        // Same transaction: the answer that committed is the one returned.
+        return tx.practiceAvailability.findUniqueOrThrow({
+          where: { id: written.id },
+          include: AVAILABILITY_INCLUDE,
+        });
       });
     } catch (err) {
-      // The player's row was hard-deleted after the roster check (the session
-      // row is locked above, so it cannot be the one that vanished).
+      // Both parent rows are locked above; kept as a last guard.
       if (isForeignKeyViolation(err)) {
         throw new NotFoundError('Player not found');
       }
       throw err;
-    }
-    const row = await prisma.practiceAvailability.findUnique({
-      where: { id: written.id },
-      include: AVAILABILITY_INCLUDE,
-    });
-    if (!row) {
-      // The session (and the answer with it) was deleted right after the write.
-      throw new NotFoundError('Practice not found');
     }
 
     logger.info('Practice availability upserted', {
@@ -503,15 +540,16 @@ export class PracticeService {
       throw new ForbiddenError('You do not have access to this practice');
     }
 
-    const [rows, canManageRoster, childIds] = await Promise.all([
+    const [rows, canManageRoster] = await Promise.all([
       prisma.practiceAvailability.findMany({
         where: countedAvailabilityWhere(sessionId, session.teamId),
         include: AVAILABILITY_INCLUDE,
         orderBy: { createdAt: 'asc' },
       }),
       hasTeamPermission(userId, session.teamId, 'canManageRoster'),
-      getGuardianChildIds(userId),
     ]);
+    // A roster manager already sees every comment; only others need their children.
+    const childIds = canManageRoster ? [] : await getGuardianChildIds(userId);
 
     return {
       availability: rows.map((row) => toAvailabilityView(row, userId, canManageRoster, childIds)),

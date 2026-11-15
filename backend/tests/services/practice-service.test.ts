@@ -237,6 +237,20 @@ describe('PracticeService.updatePractice', () => {
     mockPrisma.$queryRaw.mockReset().mockResolvedValue([{ '?column?': 1 }]);
   });
 
+  /** A session row as the lock reads it. */
+  const lockedRow = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
+    status: 'SCHEDULED',
+    exceptionFields: [],
+    type: 'PRACTICE',
+    title: null,
+    location: 'Gym',
+    notes: null,
+    startsAt: new Date('2030-01-15T23:00:00Z'),
+    durationMinutes: 90,
+    timezone: 'America/New_York',
+    ...overrides,
+  });
+
   /** The two FOR UPDATE reads, series first: the series row, then the session row. */
   const lockReads = (series: { cancelledAt: Date | null } | null, session: Record<string, unknown> | null): void => {
     if (series !== undefined) mockPrisma.$queryRaw.mockResolvedValueOnce(series ? [series] : []);
@@ -246,7 +260,7 @@ describe('PracticeService.updatePractice', () => {
   it('locks series then session, marks the occurrence an exception and merges the fields it set', async () => {
     const spy = spyOnInfo();
     mockPrisma.practiceSession.findUnique.mockResolvedValue(scheduled);
-    lockReads({ cancelledAt: null }, { status: 'SCHEDULED', exceptionFields: ['notes'] });
+    lockReads({ cancelledAt: null }, lockedRow({ exceptionFields: ['notes'] }));
     mockPrisma.practiceSession.update.mockResolvedValue(practiceRow({ seriesId: SERIES, isException: true }));
 
     await PracticeService.updatePractice(
@@ -292,9 +306,31 @@ describe('PracticeService.updatePractice', () => {
     });
   });
 
+  it('records only the fields whose value changed, so a full-form submit pins just what moved', async () => {
+    mockPrisma.practiceSession.findUnique.mockResolvedValue(scheduled);
+    lockReads({ cancelledAt: null }, lockedRow());
+    mockPrisma.practiceSession.update.mockResolvedValue(practiceRow({ seriesId: SERIES, isException: true }));
+
+    await PracticeService.updatePractice(
+      SESSION,
+      {
+        type: 'PRACTICE',
+        title: null,
+        location: 'Gym',
+        notes: null,
+        startsAt: '2030-01-15T19:30:00-05:00', // moved from 18:00 local
+        durationMinutes: 90,
+        timezone: 'America/New_York',
+      },
+      USER
+    );
+
+    expect(mockPrisma.practiceSession.update.mock.calls[0][0].data.exceptionFields).toEqual(['startsAt']);
+  });
+
   it('does not lock a series or mark a standalone session, and writes only the fields given', async () => {
     mockPrisma.practiceSession.findUnique.mockResolvedValue({ ...scheduled, seriesId: null });
-    mockPrisma.$queryRaw.mockResolvedValueOnce([{ status: 'SCHEDULED', exceptionFields: [] }]);
+    mockPrisma.$queryRaw.mockResolvedValueOnce([lockedRow()]);
     mockPrisma.practiceSession.update.mockResolvedValue(practiceRow());
     await PracticeService.updatePractice(SESSION, { location: 'Gym C' }, USER);
     expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(1);
@@ -321,7 +357,7 @@ describe('PracticeService.updatePractice', () => {
     );
 
     mockPrisma.$queryRaw.mockReset();
-    lockReads({ cancelledAt: null }, { status: 'CANCELLED', exceptionFields: [] });
+    lockReads({ cancelledAt: null }, lockedRow({ status: 'CANCELLED' }));
     await expect(PracticeService.updatePractice(SESSION, { title: 'x' }, USER)).rejects.toThrow(
       'A cancelled practice cannot be edited'
     );
@@ -428,7 +464,7 @@ describe('PracticeService.upsertAvailability', () => {
   it('writes the caller’s own row and returns it with their email', async () => {
     const spy = spyOnInfo();
     mockPrisma.practiceAvailability.upsert.mockResolvedValue({ id: 'av' });
-    mockPrisma.practiceAvailability.findUnique.mockResolvedValue(availabilityRow(USER, 'me@example.test'));
+    mockPrisma.practiceAvailability.findUniqueOrThrow.mockResolvedValue(availabilityRow(USER, 'me@example.test'));
 
     const row = await PracticeService.upsertAvailability(SESSION, USER, { status: 'YES', comment: 'Late' });
 
@@ -452,7 +488,7 @@ describe('PracticeService.upsertAvailability', () => {
 
   it('keeps an existing comment when none is sent', async () => {
     mockPrisma.practiceAvailability.upsert.mockResolvedValue({ id: 'av' });
-    mockPrisma.practiceAvailability.findUnique.mockResolvedValue(availabilityRow(USER, null));
+    mockPrisma.practiceAvailability.findUniqueOrThrow.mockResolvedValue(availabilityRow(USER, null));
     await PracticeService.upsertAvailability(SESSION, USER, { status: 'NO' });
     expect(mockPrisma.practiceAvailability.upsert.mock.calls[0][0].update).toEqual({ status: 'NO' });
   });
@@ -461,7 +497,7 @@ describe('PracticeService.upsertAvailability', () => {
     mocked(isGuardianOf).mockResolvedValue(true);
     mocked(hasTeamPermission).mockResolvedValue(false);
     mockPrisma.practiceAvailability.upsert.mockResolvedValue({ id: 'av' });
-    mockPrisma.practiceAvailability.findUnique.mockResolvedValue(availabilityRow(CHILD, 'kid@example.test'));
+    mockPrisma.practiceAvailability.findUniqueOrThrow.mockResolvedValue(availabilityRow(CHILD, 'kid@example.test'));
 
     const row = await PracticeService.upsertAvailability(SESSION, USER, { status: 'MAYBE', playerId: CHILD });
 
@@ -525,17 +561,19 @@ describe('PracticeService.upsertAvailability', () => {
     expect(mockPrisma.practiceAvailability.upsert).not.toHaveBeenCalled();
   });
 
-  it('maps a session deleted mid-request (P2003 on the player key, or gone before the re-read) to 404 and rethrows the rest', async () => {
+  it('maps a session deleted mid-request (a P2003, or a deleted player) to 404 and rethrows the rest', async () => {
     mockPrisma.practiceAvailability.upsert.mockReset();
     mockPrisma.practiceAvailability.upsert.mockRejectedValueOnce(knownError('P2003'));
     await expect(PracticeService.upsertAvailability(SESSION, USER, { status: 'YES' })).rejects.toBeInstanceOf(
       NotFoundError
     );
 
-    mockPrisma.practiceAvailability.upsert.mockResolvedValueOnce({ id: 'av' });
-    mockPrisma.practiceAvailability.findUnique.mockResolvedValueOnce(null);
-    await expect(PracticeService.upsertAvailability(SESSION, USER, { status: 'YES' })).rejects.toBeInstanceOf(
-      NotFoundError
+    // A tombstoned (deleted) player, read under FOR SHARE: no answer is written.
+    mockPrisma.$queryRaw
+      .mockResolvedValueOnce([{ status: 'SCHEDULED' }])
+      .mockResolvedValueOnce([{ deletedAt: new Date() }]);
+    await expect(PracticeService.upsertAvailability(SESSION, USER, { status: 'YES' })).rejects.toThrow(
+      'Player not found'
     );
 
     // No P2002 retry (CLAUDE.md): the upsert is native INSERT … ON CONFLICT.
@@ -543,7 +581,7 @@ describe('PracticeService.upsertAvailability', () => {
     await expect(PracticeService.upsertAvailability(SESSION, USER, { status: 'YES' })).rejects.toBeInstanceOf(
       Prisma.PrismaClientKnownRequestError
     );
-    expect(mockPrisma.practiceAvailability.upsert).toHaveBeenCalledTimes(3);
+    expect(mockPrisma.practiceAvailability.upsert).toHaveBeenCalledTimes(2);
   });
 });
 

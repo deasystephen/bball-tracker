@@ -480,7 +480,7 @@ describe('CalendarService', () => {
         cancelledAt: null,
         cancelReason: null,
         createdAt: new Date(),
-        updatedAt: new Date(),
+        updatedAt: new Date('2029-12-01T12:00:00Z'),
       };
       (mockPrisma.practiceSession.findMany as jest.Mock).mockResolvedValue([
         {
@@ -512,9 +512,8 @@ describe('CalendarService', () => {
       expect(ics).toContain(`UID:practice-11111111-1111-4111-8111-111111111111@${ICAL_UID_DOMAIN}`);
       expect(ics).toContain('SUMMARY:Lakers practice');
       expect(ics).toContain('LOCATION:Main gym');
-      // A fixed UID with a SEQUENCE that rises on every edit.
-      expect(ics).toMatch(/SEQUENCE:\d+/);
-      expect(ics).toContain('LAST-MODIFIED:');
+      // A fixed UID with LAST-MODIFIED from updatedAt, as an absolute instant.
+      expect(ics).toContain('LAST-MODIFIED:20291201T120000Z');
       // 23:00Z + 90 minutes, in UTC.
       expect(ics).toContain('DTSTART:20300115T230000Z');
       expect(ics).toContain('DTEND:20300116T003000Z');

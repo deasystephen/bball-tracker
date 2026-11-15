@@ -287,9 +287,9 @@ export class CalendarService {
       events.push({
         uid: `practice-${practice.id}@${ICAL_UID_DOMAIN}`,
         // Practices are edited one by one (time, place, cancel) under a fixed
-        // UID; a rising SEQUENCE tells a client the event changed.
-        sequence: Math.floor(practice.updatedAt.getTime() / 1000),
-        lastModified: dateToDateArray(practice.updatedAt),
+        // UID; LAST-MODIFIED tells a client the event changed. A number is an
+        // absolute instant to the ics library, whatever the host's zone.
+        lastModified: practice.updatedAt.getTime(),
         start: dateToDateArray(start),
         startInputType: 'utc',
         end: dateToDateArray(end),

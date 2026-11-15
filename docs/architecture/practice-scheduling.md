@@ -75,7 +75,7 @@ on, like games. The coach creates a new series on the new season's team.
 
 | Action | Effect |
 | --- | --- |
-| `PATCH /practices/:id` | Edits one session. On a series occurrence it sets `isException = true` and adds the edited field names to `exceptionFields`. `startsAt` must stay within 31 days back and 732 ahead of now (a mistyped year; 732 reaches the last session a series can create), on create too. A cancelled session is not editable (400). |
+| `PATCH /practices/:id` | Edits one session. On a series occurrence it sets `isException = true` and adds to `exceptionFields` the fields whose value actually changed (a full-form submit that only moves the time pins only `startsAt`). `startsAt` must stay within 31 days back and 732 ahead of now (a mistyped year; 732 reaches the last session a series can create), on create too. A cancelled session is not editable (400). |
 | `PATCH /practice-series/:id` | "Edit all future": `type`, `title`, `location`, `notes` on the series and on every session with `startsAt > now` and `status = SCHEDULED`, in one transaction; an exception takes every edited field except the ones in its own `exceptionFields` (a notes-only exception still follows a new location). Dates, times and weekdays are not editable on a series (cancel it and create a new one). 400 on a cancelled series. Answers `{ series, updatedSessions }`. |
 | `POST /practices/:id/cancel` | `status = CANCELLED`, `cancelledAt`, optional `reason`. Status-guarded, so a repeat keeps the first time and reason. The row and its answers stay. |
 | `DELETE /practices/:id` | Deletes the session and its answers. |
@@ -87,7 +87,9 @@ edit runs in a transaction that takes `SELECT … FOR NO KEY UPDATE` on the seri
 session row (`NO KEY`, so it never blocks an availability insert's foreign-key check) (the order the series writes take), merges `exceptionFields` from the locked row, and refuses a
 session of a cancelled series (400), so history cannot be moved back into the schedule. The series
 edit also re-checks `exceptionFields` in each write's `WHERE`. An availability answer takes
-`SELECT status … FOR SHARE` on the session in the same transaction as its write, so a cancel or a
+`SELECT status … FOR SHARE` on the session (and `FOR SHARE` on the player's `User` row, refusing a
+tombstone, so account deletion's purge cannot be undone by an in-flight answer) in the same
+transaction as its write and its read-back, so a cancel or a
 delete either waits for it or is seen by it (400 / 404), never slips in between. Availability upserts carry no
 `include`, so Prisma compiles them to `INSERT … ON CONFLICT` and two first answers at once both land
 (verified against Postgres in the real-database suite; there is no P2002 retry).
@@ -113,7 +115,9 @@ All through `utils/permissions.ts`, never a copy:
   generic); the free-text `comment`, which can say where a child is, only for `canManageRoster`
   callers, the row's own user and a guardian of that player (`null` for every other reader).
 - **What counts**: the list and `availabilitySummary` include only players still on the team's
-  roster; a removed player's rows stay in the table but leave the headcount. `GET …/availability`
+  roster. Removing a player (`TeamService.removePlayer`) deletes their answers for the team's
+  sessions that have not started, in the same transaction, so a re-add starts from no answer; past
+  answers stay as history and leave the headcount while the player is off the roster. `GET …/availability`
   derives its summary from the rows it returns (`toRsvpSummary`, shared with game RSVPs).
 
 ## Entitlement
@@ -131,7 +135,8 @@ practices free is a one-line move of `PRACTICE_SCHEDULING` in `services/entitlem
 UID `practice-<id>@hooplings.com` (frozen, like `game-`), `DTSTART`/`DTEND` in UTC from `startsAt`
 and `durationMinutes`, `SUMMARY` `<team>: <title>` or `<team> practice` / `<team> team event`,
 `LOCATION`, notes in `DESCRIPTION`, `STATUS:CONFIRMED` or `STATUS:CANCELLED` with the reason, and
-`SEQUENCE` / `LAST-MODIFIED` from `updatedAt`, so a client sees an edited practice as changed.
+`LAST-MODIFIED` from `updatedAt` (passed as an absolute instant), so a client sees an edited practice
+as changed. No `SEQUENCE`: the `ics` library caps it at 2^31-1, which seconds-since-epoch passes in 2038.
 Deleted sessions (a cancelled series' future) simply leave the feed.
 
 ## API

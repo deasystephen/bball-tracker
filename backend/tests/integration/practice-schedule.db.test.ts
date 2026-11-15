@@ -21,6 +21,7 @@ import { PracticeService } from '../../src/services/practice-service';
 import { PracticeSeriesService } from '../../src/services/practice-series-service';
 import { CalendarService } from '../../src/services/calendar-service';
 import { AccountService } from '../../src/services/account-service';
+import { TeamService } from '../../src/services/team-service';
 import { ForbiddenError } from '../../src/utils/errors';
 
 jest.setTimeout(30000);
@@ -228,6 +229,18 @@ describe('practice scheduling (real Postgres)', () => {
     expect(ics).toContain('Reason: Gym closed');
   });
 
+  it('removing a player from the roster drops their future answers and keeps past ones', async () => {
+    await PracticeService.upsertAvailability(pastSessionId, users.parent, { status: 'NO', playerId: users.kid });
+    expect(await prisma.practiceAvailability.count({ where: { userId: users.kid } })).toBe(2);
+    await TeamService.removePlayer(orgs.A.teamId, users.kid, users.coach);
+    const left = await prisma.practiceAvailability.findMany({ where: { userId: users.kid }, select: { sessionId: true } });
+    expect(left).toEqual([{ sessionId: pastSessionId }]);
+    // Re-added later, the kid starts from no answer on the future session.
+    await fx.member(users.kid, orgs.A);
+    const after = await PracticeService.getAvailability(futureSessionIds[0], users.coach);
+    expect(after.availability.some((a) => a.userId === users.kid)).toBe(false);
+  });
+
   it('cancelling the series deletes the future sessions (and their answers) and keeps history', async () => {
     const { series, deletedSessions } = await PracticeSeriesService.cancelSeries(seriesId, users.coach);
     expect(deletedSessions).toBe(futureSessionIds.length);
@@ -236,7 +249,8 @@ describe('practice scheduling (real Postgres)', () => {
     expect(series.sessions.map((s) => s.id)).toContain(pastSessionId);
 
     expect(await prisma.practiceAvailability.count({ where: { sessionId: futureSessionIds[0] } })).toBe(0);
-    expect(await prisma.practiceAvailability.count({ where: { sessionId: pastSessionId } })).toBe(1);
+    // The player's and the kid's answers on the past session stay.
+    expect(await prisma.practiceAvailability.count({ where: { sessionId: pastSessionId } })).toBe(2);
 
     const repeat = await PracticeSeriesService.cancelSeries(seriesId, users.coach);
     expect(repeat.deletedSessions).toBe(0);
