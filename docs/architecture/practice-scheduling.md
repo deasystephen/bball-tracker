@@ -46,8 +46,8 @@ a fixed offset (`-05:00`, `Etc/GMT+5`), which would ignore daylight saving. Only
 client cannot grow it by sending spellings.
 `utils/practice-recurrence.ts#expandRecurrence` walks the local calendar from `startDate`, keeps the
 chosen weekdays (BIWEEKLY: every other Monday-to-Sunday week, RFC 5545's default `WKST=MO`, so a
-Saturday and the next Sunday are one weekend; counting the week that holds
-`startDate` as "on"), stops at `endDate` or `occurrenceCount`, and turns each local date plus
+Saturday and the next Sunday are one weekend; counted from the week of the first chosen weekday on or
+after `startDate`, so "every other Monday" from a Sunday starts the next day), stops at `endDate` or `occurrenceCount`, and turns each local date plus
 `startTime` into a UTC instant with `utils/zoned-time.ts#zonedTimeToUtc`, using the zone's offset on
 that day. "Tuesdays at 18:00 New York" is 22:00Z in October and 23:00Z in November.
 `zoned-time.ts` uses `Intl.DateTimeFormat` (Node's ICU zone data); no date library. A time that
@@ -81,7 +81,13 @@ on, like games. The coach creates a new series on the new season's team.
 | `DELETE /practice-series/:id` | Cancels the series: stamps `cancelledAt` and deletes every session with `startsAt > now` (exceptions and cancelled ones included; their answers cascade). Sessions that already started stay, still linked, as history. Idempotent: a repeat deletes nothing. Answers `{ series, deletedSessions }`. |
 
 Both series writes are guarded on `cancelledAt IS NULL` inside the transaction, so a cancel that
-commits first wins and a concurrent series edit answers 400 instead of touching history.
+commits first wins and a concurrent series edit answers 400 instead of touching history. A single
+edit runs in a transaction that takes `SELECT … FOR UPDATE` on the series row and then the session
+row (the order the series writes take), merges `exceptionFields` from the locked row, and refuses a
+session of a cancelled series (400), so history cannot be moved back into the schedule. The series
+edit also re-checks `exceptionFields` in each write's `WHERE`. Availability upserts carry no
+`include`, so Prisma compiles them to `INSERT … ON CONFLICT` and two first answers at once both land
+(a `P2002` from a non-native path is retried once).
 
 ## Access
 

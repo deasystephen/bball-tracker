@@ -263,7 +263,12 @@ export class PracticeSeriesService {
       let touched = 0;
       for (const group of groups.values()) {
         const { count: written } = await tx.practiceSession.updateMany({
-          where: { id: { in: group.ids }, status: 'SCHEDULED' },
+          // Re-checked at write time: never overwrite a field an edit just took over.
+          where: {
+            id: { in: group.ids },
+            status: 'SCHEDULED',
+            NOT: { exceptionFields: { hasSome: Object.keys(group.data) } },
+          },
           data: group.data,
         });
         touched += written;

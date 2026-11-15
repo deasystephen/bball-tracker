@@ -79,6 +79,8 @@ function localDateSchema(label: string): z.ZodString {
     .regex(LOCAL_DATE_RE, `${label} must be YYYY-MM-DD`)
     .refine(
       (value) => {
+        // A malformed value already failed the regex; report that one only.
+        if (!LOCAL_DATE_RE.test(value)) return true;
         const { year, month, day } = parseLocalDate(value);
         const d = new Date(Date.UTC(year, month - 1, day));
         return d.getUTCFullYear() === year && d.getUTCMonth() === month - 1 && d.getUTCDate() === day;

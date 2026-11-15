@@ -236,6 +236,10 @@ describe('practice scheduling (real Postgres)', () => {
     await expect(
       PracticeSeriesService.updateSeries(seriesId, { title: 'late edit' }, users.coach)
     ).rejects.toThrow('This practice series was cancelled');
+    // History of a cancelled series cannot be moved back into the schedule.
+    await expect(
+      PracticeService.updatePractice(pastSessionId, { startsAt: new Date(Date.now() + DAY_MS).toISOString() }, users.coach)
+    ).rejects.toThrow('This practice series was cancelled');
   });
 
   it('account deletion purges the person’s availability answers', async () => {

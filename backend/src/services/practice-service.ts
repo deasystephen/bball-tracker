@@ -33,7 +33,7 @@ import {
   isSystemAdmin,
   readableTeamsWhere,
 } from '../utils/permissions';
-import { isForeignKeyViolation, isRecordNotFound } from '../utils/prisma-errors';
+import { isForeignKeyViolation, isUniqueViolation } from '../utils/prisma-errors';
 import { USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
 import { logger } from '../utils/logger';
 import { toRsvpSummary, toRsvpView, type EmailProjected, type RsvpSummary } from './rsvp-service';
@@ -71,7 +71,6 @@ const SESSION_WRITE_SELECT = {
   teamId: true,
   seriesId: true,
   status: true,
-  exceptionFields: true,
 } satisfies Prisma.PracticeSessionSelect;
 
 const DAY_MS = 86_400_000;
@@ -262,7 +261,17 @@ export class PracticeService {
    * PATCH /practices/:id. Editing one occurrence of a series marks it an
    * exception and records which fields it set (`exceptionFields`): a later
    * series-wide edit still reaches this session's other fields, never these.
-   * A cancelled session is not editable.
+   * A cancelled session, and any session of a cancelled series, is not
+   * editable.
+   *
+   *   $transaction
+   *     SELECT … FROM "PracticeSeries" FOR UPDATE   (when in a series)
+   *     SELECT … FROM "PracticeSession" FOR UPDATE
+   *     UPDATE, exceptionFields = locked ∪ edited
+   *
+   * Series first, then session: the order updateSeries and cancelSeries take,
+   * so an edit and a series-wide write serialize instead of overwriting each
+   * other's field list.
    */
   static async updatePractice(
     sessionId: string,
@@ -278,9 +287,26 @@ export class PracticeService {
     }
     const edited = PRACTICE_EXCEPTION_FIELDS.filter((field) => data[field] !== undefined);
 
-    try {
-      const practice = await prisma.practiceSession.update({
-        where: { id: sessionId, status: 'SCHEDULED' },
+    const practice = await prisma.$transaction(async (tx) => {
+      if (session.seriesId) {
+        const series = await tx.$queryRaw<Array<{ cancelledAt: Date | null }>>`
+          SELECT "cancelledAt" FROM "PracticeSeries" WHERE "id" = ${session.seriesId} FOR UPDATE`;
+        if (series[0]?.cancelledAt) {
+          throw new BadRequestError('This practice series was cancelled');
+        }
+      }
+      const rows = await tx.$queryRaw<Array<{ status: string; exceptionFields: string[] }>>`
+        SELECT "status", "exceptionFields" FROM "PracticeSession" WHERE "id" = ${sessionId} FOR UPDATE`;
+      const locked = rows[0];
+      if (!locked) {
+        throw new NotFoundError('Practice not found');
+      }
+      if (locked.status === 'CANCELLED') {
+        throw new BadRequestError('A cancelled practice cannot be edited');
+      }
+
+      return tx.practiceSession.update({
+        where: { id: sessionId },
         data: {
           ...(data.type !== undefined ? { type: data.type } : {}),
           ...(data.title !== undefined ? { title: data.title } : {}),
@@ -292,29 +318,21 @@ export class PracticeService {
           ...(session.seriesId
             ? {
                 isException: true,
-                exceptionFields: [...new Set([...session.exceptionFields, ...edited])].sort(),
+                exceptionFields: [...new Set([...locked.exceptionFields, ...edited])].sort(),
               }
             : {}),
         },
         include: PRACTICE_INCLUDE,
       });
-      logger.info('Practice updated', {
-        practiceId: sessionId,
-        teamId: session.teamId,
-        seriesId: session.seriesId,
-        userId,
-      });
-      return practice;
-    } catch (err) {
-      if (!isRecordNotFound(err)) {
-        throw err;
-      }
-      // Cancelled (400) or deleted (404) between the read and the write.
-      const now = await prisma.practiceSession.findUnique({ where: { id: sessionId }, select: { status: true } });
-      throw now
-        ? new BadRequestError('A cancelled practice cannot be edited')
-        : new NotFoundError('Practice not found');
-    }
+    });
+
+    logger.info('Practice updated', {
+      practiceId: sessionId,
+      teamId: session.teamId,
+      seriesId: session.seriesId,
+      userId,
+    });
+    return practice;
   }
 
   /** POST /practices/:id/cancel: marks one session CANCELLED. Idempotent. */
@@ -413,16 +431,25 @@ export class PracticeService {
       throw new BadRequestError('This practice was cancelled');
     }
 
-    let row: AvailabilityWithUser;
-    try {
-      row = await prisma.practiceAvailability.upsert({
+    const write = (): Promise<{ id: string }> =>
+      // No `include`: a plain upsert compiles to INSERT … ON CONFLICT, so two
+      // first answers at once (a double tap, a guardian and the player) both
+      // land instead of one failing on the unique key.
+      prisma.practiceAvailability.upsert({
         where: { sessionId_userId: { sessionId, userId: subjectId } },
         create: { sessionId, userId: subjectId, status: data.status, comment: data.comment ?? null },
         update: {
           status: data.status,
           ...(data.comment !== undefined ? { comment: data.comment } : {}),
         },
-        include: AVAILABILITY_INCLUDE,
+        select: { id: true },
+      });
+    let written: { id: string };
+    try {
+      written = await write().catch((err: unknown) => {
+        // A client that does not run the native path: the loser retries once as an update.
+        if (isUniqueViolation(err)) return write();
+        throw err;
       });
     } catch (err) {
       // The session was deleted (series cancel, coach delete) after the read.
@@ -431,6 +458,10 @@ export class PracticeService {
       }
       throw err;
     }
+    const row: AvailabilityWithUser = await prisma.practiceAvailability.findUniqueOrThrow({
+      where: { id: written.id },
+      include: AVAILABILITY_INCLUDE,
+    });
 
     logger.info('Practice availability upserted', {
       practiceId: sessionId,

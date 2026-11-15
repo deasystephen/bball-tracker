@@ -162,6 +162,15 @@ describe('expandRecurrence', () => {
     expect(occurrences.map((o) => o.localDate)).toEqual(['2026-10-24', '2026-10-25', '2026-11-07', '2026-11-08', '2026-11-21', '2026-11-22']);
   });
 
+  it('BIWEEKLY counts from the first chosen weekday on or after the start date', () => {
+    // Sunday 2026-11-15, every other Mon+Wed: starts Monday the 16th, not the 23rd.
+    const occurrences = expandRecurrence(
+      { ...tuesdays, frequency: 'BIWEEKLY', weekdays: [1, 3], startDate: '2026-11-15', endDate: '2026-12-02' },
+      100
+    );
+    expect(occurrences.map((o) => o.localDate)).toEqual(['2026-11-16', '2026-11-18', '2026-11-30', '2026-12-02']);
+  });
+
   it('stops after occurrenceCount', () => {
     const occurrences = expandRecurrence(
       { ...tuesdays, endDate: null, occurrenceCount: 3, frequency: 'BIWEEKLY' },
