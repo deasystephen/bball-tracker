@@ -613,7 +613,7 @@ export class PlayerService {
     }
 
     logger.info('Player deleted', { playerId, userId });
-    // A claimed player's live sockets go with the row (#1004).
+    // Only unclaimed rows reach here (#1034), which hold no verified socket; kept so a socket opened on a row that was claimed and un-claimed is still closed (#1004).
     revokeUserSockets(playerId);
 
     // Best-effort, after the delete and outside any transaction (#725): the row

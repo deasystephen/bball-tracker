@@ -1218,7 +1218,6 @@ describe('PlayerService', () => {
       const result = await PlayerService.deletePlayer(player.id, 'admin-id');
 
       expect(result).toEqual({ success: true });
-      // Guarded like every User write (#643); reads back the avatar (#725).
       // Guarded like every User write (#643); also refuses a row claimed since the read (#1034).
       expect(mockPrisma.user.delete).toHaveBeenCalledWith({
         where: { id: player.id, deletedAt: null, AND: [{ workosUserId: null }] },
@@ -1226,7 +1225,7 @@ describe('PlayerService', () => {
       });
       // One domain event, ids only.
       expect(infoSpy).toHaveBeenCalledWith('Player deleted', { playerId: player.id, userId: 'admin-id' });
-      // A claimed player's live sockets go with the row (#1004).
+      // Closes any live socket for the deleted id (#1004).
       expect(revokeSpy).toHaveBeenCalledWith(player.id);
       revokeSpy.mockRestore();
     });
