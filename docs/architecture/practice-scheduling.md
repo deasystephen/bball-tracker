@@ -254,9 +254,13 @@ unchanged.
   traveller sees the coach's wall time and knows it is not theirs. An unknown zone name falls back
   to the device zone instead of throwing. The edit form's pickers show device wall time and name
   the device zone when it differs.
-- **Hooks** (`hooks/usePractices.ts`, keys `hooks/query-keys.ts#practiceKeys`): every mutation
-  invalidates `practiceKeys.all`; delete and series cancel mark details stale without refetching,
-  so the screen that removed a session never refetches its 404. Each mutation fires a catalogued
+- **Hooks** (`hooks/usePractices.ts`, keys `hooks/query-keys.ts#practiceKeys`): every schedule
+  mutation invalidates `practiceKeys.all`; an availability answer only that practice's detail and
+  answers (list rows carry none); delete and series cancel mark the per-session queries (detail,
+  availability) stale without refetching, so the screen that removed a session never refetches its
+  404. The form's recurrence checks walk the calendar as the API does (`occurrenceOffsets`): a
+  weekday, an end within 366 days holding 1 to 100 practices, or a count whose last practice falls
+  within 366 days. Each mutation fires a catalogued
   event (`practice_*`, `docs/architecture/analytics.md`). Strings are under `practices.*` (English
   and Spanish).
 - **Left out**: practices on Home's upcoming list and the Games tab (a parent with several teams
