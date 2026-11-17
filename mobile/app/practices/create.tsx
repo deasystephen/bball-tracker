@@ -190,7 +190,7 @@ export default function CreatePracticeScreen() {
         await createPractice.mutateAsync({ ...base, startsAt: start.toISOString() });
         toast.showToast(t('practices.createdOne'), 'success');
       } else {
-        const found = validateRecurrence({ weekdays, startDate: start, endMode, endDate, count });
+        const found = validateRecurrence({ weekdays, frequency: repeat, startDate: start, endMode, endDate, count });
         setErrors(found);
         if (Object.keys(found).length > 0) return;
         const series = await createSeries.mutateAsync({

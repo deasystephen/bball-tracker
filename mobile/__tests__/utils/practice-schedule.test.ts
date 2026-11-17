@@ -12,6 +12,7 @@ import {
   combineDateAndTime,
   calendarDaysBetween,
   validateRecurrence,
+  daysToOccurrence,
   practiceRespondents,
 } from '../../utils/practice-schedule';
 import {
@@ -20,6 +21,8 @@ import {
   formatLongDate,
   formatWallClock,
   formatWeekdayName,
+  formatZoneName,
+  isOtherTimeZone,
 } from '../../utils/format-date';
 import { i18n } from '../../i18n';
 import type { Game } from '../../types/game';
@@ -67,6 +70,7 @@ describe('mergeSchedule', () => {
   it('interleaves games (served newest first) and practices by start time', () => {
     const { items, truncated } = mergeSchedule(
       [game('g2', '2026-12-05T18:00:00Z'), game('g1', '2026-12-01T18:00:00Z')],
+      2,
       [practice('p1', '2026-11-30T23:00:00Z'), practice('p2', '2026-12-03T23:00:00Z')],
       2
     );
@@ -77,10 +81,17 @@ describe('mergeSchedule', () => {
   it('holds back games after the last fetched practice when practices run past one page', () => {
     const { items, truncated } = mergeSchedule(
       [game('g-late', '2027-03-01T18:00:00Z'), game('g-early', '2026-12-01T18:00:00Z')],
+      2,
       [practice('p1', '2026-11-30T23:00:00Z'), practice('p2', '2026-12-03T23:00:00Z')],
       5
     );
     expect(items.map((i) => i.id)).toEqual(['p1', 'g-early', 'p2']);
+    expect(truncated).toBe(true);
+  });
+
+  it('flags a games page short of its total (served newest first, so the soonest are the ones missing)', () => {
+    const { items, truncated } = mergeSchedule([game('g1', '2026-12-01T18:00:00Z')], 3, [], 0);
+    expect(items.map((i) => i.id)).toEqual(['g1']);
     expect(truncated).toBe(true);
   });
 });
@@ -122,6 +133,23 @@ describe('time zones', () => {
     expect(formatLongDate('2026-12-02T04:30:00Z', { timeZone: 'America/New_York' })).toBe(
       'Tuesday, December 1, 2026'
     );
+  });
+
+  it('compares zones by the wall time they show, not by name', () => {
+    const zone = deviceTimeZone();
+    if (zone) expect(isOtherTimeZone(zone, '2026-12-01T09:00:00Z')).toBe(false);
+    expect(isOtherTimeZone(OTHER_ZONE, '2026-12-01T09:00:00Z')).toBe(true);
+    // An alias of the same zone is the same zone.
+    expect(
+      new Date('2026-12-01T09:00:00Z').toLocaleString('en-US', { timeZone: 'Europe/Kiev' })
+    ).toBe(new Date('2026-12-01T09:00:00Z').toLocaleString('en-US', { timeZone: 'Europe/Kyiv' }));
+    expect(isOtherTimeZone('Not/AZone', '2026-12-01T09:00:00Z')).toBe(false);
+  });
+
+  it('reads the zone name from its own part, whatever the locale puts around it', () => {
+    expect(formatZoneName('2026-12-01T23:00:00Z', 'America/New_York')).toBe('EST');
+    expect(formatZoneName('2026-07-01T22:00:00Z', 'America/New_York')).toBe('EDT');
+    expect(formatZoneName('2026-12-01T23:00:00Z', 'Not/AZone')).toBe('');
   });
 
   it('falls back to the device zone for a name the runtime does not know', () => {
@@ -178,6 +206,7 @@ describe('local date keys', () => {
 describe('validateRecurrence', () => {
   const base = {
     weekdays: [2],
+    frequency: 'WEEKLY' as const,
     startDate: new Date(2027, 0, 1),
     endMode: 'date' as const,
     endDate: new Date(2027, 2, 1),
@@ -202,10 +231,32 @@ describe('validateRecurrence', () => {
   it('takes a count of 1 to 100', () => {
     const count = (value: string) => validateRecurrence({ ...base, endMode: 'count', count: value }).count;
     expect(count('1')).toBeUndefined();
-    expect(count('100')).toBeUndefined();
+    expect(count('52')).toBeUndefined();
     expect(count('0')).toBeTruthy();
     expect(count('101')).toBeTruthy();
     expect(count('ten')).toBeTruthy();
+  });
+
+  it('refuses a count whose last practice falls past 366 days, as the API does', () => {
+    const count = (value: string, frequency: 'WEEKLY' | 'BIWEEKLY', weekdays = [2]) =>
+      validateRecurrence({ ...base, weekdays, frequency, endMode: 'count', count: value }).count;
+    // From Friday 2027-01-01, one Tuesday a week: the 52nd is day 361, the 53rd day 368.
+    expect(count('52', 'WEEKLY')).toBeUndefined();
+    expect(count('53', 'WEEKLY')).toBe('That many practices runs past 366 days. Choose fewer.');
+    // Every other week: 100 is far past it; two days a week fits 100 weekly.
+    expect(count('100', 'BIWEEKLY')).toBeTruthy();
+    expect(count('100', 'WEEKLY', [1, 2, 4])).toBeUndefined();
+  });
+
+  it('walks every other Monday-to-Sunday week from the first chosen day, as the API does', () => {
+    // 2027-01-02 is a Saturday. Saturday and Sunday are one week: Sat 2nd, Sun 3rd,
+    // then two weeks on: Sat 16th, Sun 17th.
+    const start = new Date(2027, 0, 2);
+    expect(daysToOccurrence(start, [6, 0], 'BIWEEKLY', 1)).toBe(0);
+    expect(daysToOccurrence(start, [6, 0], 'BIWEEKLY', 2)).toBe(1);
+    expect(daysToOccurrence(start, [6, 0], 'BIWEEKLY', 3)).toBe(14);
+    expect(daysToOccurrence(start, [6, 0], 'BIWEEKLY', 4)).toBe(15);
+    expect(daysToOccurrence(start, [], 'WEEKLY', 1)).toBeNull();
   });
 });
 

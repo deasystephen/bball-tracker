@@ -208,12 +208,14 @@ It is the one place both a coach and a parent already go for "this team", and it
 surface the issue asks for (a merged team schedule). Home, the Games tab and the tab bar are
 unchanged.
 
-- **Schedule**: `GET /games?teamId&startDate` and `GET /practices?teamId&from` (both from the start
-  of the device's today, so a practice that started an hour ago still shows), merged by start time
-  (`utils/practice-schedule.ts#mergeSchedule`). One page each: 100 games (served newest first; a team
-  with more upcoming games is not expected) and 200 practices (ascending, the API maximum); when
-  practices run past the page, games after the last fetched practice are held back and a footer
-  says so. A practice row shows a repeat icon for a series occurrence and a struck-through title
+- **Schedule**: `GET /games?teamId&startDate&endDate` and `GET /practices?teamId&from&to`, both over
+  one window from the start of the device's today (so a practice that started an hour ago still
+  shows) to `SCHEDULE_WINDOW_DAYS` (90) days ahead, merged by start time
+  (`utils/practice-schedule.ts#mergeSchedule`). One page each, the API maximums: 100 games and 200
+  practices. The window is bounded rather than paged because `GET /games` serves newest first, so a
+  wider range would drop the soonest games. A page short of its total is flagged in the footer
+  (which always says "Showing the next 90 days"); for practices, games after the last fetched
+  practice are also held back. A practice row shows a repeat icon for a series occurrence and a struck-through title
   with a **Cancelled** badge; its accessibility label carries the same words. **Add practice** shows
   for `hasTeamPermission(…, 'canManageTeam')`.
 - **Create** (`app/practices/create.tsx?teamId=`): type (Practice / Team event), title, location,

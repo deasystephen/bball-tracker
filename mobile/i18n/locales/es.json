@@ -1001,7 +1001,7 @@
     "emptyTitle": "Nada programado",
     "emptyCoach": "No hay partidos ni entrenamientos próximos. Añade un entrenamiento para empezar.",
     "emptyMember": "Aún no hay partidos ni entrenamientos próximos.",
-    "truncated": "Se muestran los próximos 200 entrenamientos. Los siguientes aparecerán a medida que pasen estos.",
+    "truncated": "Algunos partidos o entrenamientos de este periodo no se muestran.",
     "typePractice": "Entrenamiento",
     "typeOther": "Evento del equipo",
     "timeRange": "{{start}}–{{end}}",
@@ -1104,7 +1104,10 @@
       "updateFailed": "No se pudieron guardar los cambios",
       "cancelFailed": "No se pudo cancelar",
       "deleteFailed": "No se pudo eliminar el entrenamiento",
-      "answerFailed": "No se pudo guardar tu respuesta"
-    }
+      "answerFailed": "No se pudo guardar tu respuesta",
+      "countTooFar": "Con tantos entrenamientos se superan los {{max}} días. Elige menos.",
+      "seriesMissing": "Este entrenamiento no forma parte de una serie."
+    },
+    "windowNote": "Se muestran los próximos {{days}} días."
   }
 }

@@ -28,6 +28,9 @@ export const PRACTICE_NOTES_MAX = 1000;
 export const PRACTICE_CANCEL_REASON_MAX = 500;
 export const AVAILABILITY_COMMENT_MAX = 500;
 
+/** How far ahead the team schedule looks, in days, from the start of today. */
+export const SCHEDULE_WINDOW_DAYS = 90;
+
 /** Duration choices, in minutes. */
 export const PRACTICE_DURATIONS = [30, 45, 60, 75, 90, 120] as const;
 export const DEFAULT_PRACTICE_DURATION = 90;
@@ -40,18 +43,26 @@ export type ScheduleItem =
   | { kind: 'practice'; id: string; startsAt: string; practice: Practice };
 
 /**
- * One list for the team schedule, ascending by start. Practices come a page
- * at a time in ascending order: when the page is short of the total, the rest
- * start after the last one fetched, so games after that point are held back
- * too (they would otherwise sit next to a gap). `truncated` says so.
+ * One list for the team schedule, ascending by start. Both lists cover the
+ * same bounded window (`SCHEDULE_WINDOW_DAYS`), which keeps them inside one
+ * page each in practice. Practices come ascending: when their page is short
+ * of the total, the rest start after the last one fetched, so games after
+ * that point are held back too (they would otherwise sit next to a gap).
+ * Games come newest first, so a short games page has lost the SOONEST ones
+ * and nothing can be held back to hide that; it is flagged all the same.
+ * `truncated` says either happened.
  */
 export function mergeSchedule(
   games: Game[],
+  gamesTotal: number,
   practices: Practice[],
   practicesTotal: number
 ): { items: ScheduleItem[]; truncated: boolean } {
-  const truncated = practices.length < practicesTotal && practices.length > 0;
-  const cutoff = truncated ? new Date(practices[practices.length - 1].startsAt).getTime() : Infinity;
+  const practicesTruncated = practices.length < practicesTotal && practices.length > 0;
+  const truncated = practicesTruncated || games.length < gamesTotal;
+  const cutoff = practicesTruncated
+    ? new Date(practices[practices.length - 1].startsAt).getTime()
+    : Infinity;
   const items: ScheduleItem[] = [
     ...games
       .filter((game) => new Date(game.date).getTime() <= cutoff)
@@ -91,7 +102,7 @@ export function formatPracticeTimeRange(
     start: formatClockTime(practice.startsAt, { timeZone }),
     end: formatClockTime(practiceEndsAt(practice), { timeZone }),
   });
-  if (!isOtherTimeZone(timeZone)) return range;
+  if (!isOtherTimeZone(timeZone, practice.startsAt)) return range;
   const zone = formatZoneName(practice.startsAt, timeZone);
   return zone ? `${range} ${zone}` : range;
 }
@@ -147,9 +158,43 @@ export interface RecurrenceErrors {
   count?: string;
 }
 
+/**
+ * Days from `startDate` to the `count`-th occurrence, walking the local
+ * calendar as the API's `expandRecurrence` does (BIWEEKLY: every other
+ * Monday-to-Sunday week, counted from the week of the first chosen weekday on
+ * or after the start); `null` when it is not reached within twice the span
+ * limit (already too far).
+ */
+export function daysToOccurrence(
+  startDate: Date,
+  weekdays: readonly number[],
+  frequency: PracticeFrequency,
+  count: number
+): number | null {
+  if (weekdays.length === 0 || count < 1) return null;
+  const mondayIndex = (date: Date) => {
+    const day = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    day.setDate(day.getDate() - ((day.getDay() + 6) % 7));
+    return Math.round(Date.UTC(day.getFullYear(), day.getMonth(), day.getDate()) / (7 * 86_400_000));
+  };
+  let firstWeek: number | null = null;
+  let seen = 0;
+  for (let offset = 0; offset <= 2 * MAX_SERIES_SPAN_DAYS; offset += 1) {
+    const date = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate() + offset);
+    if (!weekdays.includes(date.getDay())) continue;
+    const week = mondayIndex(date);
+    if (firstWeek === null) firstWeek = week;
+    if (frequency === 'BIWEEKLY' && (week - firstWeek) % 2 !== 0) continue;
+    seen += 1;
+    if (seen === count) return offset;
+  }
+  return null;
+}
+
 /** The create form's recurrence checks, mirroring the API's (it stays the authority). */
 export function validateRecurrence(input: {
   weekdays: readonly number[];
+  frequency: PracticeFrequency;
   startDate: Date;
   endMode: 'date' | 'count';
   endDate: Date;
@@ -167,6 +212,12 @@ export function validateRecurrence(input: {
     const count = Number(input.count);
     if (!/^\d+$/.test(input.count.trim()) || count < 1 || count > MAX_SERIES_OCCURRENCES) {
       errors.count = i18n.t('practices.errors.countRange', { max: MAX_SERIES_OCCURRENCES });
+    } else if (input.weekdays.length > 0) {
+      // The API also refuses a count whose last practice falls past the span limit.
+      const days = daysToOccurrence(input.startDate, input.weekdays, input.frequency, count);
+      if (days === null || days > MAX_SERIES_SPAN_DAYS) {
+        errors.count = i18n.t('practices.errors.countTooFar', { max: MAX_SERIES_SPAN_DAYS });
+      }
     }
   }
   return errors;

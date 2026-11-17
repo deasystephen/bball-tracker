@@ -124,6 +124,10 @@ export default function EditPracticeScreen() {
       />
     );
   }
+  // "All future" on a practice that belongs to no series (a stale link): say so.
+  if (seriesScope && practice && !practice.seriesId) {
+    return <ErrorState message={t('practices.errors.seriesMissing')} onBack={goBack} />;
+  }
   if (isLoading || !allowed || !practice || !source) {
     return <LoadingSpinner message={t('common.loading')} fullScreen />;
   }

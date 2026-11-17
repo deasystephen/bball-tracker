@@ -44,7 +44,13 @@ jest.mock('../../hooks/useTeams', () => ({
 
 let mockGames: Game[] = [];
 jest.mock('../../hooks/useGames', () => ({
-  useGames: () => ({ data: mockGames, isLoading: false, error: null, refetch: jest.fn(), isRefetching: false }),
+  useGamesPage: () => ({
+    data: { games: mockGames, total: mockGames.length, limit: 100, offset: 0 },
+    isLoading: false,
+    error: null,
+    refetch: jest.fn(),
+    isRefetching: false,
+  }),
 }));
 
 let mockPractice: Practice | undefined;
@@ -237,6 +243,7 @@ describe('team schedule', () => {
     signIn('coach');
     const view = render(<TeamScheduleScreen />);
     expect(view.getByText('Nothing scheduled')).toBeTruthy();
+    expect(view.getByText('Showing the next 90 days.')).toBeTruthy();
     fireEvent.press(view.getByText('Add practice'));
     expect(mockRouter.push).toHaveBeenCalledWith('/practices/create?teamId=t1');
   });
@@ -393,7 +400,8 @@ describe('practice detail: the coach', () => {
     fireEvent.press(view.getByLabelText('Practice options'));
     fireEvent.press(view.getByText('Cancel all future practices'));
     expect(mockCancelSeries).not.toHaveBeenCalled();
-    expect(view.getByText(/Upcoming practices and their answers are removed/)).toBeTruthy();
+    // The confirmation waits for the menu to close (iOS presents one sheet at a time).
+    expect(await view.findByText(/Upcoming practices and their answers are removed/, {}, { timeout: 2000 })).toBeTruthy();
     await act(async () => {
       fireEvent.press(view.getByText('Cancel all future practices'));
     });
@@ -509,6 +517,13 @@ describe('edit practice', () => {
       fireEvent.press(view.getByTestId('practice-edit-save'));
     });
     expect(mockUpdateOne).toHaveBeenCalledWith({ practiceId: 'p1', data: { location: 'Gym B', durationMinutes: 60 } });
+  });
+
+  it('"all future" on a practice in no series says so instead of loading forever', () => {
+    mockParams = { id: 'p1', scope: 'series' };
+    const view = render(<EditPracticeScreen />);
+    expect(view.getByText('This practice is not part of a series.')).toBeTruthy();
+    expect(view.getByLabelText('Go back')).toBeTruthy();
   });
 
   it('"all future" starts from the series, offers no date or time, and patches the series', async () => {

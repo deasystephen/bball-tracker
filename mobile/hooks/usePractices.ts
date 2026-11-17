@@ -4,8 +4,8 @@
  *
  * Every mutation invalidates `practiceKeys.all` (lists, details, availability,
  * series). The two that delete sessions (delete one, cancel a series) mark the
- * details stale without refetching them: the screen that did it is leaving,
- * and a refetch would flash its 404.
+ * per-session queries (detail, availability) stale without refetching them:
+ * the screen that did it is leaving, and a refetch would only fetch a 404.
  */
 
 import { useQuery, useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
@@ -37,12 +37,24 @@ function invalidateAll(queryClient: QueryClient): void {
   queryClient.invalidateQueries({ queryKey: practiceKeys.all });
 }
 
-/** After a delete: everything but the details refetches; details are only marked stale. */
+/** Per-session queries: a deleted session answers 404 to both. */
+const PER_SESSION = new Set(['detail', 'availability']);
+
+/**
+ * After a delete: lists and series refetch; per-session queries (detail and
+ * availability) are only marked stale, so the mounted screen of a session
+ * that no longer exists sends no request before it leaves. A session still
+ * there refetches whenever its screen mounts next.
+ */
 function invalidateAfterDelete(queryClient: QueryClient): void {
-  queryClient.invalidateQueries({ queryKey: practiceKeys.details(), refetchType: 'none' });
   queryClient.invalidateQueries({
     queryKey: practiceKeys.all,
-    predicate: (query) => query.queryKey[1] !== 'detail',
+    predicate: (query) => PER_SESSION.has(String(query.queryKey[1])),
+    refetchType: 'none',
+  });
+  queryClient.invalidateQueries({
+    queryKey: practiceKeys.all,
+    predicate: (query) => !PER_SESSION.has(String(query.queryKey[1])),
   });
 }
 

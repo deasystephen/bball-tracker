@@ -76,25 +76,39 @@ export function deviceTimeZone(): string | undefined {
 }
 
 /**
- * True when `timeZone` is not the device's zone, so a time shown in it needs
- * its zone named (`formatZoneName`). An unknown device zone counts as the same:
- * nothing to compare against.
+ * True when `timeZone` shows a different wall time from the device at that
+ * instant, so a time shown in it needs its zone named (`formatZoneName`).
+ * Compared by the time each zone shows, never by name: the server stores its
+ * runtime's canonical name, which can be another alias of the device's zone.
+ * A zone the runtime does not know counts as the same.
  */
-export function isOtherTimeZone(timeZone: string): boolean {
-  const device = deviceTimeZone();
-  return device !== undefined && device !== timeZone;
+export function isOtherTimeZone(timeZone: string, at: Date | string = new Date()): boolean {
+  const options: Intl.DateTimeFormatOptions = {
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: 'numeric',
+  };
+  try {
+    const instant = toDate(at);
+    return instant.toLocaleString('en-US', { ...options, timeZone }) !== instant.toLocaleString('en-US', options);
+  } catch {
+    return false;
+  }
 }
 
-/** The zone's short name at that instant, e.g. "EST" or "GMT-5"; `''` when the runtime has none. */
+/**
+ * The zone's short name at that instant, e.g. "EST" or "GMT-5", read from the
+ * formatter's `timeZoneName` part (locales put it before or after the time);
+ * `''` when the runtime has none.
+ */
 export function formatZoneName(value: Date | string, timeZone: string): string {
   try {
-    const text = toDate(value).toLocaleTimeString(deviceLocale(), {
-      timeZone,
-      timeZoneName: 'short',
-      hour: 'numeric',
-    });
-    const parts = text.split(' ');
-    return parts.length > 1 ? parts[parts.length - 1] : '';
+    const parts = new Intl.DateTimeFormat(deviceLocale(), { timeZone, timeZoneName: 'short' }).formatToParts(
+      toDate(value),
+    );
+    return parts.find((part) => part.type === 'timeZoneName')?.value ?? '';
   } catch {
     return '';
   }

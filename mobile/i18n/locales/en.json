@@ -1001,7 +1001,7 @@
     "emptyTitle": "Nothing scheduled",
     "emptyCoach": "No upcoming games or practices. Add a practice to get started.",
     "emptyMember": "No upcoming games or practices yet.",
-    "truncated": "Showing the next 200 practices. Later ones appear as these pass.",
+    "truncated": "Some games or practices in this window aren't shown.",
     "typePractice": "Practice",
     "typeOther": "Team event",
     "timeRange": "{{start}} – {{end}}",
@@ -1104,7 +1104,10 @@
       "updateFailed": "Couldn't save the changes",
       "cancelFailed": "Couldn't cancel",
       "deleteFailed": "Couldn't delete the practice",
-      "answerFailed": "Couldn't save your answer"
-    }
+      "answerFailed": "Couldn't save your answer",
+      "countTooFar": "That many practices runs past {{max}} days. Choose fewer.",
+      "seriesMissing": "This practice is not part of a series."
+    },
+    "windowNote": "Showing the next {{days}} days."
   }
 }

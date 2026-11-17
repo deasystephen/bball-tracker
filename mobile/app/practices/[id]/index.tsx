@@ -213,11 +213,19 @@ export default function PracticeDetailScreen() {
     });
   }
   if (seriesActive) {
-    menuItems.push({ label: t('practices.menu.cancelSeries'), destructive: true, onPress: () => setConfirm('series') });
+    // `waitForClose`: the confirmation is a second sheet, which iOS will not
+    // present while this one is still closing (ActionMenu's file comment).
+    menuItems.push({
+      label: t('practices.menu.cancelSeries'),
+      destructive: true,
+      waitForClose: true,
+      onPress: () => setConfirm('series'),
+    });
   }
   menuItems.push({
     label: series ? t('practices.menu.deleteOne') : t('practices.menu.delete'),
     destructive: true,
+    waitForClose: true,
     onPress: () => setConfirm('delete'),
   });
 

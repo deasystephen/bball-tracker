@@ -1,15 +1,18 @@
 /**
  * Team schedule (#33): the team's games and practices from the start of
- * today, in one list by start time. Reached from team detail ("Schedule").
+ * today through the next `SCHEDULE_WINDOW_DAYS` days, in one list by start
+ * time. Reached from team detail ("Schedule").
  * Practices show a repeat icon when they belong to a series and a cancelled
  * state; a coach with `canManageTeam` gets "Add practice". Games open the
  * game detail, practices the practice detail.
  *
- * Games come from `GET /games?teamId&startDate` (newest first, one page of
- * 100; a team with more upcoming games than that is not expected),
- * practices from `GET /practices?teamId&from` (ascending, one page of 200,
- * the API's maximum). `mergeSchedule` holds back games after the last
- * fetched practice when practices run past one page.
+ * Games come from `GET /games?teamId&startDate&endDate` (newest first, one
+ * page of 100), practices from `GET /practices?teamId&from&to` (ascending,
+ * one page of 200); both are the API's maximum pages, and the window keeps a
+ * team well inside them. Games are served newest first, so a window wider
+ * than a page would lose the soonest ones: that is why the window is bounded
+ * rather than paged. `mergeSchedule` flags (and for practices, holds back
+ * around) a page that is short of its total.
  */
 
 import React, { useMemo, useState } from 'react';
@@ -27,7 +30,7 @@ import {
   EmptyState,
 } from '../../../components';
 import { BackButton } from '../../../components/BackButton';
-import { useGames } from '../../../hooks/useGames';
+import { useGamesPage } from '../../../hooks/useGames';
 import { usePractices } from '../../../hooks/usePractices';
 import { useTeam, hasTeamPermission } from '../../../hooks/useTeams';
 import { useGoBack } from '../../../hooks/useGoBack';
@@ -38,6 +41,7 @@ import { spacing, borderRadius } from '../../../theme';
 import { getHorizontalPadding } from '../../../utils/responsive';
 import { formatClockTime, formatShortDate } from '../../../utils/format-date';
 import {
+  SCHEDULE_WINDOW_DAYS,
   mergeSchedule,
   practiceTitle,
   formatPracticeTimeRange,
@@ -63,11 +67,13 @@ function gameStatusLabel(status: GameStatus): string {
   }
 }
 
-/** Midnight at the start of the device's today, as an ISO instant. */
-function startOfToday(): string {
-  const date = new Date();
-  date.setHours(0, 0, 0, 0);
-  return date.toISOString();
+/** Midnight at the start of the device's today, and the end of the window, as ISO instants. */
+function scheduleWindow(): { from: string; to: string } {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(end.getDate() + SCHEDULE_WINDOW_DAYS);
+  return { from: start.toISOString(), to: end.toISOString() };
 }
 
 export default function TeamScheduleScreen() {
@@ -81,17 +87,18 @@ export default function TeamScheduleScreen() {
   const user = useAuthUser();
 
   // Fixed for the screen's life, so the query keys stay stable.
-  const [from] = useState(startOfToday);
+  const [{ from, to }] = useState(scheduleWindow);
   const { data: team } = useTeam(id);
-  const gamesQuery = useGames({ teamId: id, startDate: from, limit: SCHEDULE_GAMES_LIMIT });
-  const practicesQuery = usePractices({ teamId: id, from, limit: SCHEDULE_PRACTICES_LIMIT });
+  const gamesQuery = useGamesPage({ teamId: id, startDate: from, endDate: to, limit: SCHEDULE_GAMES_LIMIT });
+  const practicesQuery = usePractices({ teamId: id, from, to, limit: SCHEDULE_PRACTICES_LIMIT });
 
   const canManageTeam = hasTeamPermission(team, user?.id, 'canManageTeam', user?.role, user?.leagueAdminOf);
 
   const { items, truncated } = useMemo(
     () =>
       mergeSchedule(
-        gamesQuery.data ?? [],
+        gamesQuery.data?.games ?? [],
+        gamesQuery.data?.total ?? 0,
         practicesQuery.data?.practices ?? [],
         practicesQuery.data?.total ?? 0
       ),
@@ -266,11 +273,11 @@ export default function TeamScheduleScreen() {
           />
         }
         ListFooterComponent={
-          truncated ? (
-            <ThemedText variant="footnote" color="textTertiary" style={styles.footer}>
-              {t('practices.truncated')}
-            </ThemedText>
-          ) : null
+          <ThemedText variant="footnote" color="textTertiary" style={styles.footer}>
+            {truncated
+              ? `${t('practices.windowNote', { days: SCHEDULE_WINDOW_DAYS })} ${t('practices.truncated')}`
+              : t('practices.windowNote', { days: SCHEDULE_WINDOW_DAYS })}
+          </ThemedText>
         }
       />
     </ThemedView>

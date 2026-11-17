@@ -11,6 +11,7 @@ import { renderHook, waitFor, act } from '@testing-library/react-native';
 import {
   usePractices,
   usePractice,
+  usePracticeAvailability,
   useSubmitPracticeAvailability,
   useCancelPractice,
   useCancelPracticeSeries,
@@ -99,18 +100,21 @@ it('a series cancel refreshes the lists but does not refetch the open practice i
   mockedGet.mockImplementation(async (url: string) =>
     url === '/practices/p1'
       ? { data: { practice: { id: 'p1' } } }
-      : { data: { practices: [], total: 0, limit: 50, offset: 0 } }
+      : url === '/practices/p1/availability'
+        ? { data: { availability: [], summary: { yes: 0, no: 0, maybe: 0 } } }
+        : { data: { practices: [], total: 0, limit: 50, offset: 0 } }
   );
   const { wrapper, client } = createQueryWrapper();
   // The open practice detail and the schedule list, both observed.
   renderHook(
     () => {
       usePractice('p1');
+      usePracticeAvailability('p1');
       usePractices({ teamId: 't1' });
     },
     { wrapper }
   );
-  await waitFor(() => expect(mockedGet).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(mockedGet).toHaveBeenCalledTimes(3));
   const callsTo = (url: string) => mockedGet.mock.calls.filter(([called]) => called === url).length;
 
   const { result } = renderHook(() => useCancelPracticeSeries(), { wrapper });
@@ -125,6 +129,7 @@ it('a series cancel refreshes the lists but does not refetch the open practice i
   });
   await waitFor(() => expect(callsTo('/practices?teamId=t1')).toBe(2));
   expect(callsTo('/practices/p1')).toBe(1);
+  expect(callsTo('/practices/p1/availability')).toBe(1);
   expect(client.getQueryState(practiceKeys.detail('p1'))?.isInvalidated).toBe(true);
 });
 
