@@ -200,7 +200,7 @@ on `deletedAt IS NULL`, so a request that raced the deletion cannot re-identify 
    the pg-adapter incident was diagnosed). The scripts use the API's pool, so each statement is
    bounded at 30 s as in the API (#1036); if one fails with `57014` "canceling statement due to
    statement timeout" on a healthy database, re-run it with `DB_STATEMENT_TIMEOUT_MS=0` in front
-   (off; or a larger value from 15000 to 3600000 ms) and open an issue for the slow statement.
+   (off; or a larger value from 20000 to 3600000 ms) and open an issue for the slow statement.
 3. **Export** (do this first for a deletion request too — the person may ask what was held):
    ```bash
    cd backend && NODE_ENV=production npx tsx scripts/data-subject-request.ts export <email> > export-<date>.json

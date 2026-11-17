@@ -72,20 +72,33 @@ describe('pg pool bounds', () => {
     it('sits above the slowest legitimate statement: the finalize transaction and its lock wait', () => {
       // statement_timeout counts lock-wait time, so it must not pre-empt the
       // finalize transaction's own SET LOCAL lock_timeout, nor the pool-wide one.
+      // The default and the lowest override both clear the whole finalize transaction.
       for (const bound of [DB_STATEMENT_TIMEOUT_MS, DB_STATEMENT_TIMEOUT_MIN_MS]) {
         expect(bound).toBeGreaterThan(FINALIZE_LOCK_TIMEOUT_MS);
+        expect(bound).toBeGreaterThan(FINALIZE_TRANSACTION_TIMEOUT_MS);
         expect(bound).toBeGreaterThan(DB_LOCK_TIMEOUT_MS);
       }
-      expect(DB_STATEMENT_TIMEOUT_MS).toBeGreaterThan(FINALIZE_TRANSACTION_TIMEOUT_MS);
       // Prisma closes its own transactions (15 s at most) before the server would.
       expect(DB_IDLE_IN_TRANSACTION_TIMEOUT_MS).toBeGreaterThan(FINALIZE_TRANSACTION_TIMEOUT_MS);
     });
 
+    const infraTf = (file: string): string => readFileSync(path.resolve(__dirname, '../../infra', file), 'utf8');
+
     it('ends one statement, pool wait included, inside the ALB idle timeout and the sweep stall report', () => {
-      const ALB_IDLE_TIMEOUT_MS = 60_000; // AWS default; infra sets no idle_timeout
+      // The ALB keeps AWS's default 60 s idle timeout only while infra sets none.
+      expect(infraTf('ecs.tf')).not.toMatch(/^\s*idle_timeout\s*=/m);
+      const ALB_IDLE_TIMEOUT_MS = 60_000;
       const worst = DB_CONNECTION_TIMEOUT_MS + DEFAULTS.statement_timeout;
       expect(worst).toBeLessThan(ALB_IDLE_TIMEOUT_MS);
       expect(worst).toBeLessThan(REVOCATION_SWEEP_STALL_MS);
+    });
+
+    // pg lets a same-named query parameter in the connection string win over
+    // the pool's keys, so `?statement_timeout=0` would silently lift the bound.
+    it('keeps the production DATABASE_URL free of a query string', () => {
+      const url = infraTf('ecs.tf').match(/secret_string\s*=\s*"(postgresql:\/\/[^"]*)"/);
+      expect(url).not.toBeNull();
+      expect(url![1]).not.toContain('?');
     });
 
     it('turns on TCP keepalive, the only bound for a server that never answers', () => {

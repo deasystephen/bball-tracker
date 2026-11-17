@@ -17,6 +17,8 @@
  * `src/models` itself is mocked.
  */
 
+import type { PoolConfig } from 'pg';
+
 /**
  * Per-task client ceiling (pg's implicit default, now explicit). A rolling
  * deploy briefly runs two tasks plus `prisma migrate deploy`, so the app's
@@ -74,9 +76,9 @@ export const DB_LOCK_TIMEOUT_MS = 4_000;
  * settles holds its pool client for as long as it hangs: the socket
  * revocation sweep (one query at a time) stops, enough of them exhaust the
  * pool, and a lock wait under a raised `lock_timeout` has no other limit.
- * PostgreSQL cancels server-side, so the connection answers the error and
- * stays usable (pg-pool still discards a client whose query failed outside a
- * transaction, as it does for any error).
+ * PostgreSQL cancels server-side and the connection answers the error: inside
+ * a transaction it stays in the pool; outside one pg-pool discards it and
+ * opens a new one, as it does after any failed `pool.query`.
  *
  * 30 s because it must sit above the slowest legitimate statement and below
  * what waits on it:
@@ -102,11 +104,12 @@ export const DB_STATEMENT_TIMEOUT_MS = 30_000;
 
 /**
  * The range `DB_STATEMENT_TIMEOUT_MS` may take besides `0`. The floor keeps
- * the override above finalize's 14 s lock wait and the pool-wide 4 s
- * `lock_timeout`, so a lock wait still ends as the retryable 503 and never as
- * a statement timeout; the ceiling is a sanity bound (a longer job uses `0`).
+ * the override above finalize's whole 15 s transaction (and so its 14 s lock
+ * wait) and the pool-wide 4 s `lock_timeout`, so a lock wait still ends as
+ * the retryable 503 and never as a statement timeout; the ceiling is a sanity
+ * bound (a longer job uses `0`).
  */
-export const DB_STATEMENT_TIMEOUT_MIN_MS = 15_000;
+export const DB_STATEMENT_TIMEOUT_MIN_MS = 20_000;
 export const DB_STATEMENT_TIMEOUT_MAX_MS = 3_600_000;
 
 /**
@@ -165,7 +168,10 @@ export interface DbPoolOptions {
  * as startup parameters in the StartupMessage (after the TLS handshake), so a
  * connection starts with them set and nothing runs unbounded first. pg sends
  * nothing for `0`, so the server's own default applies (none is set on RDS or
- * locally, so that is off).
+ * locally, so that is off). pg lets a query parameter of the same name in
+ * `DATABASE_URL` win over these keys; `tests/models-pool.test.ts` fails if
+ * the production URL built in `infra/ecs.tf` ever carries a query string.
+ * `satisfies PoolConfig` checks the key names against pg's own types.
  */
 export function buildDbPoolOptions(timeouts: DbTimeouts = DB_TIMEOUTS): DbPoolOptions {
   const { statementTimeoutMs, lockTimeoutMs, idleInTransactionTimeoutMs } = timeouts;
@@ -178,7 +184,7 @@ export function buildDbPoolOptions(timeouts: DbTimeouts = DB_TIMEOUTS): DbPoolOp
     statement_timeout: statementTimeoutMs,
     lock_timeout: lockTimeoutMs,
     idle_in_transaction_session_timeout: idleInTransactionTimeoutMs,
-  };
+  } satisfies PoolConfig;
 }
 
 /**
