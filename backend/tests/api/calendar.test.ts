@@ -20,8 +20,9 @@ const TEST_USER_ID = 'a1b2c3d4-e5f6-4890-a234-567890abcdef';
 const TEST_TEAM_ID = 'b2c3d4e5-f6a7-4901-a345-67890abcdef0';
 
 // Mutable mock auth user so individual tests can vary the subscription tier.
-// Calendar subscribe is gated behind CALENDAR_SYNC (PREMIUM), so the default
-// user here is an active PREMIUM coach.
+// Calendar sync is free for every tier (#1037), but `requireEntitlement` stays
+// mounted; the default user here is an active PREMIUM coach and FREE is
+// exercised explicitly.
 const mockFutureDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
 const mockAuthUser: {
   id: string;
@@ -49,6 +50,7 @@ jest.mock('../../src/api/auth/middleware', () => ({
 jest.mock('../../src/services/calendar-service');
 jest.mock('../../src/services/team-service');
 
+import { Feature, FREE_FEATURES } from '../../src/services/entitlements';
 import { authenticate } from '../../src/api/auth/middleware';
 import { TeamService } from '../../src/services/team-service';
 
@@ -109,23 +111,47 @@ describe('Calendar Feed API', () => {
       expect(res.status).toBe(400);
     });
 
-    it('returns 402 upgrade_required for a FREE user (calendar sync gated)', async () => {
+    it('lets a FREE user create a feed link (calendar sync is free, #1037)', async () => {
       mockAuthUser.subscriptionTier = 'FREE';
       mockAuthUser.subscriptionExpiresAt = null;
+      mockCalendarService.subscribe.mockResolvedValue({
+        token: 'abc123',
+        feedUrl: `http://localhost:3000/api/v1/teams/${TEST_TEAM_ID}/calendar.ics?token=abc123`,
+        webcalUrl: `webcal://localhost:3000/api/v1/teams/${TEST_TEAM_ID}/calendar.ics?token=abc123`,
+      });
 
       const res = await request(app).post(
         `/api/v1/teams/${TEST_TEAM_ID}/calendar/subscribe`
       );
 
-      expect(res.status).toBe(402);
-      expect(res.body).toEqual({
-        error: 'Upgrade required',
-        code: 'upgrade_required',
-        feature: 'calendar_sync',
-        currentTier: 'FREE',
-        requiredTier: 'PREMIUM',
-      });
-      expect(mockCalendarService.subscribe).not.toHaveBeenCalled();
+      expect(res.status).toBe(200);
+      expect(res.body.token).toBe('abc123');
+      expect(mockCalendarService.subscribe).toHaveBeenCalledWith(TEST_TEAM_ID, TEST_USER_ID);
+    });
+
+    it('keeps the entitlement gate mounted: with the feature off FREE, subscribe answers 402', async () => {
+      // Simulates the documented move back to PREMIUM without editing the source.
+      FREE_FEATURES.delete(Feature.CALENDAR_SYNC);
+      try {
+        mockAuthUser.subscriptionTier = 'FREE';
+        mockAuthUser.subscriptionExpiresAt = null;
+
+        const res = await request(app).post(
+          `/api/v1/teams/${TEST_TEAM_ID}/calendar/subscribe`
+        );
+
+        expect(res.status).toBe(402);
+        expect(res.body).toEqual({
+          error: 'Upgrade required',
+          code: 'upgrade_required',
+          feature: 'calendar_sync',
+          currentTier: 'FREE',
+          requiredTier: 'PREMIUM',
+        });
+        expect(mockCalendarService.subscribe).not.toHaveBeenCalled();
+      } finally {
+        FREE_FEATURES.add(Feature.CALENDAR_SYNC);
+      }
     });
 
     it('allows a LEAGUE user (calendar sync included in LEAGUE)', async () => {

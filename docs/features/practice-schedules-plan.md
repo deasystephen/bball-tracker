@@ -265,7 +265,7 @@ fallback: compute nudges/alerts lazily on read + a single periodic sweep.
 
 - **ICS:** extend `CalendarService.buildFeed` to include `SCHEDULED` practices
   (`uid: practice-<id>@hooplings.com`, title "Practice — <location>",
-  `CANCELLED` → ICS `CANCELLED`). Gated by existing `CALENDAR_SYNC`.
+  `CANCELLED` → ICS `CANCELLED`). Gated by existing `CALENDAR_SYNC`, which is free for every tier since 2026-11-17 (#1037).
 - **Real-time (optional, Phase B):** Socket.io room `practice:<sessionId>`,
   event `practice-availability-change` and `practice-ride-change`, mirroring
   `game-events.ts`. Coaches watching the roster see live updates.

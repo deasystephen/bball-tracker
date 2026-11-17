@@ -14,9 +14,10 @@ import {
 
 describe('Entitlements', () => {
   describe('hasFeature', () => {
-    it('gives FREE practice scheduling (#33, 2026-11-15) and no other feature', () => {
+    it('gives FREE practice scheduling (#33, 2026-11-15) and calendar sync (#1037, 2026-11-17) and no other feature', () => {
+      const everyTier = new Set([Feature.PRACTICE_SCHEDULING, Feature.CALENDAR_SYNC]);
       for (const feature of Object.values(Feature)) {
-        expect(hasFeature('FREE', feature)).toBe(feature === Feature.PRACTICE_SCHEDULING);
+        expect(hasFeature('FREE', feature)).toBe(everyTier.has(feature));
       }
     });
 
@@ -114,6 +115,7 @@ describe('Entitlements', () => {
 
     it('should return FREE for a feature every tier has', () => {
       expect(getRequiredTier(Feature.PRACTICE_SCHEDULING)).toBe('FREE');
+      expect(getRequiredTier(Feature.CALENDAR_SYNC)).toBe('FREE');
     });
 
     it('should return LEAGUE for league-only features', () => {
@@ -124,10 +126,12 @@ describe('Entitlements', () => {
   });
 
   describe('getAllFeatures', () => {
-    it('should return every feature but practice scheduling as false for FREE tier', () => {
+    it('should return every feature but the every-tier ones as false for FREE tier', () => {
       const features = getAllFeatures('FREE');
       expect(features.PRACTICE_SCHEDULING).toBe(true);
-      const others = Object.entries(features).filter(([feature]) => feature !== Feature.PRACTICE_SCHEDULING);
+      expect(features.CALENDAR_SYNC).toBe(true);
+      const everyTier: string[] = [Feature.PRACTICE_SCHEDULING, Feature.CALENDAR_SYNC];
+      const others = Object.entries(features).filter(([feature]) => !everyTier.includes(feature));
       expect(others.every(([, enabled]) => enabled === false)).toBe(true);
     });
 

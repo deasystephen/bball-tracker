@@ -1080,9 +1080,9 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 
 ### L.1 — Get team calendar URL
 - [ ] Pass / Fail / Skipped
-- **Role:** ADMIN (bypasses entitlements) or a PREMIUM user — `CALENDAR_SYNC` is PREMIUM-gated; a FREE coach gets 402 `upgrade_required`
+- **Role:** any coach or team member; `CALENDAR_SYNC` is free for every tier (2026-11-17, #1037), so a FREE user gets the URL too
 - **Steps:** The app has no calendar UI. `curl -X POST -H "Authorization: Bearer $TOKEN" https://api.hooplings.com/api/v1/teams/:id/calendar/subscribe` → copy the returned URL (format `https://api.hooplings.com/api/v1/teams/:id/calendar.ics?token=...`; the host comes from `API_BASE_URL`, audit #24 — never `hooplings.com`).
-- **Expected:** URL includes an opaque token and uses the API host. As a FREE-tier coach → 402.
+- **Expected:** URL includes an opaque token and uses the API host. As a FREE-tier coach → 200 with the same shape (no 402).
 - **Notes:** ___________
 
 ### L.2 — Subscribe in Apple Calendar
@@ -1100,7 +1100,7 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 ### L.4 — Revoke token
 - [ ] Pass / Fail / Skipped
 - **Steps:** `curl -X POST -H "Authorization: Bearer $TOKEN" …/api/v1/teams/:id/calendar/revoke`. Subsequent requests to the old URL → 401/403.
-- **Expected:** Old token rejected; subscribing again issues a new token. Also: a feed whose owner lost team access or whose tier no longer includes `CALENDAR_SYNC` answers 403 on the next fetch (audit #43).
+- **Expected:** Old token rejected; subscribing again issues a new token. Also: a feed whose owner lost team access answers 403 on the next fetch (audit #43). The tier branch of that check (a tier that no longer includes `CALENDAR_SYNC`) cannot fire while the feature is free; it is covered by unit tests that take the feature off FREE.
 - **Notes:** Soft-revocation (`revokedAt`).
 
 ### L.5 — 🔒 Calendar URL without token

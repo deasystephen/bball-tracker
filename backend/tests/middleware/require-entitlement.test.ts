@@ -82,11 +82,11 @@ describe('requireEntitlement', () => {
 
   it('treats a user without an explicit tier as FREE', () => {
     req.user = { id: 'u', email: null, name: 'x', role: 'COACH' } as unknown as TestUser;
-    requireEntitlement(Feature.CALENDAR_SYNC)(req as Request, res as Response, next as NextFunction);
+    requireEntitlement(Feature.ADVANCED_STATS)(req as Request, res as Response, next as NextFunction);
 
     expect(res.status).toHaveBeenCalledWith(402);
     expect(res.json).toHaveBeenCalledWith(
-      expect.objectContaining({ currentTier: 'FREE', feature: 'calendar_sync' })
+      expect.objectContaining({ currentTier: 'FREE', feature: 'advanced_stats' })
     );
   });
 

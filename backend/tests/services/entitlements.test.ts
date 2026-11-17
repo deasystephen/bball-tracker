@@ -20,9 +20,10 @@ import {
 import { TEST_TEAM_LIMIT, withFiniteFreeTeamLimit } from '../helpers';
 
 describe('entitlements service (source of truth)', () => {
-  it('FREE tier has practice scheduling (2026-11-15, #33) and no other feature', () => {
+  it('FREE tier has practice scheduling (2026-11-15, #33), calendar sync (2026-11-17, #1037) and no other feature', () => {
+    const everyTier = new Set([Feature.PRACTICE_SCHEDULING, Feature.CALENDAR_SYNC]);
     for (const f of Object.values(Feature)) {
-      expect(hasFeature('FREE', f)).toBe(f === Feature.PRACTICE_SCHEDULING);
+      expect(hasFeature('FREE', f)).toBe(everyTier.has(f));
     }
   });
 
@@ -98,6 +99,7 @@ describe('entitlements service (source of truth)', () => {
   it('getAllFeatures returns availability for every feature', () => {
     const free = getAllFeatures('FREE');
     expect(Object.keys(free).length).toBe(Object.values(Feature).length);
-    expect(Object.entries(free).every(([f, v]) => v === (f === Feature.PRACTICE_SCHEDULING))).toBe(true);
+    const everyTier: string[] = [Feature.PRACTICE_SCHEDULING, Feature.CALENDAR_SYNC];
+    expect(Object.entries(free).every(([f, v]) => v === everyTier.includes(f))).toBe(true);
   });
 });

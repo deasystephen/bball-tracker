@@ -137,9 +137,11 @@ changes nothing), with no route change. `tests/api/practices.test.ts` proves the
 taking the feature off FREE and expecting 402. The gate is per caller, so a FREE assistant coach can create on any team they manage.
 `GET /auth/entitlements` reports `PRACTICE_SCHEDULING: true` for FREE; no client reads the feature
 list today (`docs/architecture/entitlements-and-usage.md`). Editing, cancelling, deleting, reading
-and answering were never gated. Practices count against no usage meter. **Calendar sync is still
-PREMIUM**: subscribing to the team feed (`CALENDAR_SYNC`) answers 402 on FREE, so a FREE family sees
-practices in the app but cannot subscribe to them in a calendar app (an owner question below).
+and answering were never gated. Practices count against no usage meter. **Calendar sync is free
+too (owner decision, 2026-11-17, #1037)**: `Feature.CALENDAR_SYNC` is in `FREE_FEATURES` the same way, so a
+FREE family can subscribe to the team feed that carries the practices. `requireEntitlement(Feature.CALENDAR_SYNC)`
+stays on `POST /teams/:id/calendar/subscribe` and the per-fetch tier check in `CalendarService.resolveToken`
+stays too; both pass for FREE, and making the feed paid again is the same two-line move.
 
 ## Calendar feed
 
@@ -189,8 +191,8 @@ child's availability answers but clears their free-text `comment`.
 
 Recorded on #33; each is a one-place change.
 
-- **Calendar sync** (`CALENDAR_SYNC`) stays PREMIUM although practices are free, so the iCal feed
-  that carries them is not available on FREE.
+- **Calendar sync** (`CALENDAR_SYNC`) was decided on 2026-11-17 (#1037): free for every tier, like
+  practices (see Entitlement above). Not an open question any more.
 - **Series cancel** deletes future sessions (subscribers see them vanish) rather than marking them
   `CANCELLED` with a reason.
 - **Calendar feed** carries practice `LOCATION` and notes; the feed URL is a bearer link a parent may

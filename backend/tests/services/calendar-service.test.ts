@@ -18,6 +18,7 @@ jest.mock('../../src/utils/permissions', () => ({
 }));
 
 import { canAccessTeam } from '../../src/utils/permissions';
+import { Feature, FREE_FEATURES } from '../../src/services/entitlements';
 
 describe('CalendarService', () => {
   beforeEach(() => {
@@ -314,22 +315,56 @@ describe('CalendarService', () => {
         (canAccessTeam as jest.Mock).mockResolvedValue(true);
       });
 
-      it('rejects a FREE-tier user even though the token is otherwise valid', async () => {
+      it('serves a FREE-tier user: calendar sync is free for every tier (#1037)', async () => {
         (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({
           role: 'COACH',
           subscriptionTier: 'FREE',
           subscriptionExpiresAt: null,
         });
-        await expect(CalendarService.resolveToken('t', 'abc')).rejects.toThrow(/no longer included/);
+        await expect(CalendarService.resolveToken('t', 'abc')).resolves.toEqual({ userId: 'user-1', teamId: 't' });
       });
 
-      it('rejects a PREMIUM user whose subscription has expired', async () => {
+      it('keeps the per-fetch check mounted: with the feature off FREE, a FREE user is refused with 403', async () => {
+        // Simulates the documented move back to PREMIUM without editing the source.
+        FREE_FEATURES.delete(Feature.CALENDAR_SYNC);
+        try {
+          (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({
+            role: 'COACH',
+            subscriptionTier: 'FREE',
+            subscriptionExpiresAt: null,
+          });
+          await expect(CalendarService.resolveToken('t', 'abc')).rejects.toMatchObject({
+            statusCode: 403,
+            message: expect.stringMatching(/no longer included/),
+          });
+        } finally {
+          FREE_FEATURES.add(Feature.CALENDAR_SYNC);
+        }
+      });
+
+      it('rejects a PREMIUM user whose subscription has expired once the feature is not free', async () => {
+        // An expired PREMIUM user is effectively FREE: with the feature on FREE they are served,
+        // so the downgrade path only means something while the feature is paid.
+        FREE_FEATURES.delete(Feature.CALENDAR_SYNC);
+        try {
+          (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({
+            role: 'COACH',
+            subscriptionTier: 'PREMIUM',
+            subscriptionExpiresAt: new Date('2000-01-01'),
+          });
+          await expect(CalendarService.resolveToken('t', 'abc')).rejects.toThrow(/no longer included/);
+        } finally {
+          FREE_FEATURES.add(Feature.CALENDAR_SYNC);
+        }
+      });
+
+      it('serves a PREMIUM user whose subscription has expired: effective FREE still has the feed (#1037)', async () => {
         (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({
           role: 'COACH',
           subscriptionTier: 'PREMIUM',
           subscriptionExpiresAt: new Date('2000-01-01'),
         });
-        await expect(CalendarService.resolveToken('t', 'abc')).rejects.toThrow(/no longer included/);
+        await expect(CalendarService.resolveToken('t', 'abc')).resolves.toBeDefined();
       });
 
       it('allows LEAGUE tier', async () => {
@@ -339,6 +374,20 @@ describe('CalendarService', () => {
           subscriptionExpiresAt: future,
         });
         await expect(CalendarService.resolveToken('t', 'abc')).resolves.toEqual({ userId: 'user-1', teamId: 't' });
+      });
+
+      it('lets system admins through regardless of tier, even with the feature off FREE', async () => {
+        FREE_FEATURES.delete(Feature.CALENDAR_SYNC);
+        try {
+          (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({
+            role: 'ADMIN',
+            subscriptionTier: 'FREE',
+            subscriptionExpiresAt: null,
+          });
+          await expect(CalendarService.resolveToken('t', 'abc')).resolves.toBeDefined();
+        } finally {
+          FREE_FEATURES.add(Feature.CALENDAR_SYNC);
+        }
       });
 
       it('lets system admins through regardless of tier', async () => {
