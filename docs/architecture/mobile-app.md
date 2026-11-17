@@ -176,6 +176,11 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   `utils/relative-time.ts#formatRelativeTime`, never an inline helper. Tests:
   `__tests__/app/announcement-thread.test.tsx`, `__tests__/hooks/useAnnouncementReplies.runtime.test.tsx`,
   `__tests__/app/profile-reply-notifications.test.tsx`; Maestro `.maestro/announcement-reply.yaml`.
+- **Practices** (#33): team detail → **Schedule** (`app/teams/[id]/schedule.tsx`, games and
+  practices merged by start time) → `app/practices/[id]` (availability, coach ⋯ menu with explicit
+  "this practice" / "all future practices" items) and `app/practices/create`, `app/practices/[id]/edit`.
+  Practice times render in the session's own zone through `format-date.ts` (`{ timeZone }`). As-built
+  detail: `docs/architecture/practice-scheduling.md`, "Mobile app".
 - **Dates and times** (#769): every date or time string goes through `utils/format-date.ts`
   (`formatShortDate`, `formatLongDate`, `formatCalendarDate`, `formatSeasonDate`, `formatMonthDay`,
   `formatMonthShort`, `formatNumericDate`, `formatDateTime`, `formatClockTime`; add a shape there

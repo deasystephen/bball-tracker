@@ -205,6 +205,15 @@ export default function TeamDetailsScreen() {
           style={styles.statsButton}
         />
 
+        {/* Schedule (#33): upcoming games and practices; coaches add practices there */}
+        <Button
+          title={t('practices.scheduleTitle')}
+          onPress={() => router.push(`/teams/${id}/schedule`)}
+          variant="outline"
+          style={styles.statsButton}
+          testID="team-schedule-button"
+        />
+
         {/* Team Chat Link */}
         {team.chatLink && (
           <Button

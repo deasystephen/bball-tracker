@@ -1,7 +1,7 @@
 # Practice scheduling (#33)
 
 As-built reference for practices, other non-game team events, recurring series and per-session
-availability. Backend only so far: the mobile screens are a later PR (see "What the mobile PR builds").
+availability: the API, and the app screens (see "Mobile app").
 The product plan, competitive notes and the three follow-ups (#331 availability defaults, #332
 minimum-attendance alerts, #333 carpool) are in `docs/features/practice-schedules-plan.md`.
 
@@ -182,7 +182,7 @@ child's availability answers but clears their free-text `comment`.
 
 - Notifications: nothing pushes or emails on create, change or cancel (game create does not either).
   The plan's targeted nudges and minimum-attendance alerts are #332 and need a job runner.
-- Mobile UI, `mobile/` types and the Maestro flow (the next PR).
+- Practices on Home or the Games tab, and a series screen (see "Mobile app", left out).
 - Socket.io updates for practices.
 
 ## Open questions for the owner
@@ -200,20 +200,73 @@ Recorded on #33; each is a one-place change.
   guardian's own account deletion and are not in the guardian's export; nothing records who wrote
   an answer.
 
-## What the mobile PR builds
+## Mobile app
 
-- Hooks over the endpoints above (TanStack Query; invalidate the list, the detail and the
-  availability query on every mutation) and an Amplitude event per mutation hook.
-- A team schedule that merges `GET /games?teamId` and `GET /practices?teamId&from` by start time,
-  with a recurring indicator when `seriesId` is set and a cancelled state.
-- Practice detail: one-tap YES/NO/MAYBE (`PUT …/availability`, `playerId` for a guardian's child),
-  the summary, and the coach's roster breakdown (`GET …/availability`).
-- Coach create form (one-off or recurring: weekdays, weekly/biweekly, start date and time, duration,
-  end date or count), sending the device zone; "edit this practice" vs "edit all future practices";
-  cancel one / cancel series. Coach UI gates on `hasTeamPermission(…, 'canManageTeam')`.
-- Dates through `utils/format-date.ts` in the session's `timezone`; the create form through
-  `DateTimePickerSheet`. Create is open to every tier, so no upgrade path is needed.
-- A Maestro flow (create a series, answer availability, cancel), with a seed reset if it mutates.
+**Where practices live: the team's Schedule** (`app/teams/[id]/schedule.tsx`), reached from a
+**Schedule** button on team detail, for everyone who can open the team (staff, players, guardians).
+It is the one place both a coach and a parent already go for "this team", and it is the smallest
+surface the issue asks for (a merged team schedule). Home, the Games tab and the tab bar are
+unchanged.
+
+- **Schedule**: `GET /games?teamId&startDate` and `GET /practices?teamId&from` (both from the start
+  of the device's today, so a practice that started an hour ago still shows), merged by start time
+  (`utils/practice-schedule.ts#mergeSchedule`). One page each: 100 games (served newest first; a team
+  with more upcoming games is not expected) and 200 practices (ascending, the API maximum); when
+  practices run past the page, games after the last fetched practice are held back and a footer
+  says so. A practice row shows a repeat icon for a series occurrence and a struck-through title
+  with a **Cancelled** badge; its accessibility label carries the same words. **Add practice** shows
+  for `hasTeamPermission(…, 'canManageTeam')`.
+- **Create** (`app/practices/create.tsx?teamId=`): type (Practice / Team event), title, location,
+  notes, **Repeats** Once / Weekly / Every 2 weeks, weekday chips (Monday first, checkboxes, the
+  start date's weekday preselected), date and start time through `DateTimePickerSheet`, duration
+  pills (30–120 min), and for a series **Ends** on a date or after a number. A one-off goes out as
+  `POST /practices { startsAt (instant), timezone }`; a series as `POST /practice-series` with the
+  device-local `startDate` "YYYY-MM-DD", `startTime` "HH:MM" and the device zone
+  (`format-date.ts#deviceTimeZone`, `Intl…resolvedOptions().timeZone`). The form names that zone.
+  Client checks mirror the API (a weekday, end within 366 days, count 1–100); the API stays the
+  authority. Free on every tier, so there is no upgrade path. Guarded by `useAccessGuard` on
+  `canManageTeam`.
+- **Detail** (`app/practices/[id]/index.tsx`): date and time in the session's own zone, the
+  recurrence ("Weekly on Tue, Thu at 6:00 PM"), location, notes, a cancelled banner with the
+  reason. **Availability**: Going / Maybe / Not going in one tap (`PUT …/availability`), then an
+  optional note saved with the same answer. Who may answer is derived from the team's roster
+  (`practiceRespondents`): the user when rostered, and each of their children on the roster
+  (`playerId`); with more than one choice a **Responding for** chip row appears, with one child it
+  reads "Answering for <child>". A coach who is not on the roster gets no buttons, only the counts
+  (the API refuses them, 403). Staff with `canManageTeam` or `canManageRoster` see the **Roster**
+  breakdown (Going / Maybe / Not going / No answer, with notes). Answers stay open on past sessions
+  (as built); a cancelled session takes none.
+- **Edit and cancel**: the ⋯ `ActionMenu` (`canManageTeam`) names the scope in each item: **Edit
+  this practice** / **Edit all future practices**, **Cancel this practice** / **Cancel all future
+  practices**, **Delete this practice** (a standalone practice gets Edit / Cancel / Delete
+  practice). Edit opens `app/practices/[id]/edit.tsx?scope=one|series`, which sends only the
+  changed fields; "all future" starts from the series' own fields (`GET /practice-series/:id`),
+  offers no date or time and says to cancel and recreate for that. A new start is sent without a
+  zone, so the session keeps its own. Cancel one asks for an optional reason inline; cancel series
+  and delete confirm in a second `ActionMenu` that says what goes (upcoming sessions and their
+  answers; past ones stay), then return to the schedule. A session of a cancelled series offers
+  Delete only (the API refuses edits).
+- **Time zones**: every practice time goes through `utils/format-date.ts` with the session's
+  `timezone` (`formatShortDate` / `formatLongDate` / `formatClockTime` take `{ timeZone }`); when it
+  is not the device zone, the zone's short name follows the range ("6:00 PM – 7:30 PM EST"), so a
+  traveller sees the coach's wall time and knows it is not theirs. An unknown zone name falls back
+  to the device zone instead of throwing. The edit form's pickers show device wall time and name
+  the device zone when it differs.
+- **Hooks** (`hooks/usePractices.ts`, keys `hooks/query-keys.ts#practiceKeys`): every mutation
+  invalidates `practiceKeys.all`; delete and series cancel mark details stale without refetching,
+  so the screen that removed a session never refetches its 404. Each mutation fires a catalogued
+  event (`practice_*`, `docs/architecture/analytics.md`). Strings are under `practices.*` (English
+  and Spanish).
+- **Left out**: practices on Home's upcoming list and the Games tab (a parent with several teams
+  opens each team's schedule); a series overview screen; editing a series' days or times (the API
+  does not support it); notifications (#332).
+- **Tests**: `__tests__/app/practices.test.tsx` (schedule merge and gating, guardian answers for two
+  children, coach menu and both cancels, create bodies, both edit scopes, Spanish),
+  `__tests__/hooks/usePractices.runtime.test.tsx`, `__tests__/utils/practice-schedule.test.ts` (zones,
+  DST, merge, validation), the way-back cases in `__tests__/app/error-state-way-back.test.tsx`.
+  Maestro `.maestro/practice-schedule.yaml` (create a weekly series of three, cancel one); the seed
+  removes practices titled with `FLOW_CREATED_PRACTICE_TITLES`. E2E: D.11–D.13 in
+  `docs/testing/e2e-test-plan-v2.0.md`.
 
 ## Tests
 

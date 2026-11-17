@@ -129,6 +129,14 @@ on the same path do not repeat it. Stats views (`/(tabs)/stats`, `/teams/[id]/st
 | `game_event_recorded` | the tracker's shot or stat is persisted | `game_id`, `event_type`; for a shot `shot_made`, `shot_points` | `hooks/useGameEvents.ts` |
 | `game_event_undone` | the tracker's undo deletes an event | `game_id`, `event_type` (when the tracker knows it) | `hooks/useGameEvents.ts` |
 | `rsvp_submitted` | an RSVP is saved | `game_id`, `status`, `on_behalf_of_child` | `hooks/useGames.ts` |
+| `practice_created` | `POST /practices` succeeds (a one-off practice or team event, #33) | `practice_id`, `team_id`, `practice_type` | `hooks/usePractices.ts` |
+| `practice_series_created` | `POST /practice-series` succeeds | `series_id`, `team_id`, `practice_type`, `frequency`, `weekday_count`, `session_count`, `ends` | `hooks/usePractices.ts` |
+| `practice_updated` | `PATCH /practices/:id` succeeds ("Edit this practice") | `practice_id`, `in_series`, `fields` | `hooks/usePractices.ts` |
+| `practice_series_updated` | `PATCH /practice-series/:id` succeeds ("Edit all future practices") | `series_id`, `fields`, `updated_sessions` | `hooks/usePractices.ts` |
+| `practice_cancelled` | `POST /practices/:id/cancel` succeeds | `practice_id`, `in_series`, `has_reason` | `hooks/usePractices.ts` |
+| `practice_series_cancelled` | `DELETE /practice-series/:id` succeeds (future sessions deleted) | `series_id`, `deleted_sessions` | `hooks/usePractices.ts` |
+| `practice_deleted` | `DELETE /practices/:id` succeeds | `practice_id`, `in_series` | `hooks/usePractices.ts` |
+| `practice_availability_submitted` | `PUT /practices/:id/availability` succeeds (an answer, or a note saved with it) | `practice_id`, `status`, `on_behalf_of_child`, `has_comment` | `hooks/usePractices.ts` |
 | `push_permission_answered` | the OS push prompt was certainly shown and answered: the stored status was `undetermined`, or a stored `denied` became `granted` (Android's second ask). Not when already granted, and not on a repeat `denied`, which resolves with no prompt on iOS after a refusal and on Android after two refusals or with notifications off in system settings | `granted` | `hooks/useNotifications.ts` |
 | `notification_opened` | the user taps a push notification | `target`: `game` / `announcement` / `team` / `none` | `hooks/useNotifications.ts` |
 | `entitlement_denied` | the API answers 402 `upgrade_required` | `endpoint_pattern`, `feature`, `current_tier`, `required_tier` | `services/api-client.ts#normalizeApiError` |
@@ -150,7 +158,12 @@ on the same path do not repeat it. Stats views (`/(tabs)/stats`, `/teams/[id]/st
 
 | Property | Type | Meaning |
 | --- | --- | --- |
-| `team_id`, `game_id`, `league_id`, `season_id`, `invitation_id`, `announcement_id` | string (uuid) | the row the action touched |
+| `team_id`, `game_id`, `league_id`, `season_id`, `invitation_id`, `announcement_id`, `practice_id`, `series_id` | string (uuid) | the row the action touched |
+| `practice_type` | enum | `PRACTICE` or `OTHER` (a team event) |
+| `frequency`, `weekday_count`, `ends` | enum, count, enum | a practice series' rule: `WEEKLY`/`BIWEEKLY`, how many weekdays were chosen, and whether it ends on a `date` or after a `count` |
+| `session_count`, `updated_sessions`, `deleted_sessions` | count | sessions the server created, edited or deleted, from its answer |
+| `in_series` | boolean | the practice belongs to a recurring series |
+| `has_reason`, `has_comment` | boolean | a cancel reason or an availability note was sent (never its text) |
 | `screen` | string | Expo Router route pattern, `/teams/[id]` |
 | `params_kind` | string | names of the route's dynamic segments (`id`, `id,playerId`, `token`) or `none` |
 | `fields` | string | sorted, comma-joined keys of the payload that was sent (`changedFields`), never values |
@@ -169,7 +182,7 @@ on the same path do not repeat it. Stats views (`/(tabs)/stats`, `/teams/[id]/st
 | `runtime_version` | string | the binary's runtime version (policy `appVersion`, so it equals the binary's `version`) |
 | `by` | enum | how a staff member was identified: `user_id` (picker) or `email` |
 | `relationship` | enum | `MOTHER`, `FATHER`, `GUARDIAN`, `OTHER` |
-| `status` | string or number | RSVP answer (`YES`/`NO`/`MAYBE`) on `rsvp_submitted`; HTTP status on `error_shown` and on `sign_in_failed` (left out when nothing answered) |
+| `status` | string or number | RSVP answer (`YES`/`NO`/`MAYBE`) on `rsvp_submitted` and `practice_availability_submitted`; HTTP status on `error_shown` and on `sign_in_failed` (left out when nothing answered) |
 | `event_type` | enum | game event type (`SHOT`, `REBOUND`, …) |
 | `shot_made`, `shot_points` | boolean, 1/2/3 | shot outcome; only on `event_type: SHOT` |
 | `on_behalf_of_child` | boolean | a guardian answered for a child |

@@ -35,15 +35,80 @@ function capitalizeFirst(text: string, locale: string | undefined): string {
   return text.charAt(0).toLocaleUpperCase(locale) + text.slice(1);
 }
 
+/**
+ * A display zone for the formatters below. Practices (#33) are shown in the
+ * IANA zone they were scheduled in, so "18:00" stays the coach's 18:00 for a
+ * viewer elsewhere; every other caller omits it and gets the device zone.
+ */
+export interface ZoneOption {
+  timeZone?: string;
+}
+
+/**
+ * Runs a formatter in `timeZone`, or in the device zone when the runtime
+ * refuses that name (a RangeError for a zone its data does not know): a date
+ * one zone off is better than a screen that throws.
+ */
+function inZone<T extends Intl.DateTimeFormatOptions>(
+  format: (options: T) => string,
+  options: T,
+  timeZone: string | undefined,
+): string {
+  if (!timeZone) return format(options);
+  try {
+    return format({ ...options, timeZone });
+  } catch {
+    return format(options);
+  }
+}
+
+/**
+ * The device's IANA zone (`America/New_York`), what a new practice series is
+ * scheduled in; `undefined` when the runtime reports none.
+ */
+export function deviceTimeZone(): string | undefined {
+  try {
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return zone ? zone : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * True when `timeZone` is not the device's zone, so a time shown in it needs
+ * its zone named (`formatZoneName`). An unknown device zone counts as the same:
+ * nothing to compare against.
+ */
+export function isOtherTimeZone(timeZone: string): boolean {
+  const device = deviceTimeZone();
+  return device !== undefined && device !== timeZone;
+}
+
+/** The zone's short name at that instant, e.g. "EST" or "GMT-5"; `''` when the runtime has none. */
+export function formatZoneName(value: Date | string, timeZone: string): string {
+  try {
+    const text = toDate(value).toLocaleTimeString(deviceLocale(), {
+      timeZone,
+      timeZoneName: 'short',
+      hour: 'numeric',
+    });
+    const parts = text.split(' ');
+    return parts.length > 1 ? parts[parts.length - 1] : '';
+  } catch {
+    return '';
+  }
+}
+
 /** Short game date, e.g. "Sat, Oct 3" / "Sáb, 3 oct" (GameCard). Starts its label, so capitalized. */
-export function formatShortDate(value: Date | string): string {
+export function formatShortDate(value: Date | string, options: ZoneOption = {}): string {
   const locale = deviceLocale();
   return capitalizeFirst(
-    toDate(value).toLocaleDateString(locale, {
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-    }),
+    inZone(
+      (o) => toDate(value).toLocaleDateString(locale, o),
+      { weekday: 'short', month: 'short', day: 'numeric' },
+      options.timeZone,
+    ),
     locale,
   );
 }
@@ -52,15 +117,14 @@ export function formatShortDate(value: Date | string): string {
  * Long game date, e.g. "Saturday, October 3, 2026" / "Sábado, 3 de octubre de 2026" (game
  * detail, game stats, Create Game). Starts its label, so capitalized.
  */
-export function formatLongDate(value: Date | string): string {
+export function formatLongDate(value: Date | string, options: ZoneOption = {}): string {
   const locale = deviceLocale();
   return capitalizeFirst(
-    toDate(value).toLocaleDateString(locale, {
-      weekday: 'long',
-      month: 'long',
-      day: 'numeric',
-      year: 'numeric',
-    }),
+    inZone(
+      (o) => toDate(value).toLocaleDateString(locale, o),
+      { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' },
+      options.timeZone,
+    ),
     locale,
   );
 }
@@ -82,6 +146,32 @@ export function formatSeasonDate(date: Date | null, notSet: string): string {
 /** Month and day, e.g. "Oct 3" (home upcoming games, relative-time rows). */
 export function formatMonthDay(value: Date | string): string {
   return toDate(value).toLocaleDateString(deviceLocale(), { month: 'short', day: 'numeric' });
+}
+
+/**
+ * A weekday's name from its number, 0 = Sunday … 6 = Saturday, e.g. "Tue" /
+ * "mar" (`short`) or "Tuesday" (`long`): the practice series weekday chips and
+ * their labels (#33). 2023-01-01 was a Sunday; UTC noon, so no zone moves it.
+ */
+export function formatWeekdayName(day: number, width: 'short' | 'long' = 'short'): string {
+  return new Date(Date.UTC(2023, 0, 1 + day, 12)).toLocaleDateString(deviceLocale(), {
+    weekday: width,
+    timeZone: 'UTC',
+  });
+}
+
+/**
+ * A wall-clock "HH:MM" (a practice series' start time) in the device's clock
+ * style, e.g. "6:00 PM" or "18:00". It is a local time with no date, so it is
+ * formatted as that time in UTC.
+ */
+export function formatWallClock(hhmm: string): string {
+  const [hours, minutes] = hhmm.split(':').map((part) => Number(part));
+  return new Date(Date.UTC(2023, 0, 1, hours || 0, minutes || 0)).toLocaleTimeString(deviceLocale(), {
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZone: 'UTC',
+  });
 }
 
 /**
@@ -127,11 +217,21 @@ export function formatDateTime(value: Date | string): string {
   return toDate(value).toLocaleString(deviceLocale());
 }
 
-/** Clock time, e.g. "7:30 PM" or "19:30"; `seconds` adds the seconds (EventTimeline). */
-export function formatClockTime(value: Date | string, options: { seconds?: boolean } = {}): string {
-  return toDate(value).toLocaleTimeString(deviceLocale(), {
-    hour: 'numeric',
-    minute: '2-digit',
-    ...(options.seconds ? { second: '2-digit' } : {}),
-  });
+/**
+ * Clock time, e.g. "7:30 PM" or "19:30"; `seconds` adds the seconds
+ * (EventTimeline); `timeZone` shows it in that zone (practices, #33).
+ */
+export function formatClockTime(
+  value: Date | string,
+  options: { seconds?: boolean } & ZoneOption = {},
+): string {
+  return inZone(
+    (o) => toDate(value).toLocaleTimeString(deviceLocale(), o),
+    {
+      hour: 'numeric',
+      minute: '2-digit',
+      ...(options.seconds ? { second: '2-digit' } : {}),
+    } as Intl.DateTimeFormatOptions,
+    options.timeZone,
+  );
 }

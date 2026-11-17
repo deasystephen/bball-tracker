@@ -1,0 +1,100 @@
+appId: com.bballtracker.mobile
+---
+# Practice scheduling, coach path (#33): schedule a weekly series of three
+# practices on the Lakers, see it on the team schedule, cancel one occurrence
+# with a reason, and see it cancelled while the others stay.
+#
+# Mutates data: the seed removes every practice and series titled
+# "E2E Practice" (FLOW_CREATED_PRACTICE_TITLES in
+# backend/tests/support/flow-fixtures.ts). Run `npx prisma db seed` first.
+- launchApp:
+    clearState: true
+- tapOn: "Skip"
+- tapOn: "Developer login with test users"
+- assertVisible: "Select Test User"
+- tapOn: "Frank Vogel.*"
+- assertVisible: "Your Teams"
+
+- tapOn: "Teams tab"
+- extendedWaitUntil:
+    visible: "Lakers"
+    timeout: 10000
+- tapOn: "Lakers"
+
+- scrollUntilVisible:
+    element:
+      id: "team-schedule-button"
+    direction: DOWN
+    centerElement: true
+    timeout: 10000
+- tapOn:
+    id: "team-schedule-button"
+- assertVisible: "Schedule"
+- tapOn:
+    id: "schedule-add-practice"
+- assertVisible: "New Practice"
+
+# --- The form: title, weekly, three sessions ---
+- tapOn:
+    id: "practice-title-input"
+- inputText: "E2E Practice"
+- pressKey: Enter
+- tapOn: "Repeats: Weekly"
+- scrollUntilVisible:
+    element:
+      text: "Ends: After a number"
+    direction: DOWN
+    centerElement: true
+    timeout: 10000
+- tapOn: "Ends: After a number"
+- tapOn:
+    id: "practice-count-input"
+- eraseText: 5
+- inputText: "3"
+# The number pad has no Return key; a tap on plain text puts it away.
+- tapOn: "Ends"
+- scrollUntilVisible:
+    element:
+      id: "practice-create-submit"
+    direction: DOWN
+    visibilityPercentage: 60
+    timeout: 10000
+- tapOn:
+    id: "practice-create-submit"
+
+# --- Back on the schedule: three recurring rows ---
+- extendedWaitUntil:
+    visible: "E2E Practice, .*, Repeats"
+    timeout: 10000
+- assertVisible:
+    text: "E2E Practice, .*, Repeats"
+    index: 2
+
+# --- Cancel the first occurrence only ---
+- tapOn:
+    text: "E2E Practice, .*, Repeats"
+    index: 0
+- assertVisible: "Availability"
+- tapOn: "Practice options"
+- assertVisible: "Edit all future practices"
+- tapOn: "Cancel this practice"
+- tapOn:
+    id: "practice-cancel-reason"
+- inputText: "Gym closed"
+- pressKey: Enter
+- tapOn:
+    id: "practice-cancel-confirm"
+- extendedWaitUntil:
+    visible:
+      id: "practice-cancelled-banner"
+    timeout: 10000
+- assertVisible: "Gym closed"
+
+# --- The schedule shows it cancelled; the other two are still on ---
+- tapOn: "Go back"
+- extendedWaitUntil:
+    visible: "E2E Practice, .*, Repeats, Cancelled"
+    timeout: 10000
+- assertVisible:
+    text: "E2E Practice, .*, Repeats"
+    index: 1

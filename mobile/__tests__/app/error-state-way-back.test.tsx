@@ -32,6 +32,9 @@ import PlayerGuardiansScreen from '../../app/teams/[id]/players/[playerId]/guard
 import TeamStaffScreen from '../../app/teams/[id]/staff';
 import AnnouncementThreadScreen from '../../app/teams/[id]/announcements/[announcementId]';
 import TeamStatsScreen from '../../app/teams/[id]/stats';
+import TeamScheduleScreen from '../../app/teams/[id]/schedule';
+import PracticeDetailScreen from '../../app/practices/[id]/index';
+import EditPracticeScreen from '../../app/practices/[id]/edit';
 import { apiClient } from '../../services/api-client';
 import { useAuthStore } from '../../store/auth-store';
 
@@ -97,6 +100,15 @@ const SCREENS: ScreenCase[] = [
     fallback: '/(tabs)/teams',
   },
   { name: 'teams/[id]/stats', Screen: TeamStatsScreen, params: { id: 't1' }, fallback: '/(tabs)/teams' },
+  { name: 'teams/[id]/schedule', Screen: TeamScheduleScreen, params: { id: 't1' }, fallback: '/teams/t1' },
+  // The practice is what failed to load, so its team (and schedule) is unknown.
+  { name: 'practices/[id]', Screen: PracticeDetailScreen, params: { id: 'p1' }, fallback: '/(tabs)/teams' },
+  {
+    name: 'practices/[id]/edit',
+    Screen: EditPracticeScreen,
+    params: { id: 'p1', scope: 'one' },
+    fallback: '/practices/p1',
+  },
 ];
 
 function renderScreen(Screen: React.ComponentType): ReturnType<typeof render> {
