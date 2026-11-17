@@ -61,7 +61,7 @@ It is not set in `infra/task-definition.json`. It exists for an operator script 
 
 - `prisma migrate deploy` (`docker/entrypoint.sh`) and `prisma db execute` connect through Prisma's schema engine with `prisma.config.ts`'s `datasource.url` and never load `src/models`. A probe through `prisma db execute` reads `statement_timeout`, `idle_in_transaction_session_timeout` and `lock_timeout` as `0` on that connection, so a long hand-written backfill is unbounded as before (the RDS parameter group sets none of them).
 - `scripts/pg-upgrade-checks.mjs` and `scripts/workos-cutover-check.mjs` open their own `pg` client with no options.
-- `scripts/data-subject-request.ts` and `scripts/convert-to-managed.ts` import `src/models` and run the same `AccountService` methods as the API's routes, so they carry the API's bound by design. Prefix the command with `DB_STATEMENT_TIMEOUT_MS=<ms>` (or `0`) if one ever needs longer.
+- `scripts/data-subject-request.ts` and `scripts/convert-to-managed.ts` import `src/models` and run the same `AccountService` methods as the API's routes, so they carry the API's bound by design. Prefix the command with `DB_STATEMENT_TIMEOUT_MS=<ms>` (or `0`) if an `export` ever needs longer. `delete` and the conversion run inside one Prisma transaction that Prisma ends at 5 s, long before the statement bound, so the override does not apply to them.
 - `prisma db seed` has its own unbounded client for its rows, but its `StatsService` calls carry the bound.
 
 **Tests.** `tests/integration/pool-statement-timeout.db.test.ts` runs on real Postgres, with a one-client pool built like production's and short limits. It proves:

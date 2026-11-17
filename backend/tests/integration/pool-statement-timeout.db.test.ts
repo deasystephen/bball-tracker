@@ -20,6 +20,7 @@ import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import prisma from '../../src/models';
 import {
+  DB_CONNECTION_TIMEOUT_MS,
   buildDbPoolOptions,
   classifyDbError,
   dbPoolOptionsFromEnv,
@@ -135,15 +136,17 @@ describe('a statement past statement_timeout (#1036)', () => {
     const db = track(shortPool({}, app));
     const started = Date.now();
     const err = await rejectionOf(db.$queryRaw`SELECT pg_sleep(10)`);
-    expect(Date.now() - started).toBeLessThan(3_000);
+    // Far under the 10 s sleep (the first connect is in here too).
+    expect(Date.now() - started).toBeLessThan(5_000);
     expect(sqlState(err)).toBe(STATEMENT_CANCELLED);
     // Cancelled server-side: nothing of that pool is still running.
     expect(await activeBackends(app)).toBe(0);
     // The pool's one slot is free again (pg-pool discards a client whose query
-    // failed outside a transaction, so this may be a new connection).
+    // failed outside a transaction, so this opens a new connection): it answers
+    // well inside the pool wait instead of timing out on a held slot.
     const next = Date.now();
     await expect(db.$queryRaw`SELECT 1 AS ok`).resolves.toEqual([{ ok: 1 }]);
-    expect(Date.now() - next).toBeLessThan(1_000);
+    expect(Date.now() - next).toBeLessThan(DB_CONNECTION_TIMEOUT_MS);
   });
 
   it('rolls an interactive transaction back cleanly and leaves its connection usable', async () => {
@@ -218,24 +221,39 @@ describe('a lock wait (#1036)', () => {
     const held = await fx.user('idle-holder', 'PLAYER');
     const db = track(shortPool({ idleInTransactionTimeoutMs: 500 }, `stmt-idle-${fx.run}`));
 
-    // A holder that takes the lock and then stalls, as a wedged API would.
+    // A holder that takes the lock and then stalls, as a wedged API would. It
+    // stalls far longer than the idle limit, so the probe below has room.
+    let locked!: () => void;
+    const lockTaken = new Promise<void>((resolve) => (locked = resolve));
+    let stalled = true;
     const holder = rejectionOf(
       db.$transaction(
         async (tx) => {
           await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${held} FOR UPDATE`;
-          await pause(2_000);
+          locked();
+          await pause(8_000);
+          stalled = false;
           await tx.$queryRaw`SELECT 1`;
         },
-        { timeout: 10_000 }
+        { timeout: 15_000 }
       )
     );
-    await pause(1_200);
-    // Past the idle limit PostgreSQL has ended that session: the row is free
-    // while the stalled holder is still inside its callback.
-    const locked = await prisma.$transaction(
-      async (tx) => tx.$queryRaw<{ id: string }[]>`SELECT id FROM "User" WHERE id = ${held} FOR UPDATE NOWAIT`
-    );
-    expect(locked).toEqual([{ id: held }]);
+    await lockTaken;
+    // Poll with NOWAIT until PostgreSQL has ended that session (no fixed sleep):
+    // the row frees while the stalled holder is still inside its callback.
+    let freed = false;
+    for (const deadline = Date.now() + 6_000; !freed && Date.now() < deadline; ) {
+      try {
+        await prisma.$transaction(
+          async (tx) => tx.$queryRaw`SELECT id FROM "User" WHERE id = ${held} FOR UPDATE NOWAIT`
+        );
+        freed = true;
+      } catch {
+        await pause(100);
+      }
+    }
+    expect(freed).toBe(true);
+    expect(stalled).toBe(true);
 
     const err = await holder;
     expect(err).toBeInstanceOf(Error);

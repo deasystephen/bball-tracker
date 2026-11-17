@@ -144,12 +144,13 @@ export interface DbTimeouts {
   idleInTransactionTimeoutMs: number;
 }
 
-export const DB_TIMEOUTS: DbTimeouts = {
+export const DB_TIMEOUTS: Readonly<DbTimeouts> = Object.freeze({
   statementTimeoutMs: DB_STATEMENT_TIMEOUT_MS,
   lockTimeoutMs: DB_LOCK_TIMEOUT_MS,
   idleInTransactionTimeoutMs: DB_IDLE_IN_TRANSACTION_TIMEOUT_MS,
-};
+});
 
+/** What `buildDbPoolOptions` returns; the literal there is also checked against pg's `PoolConfig`. */
 export interface DbPoolOptions {
   max: number;
   connectionTimeoutMillis: number;
@@ -173,7 +174,7 @@ export interface DbPoolOptions {
  * the production URL built in `infra/ecs.tf` ever carries a query string.
  * `satisfies PoolConfig` checks the key names against pg's own types.
  */
-export function buildDbPoolOptions(timeouts: DbTimeouts = DB_TIMEOUTS): DbPoolOptions {
+export function buildDbPoolOptions(timeouts: DbTimeouts): DbPoolOptions {
   const { statementTimeoutMs, lockTimeoutMs, idleInTransactionTimeoutMs } = timeouts;
   return {
     max: DB_POOL_MAX,

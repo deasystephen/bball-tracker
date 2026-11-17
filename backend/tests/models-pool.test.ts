@@ -3,7 +3,7 @@
  * container health check's timeout so an unreachable or saturated database
  * answers /health with a 503 instead of hanging past the check.
  */
-import { readFileSync } from 'fs';
+import { readdirSync, readFileSync } from 'fs';
 import path from 'path';
 import {
   DB_CONNECTION_TIMEOUT_MS,
@@ -85,8 +85,14 @@ describe('pg pool bounds', () => {
     const infraTf = (file: string): string => readFileSync(path.resolve(__dirname, '../../infra', file), 'utf8');
 
     it('ends one statement, pool wait included, inside the ALB idle timeout and the sweep stall report', () => {
-      // The ALB keeps AWS's default 60 s idle timeout only while infra sets none.
-      expect(infraTf('ecs.tf')).not.toMatch(/^\s*idle_timeout\s*=/m);
+      // The ALB keeps AWS's default 60 s idle timeout only while no Terraform file sets one.
+      const infraDir = path.resolve(__dirname, '../../infra');
+      for (const file of readdirSync(infraDir).filter((f) => f.endsWith('.tf'))) {
+        expect({ file, setsIdleTimeout: /^\s*idle_timeout\s*=/m.test(infraTf(file)) }).toEqual({
+          file,
+          setsIdleTimeout: false,
+        });
+      }
       const ALB_IDLE_TIMEOUT_MS = 60_000;
       const worst = DB_CONNECTION_TIMEOUT_MS + DEFAULTS.statement_timeout;
       expect(worst).toBeLessThan(ALB_IDLE_TIMEOUT_MS);
