@@ -10,6 +10,14 @@
       "severity": "high",
       "why": "Quadratic-time replacement of percent-encoded runs: a crafted string makes decoding slow. The only copy is decode-uri-component 0.2.2 under expo-router 57 -> query-string 7.1.3 (^0.2.2), which parses URLs on the user's own device, so the worst case is a slow parse of a link that user opened, never a server or another user. The only patched release, 0.5.1, is ESM-only and breaks query-string under Jest (Unexpected token 'export'), and a version-keyed override desyncs npm ci (#275). npm's only fix is expo-router 58 (Expo SDK 58), which needs a new native binary (#922). Accepted by the owner on 2026-11-06.",
       "revisit": "With the Expo SDK 58 binary (#922), whose expo-router no longer pulls decode-uri-component (Dependabot #997), or a CommonJS patched release: take it and remove this entry in the same PR."
+    },
+    {
+      "ghsa": "GHSA-fc5q-39xc-vjpf",
+      "package": "picomatch",
+      "range": "<=4.0.7",
+      "severity": "high",
+      "why": "Catastrophic regex backtracking when picomatch compiles a glob with a single-branch repeated extglob: a crafted glob pattern makes matching slow. No patched release exists: the advisory covers every version up to 4.0.7, which is the latest on npm (checked 2026-11-17), so no override can lift it. Every copy in mobile's production tree (2.3.2 and 4.0.4) sits under build tooling: Metro (metro-file-map -> micromatch, jest-worker -> jest-util), Expo CLI and @expo/metro-config, react-native -> tinyglobby and fdir, and jest-haste-map -> anymatch. Those run on a developer's machine or an EAS build worker against glob patterns written in this repo and its dependencies; none is in the JavaScript bundle the app ships, and no user or network input reaches a glob pattern. The worst case is a slow local build. Proposed for acceptance on 2026-11-17; the owner accepts by approving this PR.",
+      "revisit": "When picomatch publishes a patched release: add an override that lifts both the 2.x and 4.x copies above it (or take the Metro and Expo releases that do), and remove this entry in the same PR. The gate fails this entry on its own when npm audit reports a different range or a reachable fix."
     }
   ]
 }
