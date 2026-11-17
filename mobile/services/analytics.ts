@@ -67,6 +67,14 @@ export const AnalyticsEvents = {
   GAME_EVENT_RECORDED: 'game_event_recorded',
   GAME_EVENT_UNDONE: 'game_event_undone',
   RSVP_SUBMITTED: 'rsvp_submitted',
+  PRACTICE_CREATED: 'practice_created',
+  PRACTICE_SERIES_CREATED: 'practice_series_created',
+  PRACTICE_UPDATED: 'practice_updated',
+  PRACTICE_SERIES_UPDATED: 'practice_series_updated',
+  PRACTICE_CANCELLED: 'practice_cancelled',
+  PRACTICE_SERIES_CANCELLED: 'practice_series_cancelled',
+  PRACTICE_DELETED: 'practice_deleted',
+  PRACTICE_AVAILABILITY_SUBMITTED: 'practice_availability_submitted',
   PUSH_PERMISSION_ANSWERED: 'push_permission_answered',
   NOTIFICATION_OPENED: 'notification_opened',
   ENTITLEMENT_DENIED: 'entitlement_denied',
@@ -192,6 +200,36 @@ export interface AnalyticsEventProps {
   game_event_recorded: { game_id: string; event_type: string; shot_made?: boolean; shot_points?: number };
   game_event_undone: { game_id: string; event_type?: string };
   rsvp_submitted: { game_id: string; status: string; on_behalf_of_child: boolean };
+  /** A standalone practice or other event (#33); `practice_type` is PRACTICE or OTHER. */
+  practice_created: { practice_id: string; team_id: string; practice_type: string };
+  /**
+   * A recurring series (#33): `frequency` WEEKLY/BIWEEKLY, how many weekdays
+   * were chosen, how many sessions the server materialized, and how it ends.
+   */
+  practice_series_created: {
+    series_id: string;
+    team_id: string;
+    practice_type: string;
+    frequency: string;
+    weekday_count: number;
+    session_count: number;
+    ends: 'date' | 'count';
+  };
+  /** "Edit this practice": `fields` names the keys sent, never their values. */
+  practice_updated: { practice_id: string; in_series: boolean; fields: string };
+  /** "Edit all future practices": `updated_sessions` from the server. */
+  practice_series_updated: { series_id: string; fields: string; updated_sessions: number };
+  practice_cancelled: { practice_id: string; in_series: boolean; has_reason: boolean };
+  /** A series cancel deletes its future sessions; `deleted_sessions` from the server. */
+  practice_series_cancelled: { series_id: string; deleted_sessions: number };
+  practice_deleted: { practice_id: string; in_series: boolean };
+  /** An availability answer; `has_comment` is a flag, the comment never leaves the device's request. */
+  practice_availability_submitted: {
+    practice_id: string;
+    status: string;
+    on_behalf_of_child: boolean;
+    has_comment: boolean;
+  };
   push_permission_answered: { granted: boolean };
   notification_opened: { target: 'game' | 'announcement' | 'team' | 'none' };
   entitlement_denied: { endpoint_pattern: string; feature: string; current_tier: string; required_tier: string };

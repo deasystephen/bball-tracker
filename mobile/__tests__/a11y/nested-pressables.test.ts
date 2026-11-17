@@ -40,6 +40,10 @@ const ALWAYS_PRESSABLE = new Set([
   'OpponentScoreButtons',
   'UndoBanner',
   'ScoreDisplay',
+  // components/practice/PracticeFormFields (#33)
+  'PracticeDetailsFields',
+  'PickerRow',
+  'DurationPills',
 ]);
 /** Components that render a touchable only when given `onPress`. */
 const PRESSABLE_WITH_ON_PRESS = new Set(['ListItem', 'Card', 'PlayerStatsCard']);

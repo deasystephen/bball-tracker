@@ -8,7 +8,12 @@ import { randomBytes } from 'crypto';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { StatsService } from '../src/services/stats-service';
 import { removeTestRows } from '../tests/support/test-leftovers';
-import { AGE_GATE_FIXTURES, FLOW_CREATED_OPPONENTS, FLOW_CREATED_ANNOUNCEMENT_TITLES } from '../tests/support/flow-fixtures';
+import {
+  AGE_GATE_FIXTURES,
+  FLOW_CREATED_OPPONENTS,
+  FLOW_CREATED_ANNOUNCEMENT_TITLES,
+  FLOW_CREATED_PRACTICE_TITLES,
+} from '../tests/support/flow-fixtures';
 import {
   BRYCE_JAMES_ID,
   LAKERS_MANAGED_IDS,
@@ -174,6 +179,20 @@ async function main() {
   });
   if (staleFixtureAnnouncements.count > 0) {
     console.log(`    Removed ${staleFixtureAnnouncements.count} fixture announcement(s) from a previous E2E run`);
+  }
+
+  // ...and the practices practice-schedule.yaml schedules on his Lakers (#33):
+  // the sessions (their answers cascade), then the series that made them.
+  const staleFlowSessions = await prisma.practiceSession.deleteMany({
+    where: { title: { in: FLOW_CREATED_PRACTICE_TITLES } },
+  });
+  const staleFlowSeries = await prisma.practiceSeries.deleteMany({
+    where: { title: { in: FLOW_CREATED_PRACTICE_TITLES } },
+  });
+  if (staleFlowSessions.count + staleFlowSeries.count > 0) {
+    console.log(
+      `    Removed ${staleFlowSessions.count} practice(s) and ${staleFlowSeries.count} series from a previous E2E run`
+    );
   }
 
   // ...and the managed players roster flows add to his Lakers (E2E Test

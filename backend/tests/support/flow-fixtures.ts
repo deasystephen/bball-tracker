@@ -24,6 +24,15 @@ export const FLOW_CREATED_ANNOUNCEMENT_TITLES = [
 ];
 
 /**
+ * Practice titles the flows type on the New Practice screen (#33,
+ * practice-schedule.yaml). The seed deletes sessions and series with these
+ * titles; their availability answers go with the sessions (cascade).
+ */
+export const FLOW_CREATED_PRACTICE_TITLES = [
+  'E2E Practice', // practice-schedule.yaml
+];
+
+/**
  * The two sign-ups `.maestro/age-gate.yaml` signs in as (#981). Seeded with
  * `ageConfirmedAt` null and nothing else: no roster row, no history. Taylor
  * answers an adult birth month/year; Jamie answers under 13 and is erased.

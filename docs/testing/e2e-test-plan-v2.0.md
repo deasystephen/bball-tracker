@@ -538,6 +538,25 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
 - **Expected:** The screen is replaced by the new Lakers team-season in Spring 2025 with the same roster (jersey numbers kept) and staff; no games, announcements or pending invitations. The Teams list shows both Lakers rows. A player's stats screen lists both the Spring 2024 row (with last season's stats) and the Spring 2025 row. Repeating the action answers with the same team ("This team already has Spring 2025"), never a duplicate. An assistant coach does not see the button, and neither does anyone on last season's Lakers row (only the latest team-season continues a team). The season list shows only active seasons that may follow the team's own (never the team's own season, or one with an earlier start date when both are dated). Every refusal reads in the device language (check once in Spanish). Naming an archived season (another case is enough) is refused with "That season is archived. Pick an active season or name a new one." A coach in their own personal league sees "New season" preselected with next year's name ("2027"), and the season is created; typing a different case of an existing season's name reuses that season. A deep-linked form's back arrow and Cancel return to the team.
 - **Maestro:** `.maestro/team-rollover.yaml` (passed 2026-11-07 on iPhone 17 / iOS 26.5, PR #1001; the player stats screen lists the per-team rows below the averages and totals, so the flow scrolls to each season).
 
+### D.11 — Coach schedules practices, one-off and recurring (#33)
+- [ ] Pass / Fail / Skipped
+- **Pre:** Seed fresh. Signed in as Frank Vogel (Lakers head coach). Any tier: practices are free.
+- **Steps:** Lakers → **Schedule** → **Add practice**. (a) Title "Shooting", location "Main gym", Repeats **Once**, pick a date and time, duration 60 min → **Schedule practice**. (b) **Add practice** again: Repeats **Weekly**, tick two weekdays, start time 6:00 PM, Ends **After a number** = 6 → **Schedule practices**. (c) Repeat with **Every 2 weeks** and Ends **On a date** about two months out.
+- **Expected:** The form says which time zone the times are in (the device's). (a) toasts "Practice scheduled"; (b) "6 practices scheduled". The schedule lists games and practices together by start time from the start of today; series rows show the repeat icon, every row reads the coach's wall time ("6:00 PM – 7:30 PM") on both sides of a DST change. A player (Steph Curry) and a guardian (Sonya Curry) see the same list without **Add practice**. No weekday, an end before the start, an end more than 366 days out or a count outside 1–100 is refused on the form. In Spanish every label, toast and weekday chip is Spanish.
+- **Maestro:** `.maestro/practice-schedule.yaml` covers (b) with 3 sessions, then E-cancel of one (passed 2026-11-17 on iPhone 17 / iOS 26.5).
+
+### D.12 — Edit or cancel one practice vs the rest of the series (#33)
+- [ ] Pass / Fail / Skipped
+- **Pre:** D.11 (b) done.
+- **Steps:** Open one occurrence → ⋯. The menu lists **Edit this practice**, **Edit all future practices**, **Cancel this practice**, **Cancel all future practices**, **Delete this practice** (a standalone practice has no series items). (a) **Edit this practice** → change the location and the time → Save. (b) On another occurrence, **Edit all future practices** → change the location and notes → Save (the screen offers no date or time and says to cancel and recreate for that). (c) **Cancel this practice** → reason "Gym closed" → **Cancel practice**. (d) **Cancel all future practices** → confirm in the second sheet.
+- **Expected:** (a) only that occurrence moves; (b) toasts "Updated N upcoming practices", and the occurrence edited in (a) keeps its own location but takes the new notes. (c) the row shows **Cancelled** (strikethrough) with the reason on its detail, answers are kept, and it takes no new answers. (d) toasts "Series cancelled: N upcoming practices removed" and returns to the schedule: every upcoming occurrence is gone (deleted with its answers, by design), past ones stay; a past occurrence of the cancelled series offers only **Delete**. Never an `Alert` menu.
+
+### D.13 — Players and guardians answer practice availability (#33)
+- [ ] Pass / Fail / Skipped
+- **Pre:** D.11 done. A guardian with two children on the Lakers roster (seed or prod `+parent`), and a rostered player.
+- **Steps:** As the player: open a practice → **Going** → type a note → **Save note**. As the guardian: the **Responding for** chips list each child on the team (and "Me" only if rostered) → pick child 1 → **Maybe**; pick child 2 → **Not Going** with a note. As Frank: open the same practice.
+- **Expected:** One tap saves the answer (no form). Each child's answer and note show when that child's chip is selected. The counts read "1 going · 1 maybe · 1 not going". Frank sees no answer buttons (coaches are not on the roster) but a **Roster** card grouping every player under Going / Maybe / Not Going / No answer, with the notes. A viewer whose device is in another time zone sees the practice at the coach's wall time with the zone named ("6:00 PM – 7:30 PM PST").
+
 ## E. Invitations & accept flow (NEW v2.0) 📧
 
 The marquee feature shipped this month. Includes the email path (#131) + web/mobile invite-accept screens (#130) + Universal Links (#138).
@@ -1448,6 +1467,7 @@ After testing, optionally tear down:
   - `game-lifecycle.yaml`, `game-tracking.yaml`, `live-spectator.yaml`, `stats-viewing.yaml` — F.1–F.3, G.1/G.2, H.1, K
   - `player-no-tracking.yaml` — PLAYER sees RSVP but no lifecycle/tracking controls (G.8, Steph Curry)
   - `guardian-rsvp.yaml` — "My kids" + "Responding for" RSVP as a pure guardian (I.5, Sonya Curry)
+  - `practice-schedule.yaml` — D.11/D.12: a weekly series of three on the Lakers, then cancel one occurrence with a reason (#33, Frank Vogel; mutates: the seed removes practices titled "E2E Practice")
   - Not covered: completing an invite accept (E.5; the deep-link flow stops at the confirmation alert), exports (M), push (N), any WorkOS sign-in
 
 ### C. Sandbox SES recipient management

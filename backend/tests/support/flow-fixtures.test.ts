@@ -9,7 +9,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { FLOW_CREATED_OPPONENTS } from './flow-fixtures';
+import { FLOW_CREATED_OPPONENTS, FLOW_CREATED_PRACTICE_TITLES } from './flow-fixtures';
 
 const MAESTRO_DIR = path.resolve(__dirname, '..', '..', '..', '.maestro');
 
@@ -60,5 +60,35 @@ describe('flow fixtures', () => {
     const seeded = ['Lakers', 'Celtics', 'Heat', 'Warriors', 'Suns'];
 
     expect(FLOW_CREATED_OPPONENTS.filter((opponent) => seeded.includes(opponent))).toEqual([]);
+  });
+});
+
+/** Practice titles typed on the New Practice screen (#33), per flow file. */
+function practiceTitlesTypedByFlows(): string[] {
+  const found: string[] = [];
+  for (const file of fs.readdirSync(MAESTRO_DIR).filter((name) => /\.ya?ml$/.test(name))) {
+    const lines = fs.readFileSync(path.join(MAESTRO_DIR, file), 'utf8').split('\n');
+    lines.forEach((line, index) => {
+      if (!/id:\s*"practice-title-input"/.test(line)) return;
+      const typed = lines
+        .slice(index + 1, index + 4)
+        .map((next) => /^\s*-\s*inputText:\s*"([^"]+)"/.exec(next)?.[1])
+        .find((value) => value !== undefined);
+      if (typed) found.push(typed);
+    });
+  }
+  return found;
+}
+
+describe('flow fixtures: practices', () => {
+  const typed = practiceTitlesTypedByFlows();
+
+  it('finds the flow that schedules practices', () => {
+    expect(typed.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('the seed removes every practice a flow creates, and lists nothing else', () => {
+    expect(typed.filter((title) => !FLOW_CREATED_PRACTICE_TITLES.includes(title))).toEqual([]);
+    expect(FLOW_CREATED_PRACTICE_TITLES.filter((title) => !typed.includes(title))).toEqual([]);
   });
 });

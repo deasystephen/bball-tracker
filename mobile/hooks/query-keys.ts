@@ -7,6 +7,7 @@
  */
 
 import type { GameFilters } from '../types/game';
+import type { PracticeFilters } from '../types/practice';
 
 export interface TeamFilters {
   seasonId?: string;
@@ -90,4 +91,18 @@ export const statsKeys = {
     [...statsKeys.all, 'playerSeason', playerId, teamId] as const,
   teamSeason: (teamId: string) => [...statsKeys.all, 'teamSeason', teamId] as const,
   teamRoster: (teamId: string) => [...statsKeys.all, 'teamRoster', teamId] as const,
+};
+
+// Practices (#33). Every practice mutation invalidates `practiceKeys.all`
+// (lists, details, availability and series alike); the ones that delete a
+// session mark details stale without refetching, so the screen that deleted
+// it can leave instead of flashing a 404.
+export const practiceKeys = {
+  all: ['practices'] as const,
+  lists: () => [...practiceKeys.all, 'list'] as const,
+  list: (filters?: PracticeFilters) => [...practiceKeys.lists(), filters] as const,
+  details: () => [...practiceKeys.all, 'detail'] as const,
+  detail: (id: string) => [...practiceKeys.details(), id] as const,
+  availability: (id: string) => [...practiceKeys.all, 'availability', id] as const,
+  series: (id: string) => [...practiceKeys.all, 'series', id] as const,
 };

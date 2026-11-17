@@ -44,7 +44,8 @@ const getStatusColor = (
   }
 };
 
-const getStatusLabel = (status: GameStatus): string => {
+/** A game's status as a list row shows it (also the team schedule, #33). */
+export const getStatusLabel = (status: GameStatus): string => {
   switch (status) {
     case 'SCHEDULED':
       return i18n.t('games.scheduled');
