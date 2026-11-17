@@ -8,9 +8,11 @@ import { join } from 'node:path';
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import type { PoolConfig } from 'pg';
-import { dbPoolOptionsFromEnv } from './pool-config';
+import { assertUrlKeepsDbBounds, dbPoolOptionsFromEnv } from './pool-config';
 
 const connectionString = process.env.DATABASE_URL!;
+// pg would let a `?statement_timeout=…` (or `options`) in the URL replace the pool's bounds.
+assertUrlKeepsDbBounds(connectionString);
 
 /**
  * RDS enforces TLS (`rds.force_ssl = 1`), and unlike Prisma's old Rust engine,

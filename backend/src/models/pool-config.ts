@@ -170,9 +170,9 @@ export interface DbPoolOptions {
  * connection starts with them set and nothing runs unbounded first. pg sends
  * nothing for `0`, so the server's own default applies (none is set on RDS or
  * locally, so that is off). pg lets a query parameter of the same name in
- * `DATABASE_URL` win over these keys; `tests/models-pool.test.ts` fails if
- * the production URL built in `infra/ecs.tf` ever carries a query string.
- * `satisfies PoolConfig` checks the key names against pg's own types.
+ * `DATABASE_URL` win over these keys, so `assertUrlKeepsDbBounds` refuses
+ * such a URL at startup. `satisfies PoolConfig` checks the key names against
+ * pg's own types.
  */
 export function buildDbPoolOptions(timeouts: DbTimeouts): DbPoolOptions {
   const { statementTimeoutMs, lockTimeoutMs, idleInTransactionTimeoutMs } = timeouts;
@@ -204,6 +204,40 @@ export function statementTimeoutFromEnv(raw: string | undefined): number {
     `DB_STATEMENT_TIMEOUT_MS must be 0 (off) or an integer of milliseconds from ${DB_STATEMENT_TIMEOUT_MIN_MS} ` +
       `to ${DB_STATEMENT_TIMEOUT_MAX_MS}, got "${raw}"`
   );
+}
+
+/**
+ * Connection-string parameters that pg would let override the bounds above
+ * (`pg-connection-string` copies every query parameter onto the config, after
+ * the pool's own keys). `options` can carry `-c statement_timeout=0`.
+ */
+export const DB_BOUND_URL_PARAMS = [
+  'statement_timeout',
+  'lock_timeout',
+  'idle_in_transaction_session_timeout',
+  'options',
+] as const;
+
+/**
+ * Throws when `connectionString` carries a parameter that would silently
+ * replace a pool bound (the production URL from Secrets Manager, or one an
+ * operator passes to a script through the RDS tunnel). Other parameters
+ * (`schema`, `sslmode`, …) pass. Run once, where `src/models` builds the pool.
+ */
+export function assertUrlKeepsDbBounds(connectionString: string): void {
+  let params: URLSearchParams;
+  try {
+    params = new URL(connectionString).searchParams;
+  } catch {
+    return; // Not a URL pg-connection-string would read params from; pg reports its own error.
+  }
+  const overriding = DB_BOUND_URL_PARAMS.filter((name) => params.has(name));
+  if (overriding.length > 0) {
+    throw new Error(
+      `DATABASE_URL must not set ${overriding.join(', ')}: it would replace the pool's bounds ` +
+        '(models/pool-config.ts). Use DB_STATEMENT_TIMEOUT_MS to change the statement bound.'
+    );
+  }
 }
 
 /** The pool options `src/models/index.ts` hands to `PrismaPg`. */

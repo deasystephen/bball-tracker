@@ -139,8 +139,14 @@ describe('a statement past statement_timeout (#1036)', () => {
     // Far under the 10 s sleep (the first connect is in here too).
     expect(Date.now() - started).toBeLessThan(5_000);
     expect(sqlState(err)).toBe(STATEMENT_CANCELLED);
-    // Cancelled server-side: nothing of that pool is still running.
-    expect(await activeBackends(app)).toBe(0);
+    // Cancelled server-side: nothing of that pool is still running (polled: the
+    // backend reports its state change to pg_stat_activity a moment later).
+    let active = await activeBackends(app);
+    for (const deadline = Date.now() + 3_000; active > 0 && Date.now() < deadline; ) {
+      await pause(100);
+      active = await activeBackends(app);
+    }
+    expect(active).toBe(0);
     // The pool's one slot is free again (pg-pool discards a client whose query
     // failed outside a transaction, so this opens a new connection): it answers
     // well inside the pool wait instead of timing out on a held slot.
