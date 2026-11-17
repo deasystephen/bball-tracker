@@ -106,12 +106,18 @@ export default function PracticeDetailScreen() {
   const subjectId = respondingFor ?? user?.id;
   const myRow = availabilityData?.availability.find((row) => row.userId === subjectId);
 
-  // The note field shows the selected person's stored note until it is edited;
-  // a draft belongs to the person it was typed for.
+  // The note field shows the selected person's stored note until it is edited.
+  // A draft belongs to the person it was typed for and to the stored note it
+  // was typed over: once the stored note changes (this save landing, or an
+  // answer from another device) the draft gives way to it, so a stale draft is
+  // never offered for saving over a newer note.
   const storedComment = myRow?.comment ?? '';
-  const [draft, setDraft] = useState<{ subjectId: string | undefined; text: string } | null>(null);
-  const comment = draft && draft.subjectId === subjectId ? draft.text : storedComment;
-  const setComment = (text: string) => setDraft({ subjectId, text });
+  const [draft, setDraft] = useState<{ subjectId: string | undefined; baseline: string; text: string } | null>(
+    null
+  );
+  const comment =
+    draft && draft.subjectId === subjectId && draft.baseline === storedComment ? draft.text : storedComment;
+  const setComment = (text: string) => setDraft({ subjectId, baseline: storedComment, text });
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirm, setConfirm] = useState<Confirm>(null);
@@ -150,9 +156,8 @@ export default function PracticeDetailScreen() {
     submit.mutate(
       { practiceId: practice.id, status: myRow.status, playerId, comment: comment.trim() },
       {
-        // The draft stays: it is what was saved, so the field never shows the
-        // old note while (or if) the refetch is in flight; once the stored
-        // note matches it, Save note hides.
+        // The draft stays until the refetched note replaces it (see `draft`),
+        // so the field never flashes the old note in between.
         onSuccess: () => toast.showToast(t('practices.noteSaved'), 'success'),
         onError: (err) => toast.showToast(getApiErrorMessage(err, t('practices.errors.answerFailed')), 'error'),
       }
@@ -173,7 +178,7 @@ export default function PracticeDetailScreen() {
   const confirmCancelSeries = async () => {
     if (!series) return;
     try {
-      const result = await cancelSeries.mutateAsync(series.id);
+      const result = await cancelSeries.mutateAsync({ seriesId: series.id, practiceId: practice.id });
       toast.showToast(t('practices.seriesCancelledToast', { count: result.deletedSessions ?? 0 }), 'success');
       goBack();
     } catch (err) {

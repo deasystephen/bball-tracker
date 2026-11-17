@@ -63,6 +63,7 @@ import {
   toLocalDateKey,
   toLocalTimeKey,
   validateRecurrence,
+  validateStartDate,
   type RecurrenceErrors,
 } from '../../utils/practice-schedule';
 import type { PracticeFrequency } from '../../types/practice';
@@ -198,14 +199,20 @@ export default function CreatePracticeScreen() {
       durationMinutes: duration,
       timezone: timeZone,
     };
+    const startError = validateStartDate(start, recurring);
+    const found: RecurrenceErrors = {
+      ...(recurring
+        ? validateRecurrence({ weekdays, frequency: repeat, startDate: start, endMode, endDate, count })
+        : {}),
+      ...(startError ? { startDate: startError } : {}),
+    };
+    setErrors(found);
+    if (Object.keys(found).length > 0) return;
     try {
       if (!recurring) {
         await createPractice.mutateAsync({ ...base, startsAt: start.toISOString() });
         toast.showToast(t('practices.createdOne'), 'success');
       } else {
-        const found = validateRecurrence({ weekdays, frequency: repeat, startDate: start, endMode, endDate, count });
-        setErrors(found);
-        if (Object.keys(found).length > 0) return;
         const series = await createSeries.mutateAsync({
           ...base,
           frequency: repeat,
@@ -222,6 +229,10 @@ export default function CreatePracticeScreen() {
     }
   };
 
+  // Opened without a team (a stale or hand-typed link): nothing to load.
+  if (!teamId) {
+    return <ErrorState message={t('teams.notFound')} onBack={goBack} />;
+  }
   if (!team && teamError) {
     return (
       <ErrorState
@@ -333,6 +344,11 @@ export default function CreatePracticeScreen() {
               onPress={() => openPicker('date')}
               testID="practice-date-button"
             />
+            {errors.startDate ? (
+              <ThemedText variant="footnote" color="error" style={styles.error}>
+                {errors.startDate}
+              </ThemedText>
+            ) : null}
             <PickerRow
               icon="time"
               text={formatClockTime(start)}

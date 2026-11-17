@@ -134,58 +134,75 @@ export interface WallClock {
   minute: number;
 }
 
+const WALL_CLOCK_OPTIONS: Intl.DateTimeFormatOptions = {
+  year: 'numeric',
+  month: 'numeric',
+  day: 'numeric',
+  hour: 'numeric',
+  minute: 'numeric',
+  hourCycle: 'h23',
+};
+
+/** `formatToParts`' numeric fields, or null when a field is missing. */
+function wallClockFromParts(instant: Date, timeZone: string): WallClock | null {
+  const parts = new Intl.DateTimeFormat('en-US', { ...WALL_CLOCK_OPTIONS, timeZone }).formatToParts(instant);
+  const read = (type: string) => {
+    const value = parts.find((part) => part.type === type)?.value;
+    return value !== undefined && /^\d+$/.test(value) ? Number(value) : null;
+  };
+  const [year, month, day, hour, minute] = ['year', 'month', 'day', 'hour', 'minute'].map(read);
+  if (year === null || month === null || day === null || hour === null || minute === null) return null;
+  return { year, month, day, hour: hour % 24, minute };
+}
+
+/** The `en-US` string form, "11/6/2026, 18:05" or "11/6/2026, 6:05 PM"; null when it does not parse. */
+function wallClockFromString(instant: Date, timeZone: string): WallClock | null {
+  const text = instant.toLocaleString('en-US', { ...WALL_CLOCK_OPTIONS, timeZone });
+  const match = /^(\d{1,2})\/(\d{1,2})\/(\d{4}),?\s+(\d{1,2}):(\d{2})(?::\d{2})?\s*([AaPp]\.?[Mm]\.?)?$/.exec(
+    text.replace(/ | /g, ' ').trim(),
+  );
+  if (!match) return null;
+  let hour = Number(match[4]) % 24;
+  const meridiem = match[6]?.toLowerCase();
+  if (meridiem?.startsWith('p') && hour < 12) hour += 12;
+  if (meridiem?.startsWith('a') && hour === 12) hour = 0;
+  return { year: Number(match[3]), month: Number(match[1]), day: Number(match[2]), hour, minute: Number(match[5]) };
+}
+
 /**
  * What a clock in `timeZone` shows at that instant (a practice's own wall
- * time, #33). Not display text: it is parsed from a fixed `en-US` 24-hour
- * form. A zone the runtime does not know reads as the device's clock.
+ * time, #33). Read from `formatToParts` with a 24-hour cycle, else from the
+ * `en-US` string (12- or 24-hour). `null` when the runtime does not know the
+ * zone or neither form can be read: never the device's clock in its place,
+ * which would silently move a practice by the difference.
  */
-export function wallClockIn(value: Date | string, timeZone: string): WallClock {
+export function wallClockIn(value: Date | string, timeZone: string): WallClock | null {
   const instant = toDate(value);
-  const options: Intl.DateTimeFormatOptions = {
-    year: 'numeric',
-    month: 'numeric',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: 'numeric',
-    hour12: false,
-  };
-  let text: string;
   try {
-    text = instant.toLocaleString('en-US', { ...options, timeZone });
+    const fromParts = wallClockFromParts(instant, timeZone);
+    if (fromParts) return fromParts;
   } catch {
-    text = instant.toLocaleString('en-US', options);
+    // no formatToParts, or the zone is unknown: try the string form
   }
-  // "11/6/2026, 18:05"; some runtimes write midnight as 24.
-  const match = /(\d+)\/(\d+)\/(\d+),?\s+(\d+):(\d+)/.exec(text);
-  if (!match) {
-    return {
-      year: instant.getFullYear(),
-      month: instant.getMonth() + 1,
-      day: instant.getDate(),
-      hour: instant.getHours(),
-      minute: instant.getMinutes(),
-    };
+  try {
+    return wallClockFromString(instant, timeZone);
+  } catch {
+    return null;
   }
-  return {
-    year: Number(match[3]),
-    month: Number(match[1]),
-    day: Number(match[2]),
-    hour: Number(match[4]) % 24,
-    minute: Number(match[5]),
-  };
 }
 
 /**
  * The instant at which a clock in `timeZone` shows `wall`: the inverse of
  * `wallClockIn`, using that zone's offset on that day (so 18:00 stays 18:00
  * across daylight saving). A time skipped by a spring-forward lands just
- * after the jump, as on the server.
+ * after the jump, as on the server. `null` when the zone cannot be read.
  */
-export function instantFromWallClock(wall: WallClock, timeZone: string): Date {
+export function instantFromWallClock(wall: WallClock, timeZone: string): Date | null {
   const target = Date.UTC(wall.year, wall.month - 1, wall.day, wall.hour, wall.minute);
   let guess = target;
   for (let i = 0; i < 3; i += 1) {
     const shown = wallClockIn(new Date(guess), timeZone);
+    if (!shown) return null;
     const shownUtc = Date.UTC(shown.year, shown.month - 1, shown.day, shown.hour, shown.minute);
     if (shownUtc === target) break;
     guess += target - shownUtc;

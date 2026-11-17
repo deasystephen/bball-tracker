@@ -147,6 +147,15 @@ export default function EditPracticeScreen() {
   if (seriesScope && practice && !practice.seriesId) {
     return <ErrorState message={t('practices.errors.seriesMissing')} onBack={goBack} />;
   }
+  // The API refuses to edit a cancelled practice, or any session of a
+  // cancelled series; say so before the coach fills in a form (the menu that
+  // led here may have been built from older data).
+  if (
+    practice &&
+    ((!seriesScope && practice.status === 'CANCELLED') || practice.series?.cancelledAt)
+  ) {
+    return <ErrorState message={t('practices.errors.notEditable')} onBack={goBack} />;
+  }
   const source = seriesScope ? seriesQuery.data : practice;
   if (!practice || !source || !allowed) {
     return <LoadingSpinner message={t('common.loading')} fullScreen />;
@@ -155,10 +164,13 @@ export default function EditPracticeScreen() {
   const timeZone = practice.timezone;
   const initial = detailsOf(source);
   const details: PracticeDetailsValue = { ...initial, ...edits };
-  const wall = wallEdit ?? wallClockIn(practice.startsAt, timeZone);
+  // The practice's own clock. `null` when this runtime cannot read its zone:
+  // then date and time are not offered at all, rather than guessed.
+  const storedWall = wallClockIn(practice.startsAt, timeZone);
+  const wall = wallEdit ?? storedWall;
   // Untouched, the start is the stored instant itself (a repeated autumn hour
   // has two instants for one wall time; the round trip would pick the first).
-  const start = wallEdit ? instantFromWallClock(wallEdit, timeZone) : new Date(practice.startsAt);
+  const start = (wallEdit && instantFromWallClock(wallEdit, timeZone)) || new Date(practice.startsAt);
   const duration = durationEdit ?? practice.durationMinutes;
   const dateText = formatLongDate(start, { timeZone });
   const timeText = formatClockTime(start, { timeZone });
@@ -192,6 +204,7 @@ export default function EditPracticeScreen() {
   };
 
   const onPicked = (value: Date) => {
+    if (!wall) return;
     setWallEdit(
       picker === 'time'
         ? { ...wall, hour: value.getHours(), minute: value.getMinutes() }
@@ -243,20 +256,28 @@ export default function EditPracticeScreen() {
 
           {!seriesScope ? (
             <Card variant="default" style={styles.section}>
-              <PickerRow
-                icon="calendar"
-                text={dateText}
-                accessibilityLabel={t('practices.form.dateA11y', { date: dateText })}
-                onPress={() => openPicker('date')}
-                testID="practice-date-button"
-              />
-              <PickerRow
-                icon="time"
-                text={timeText}
-                accessibilityLabel={t('practices.form.startTimeA11y', { time: timeText })}
-                onPress={() => openPicker('time')}
-                testID="practice-time-button"
-              />
+              {wall ? (
+                <>
+                  <PickerRow
+                    icon="calendar"
+                    text={dateText}
+                    accessibilityLabel={t('practices.form.dateA11y', { date: dateText })}
+                    onPress={() => openPicker('date')}
+                    testID="practice-date-button"
+                  />
+                  <PickerRow
+                    icon="time"
+                    text={timeText}
+                    accessibilityLabel={t('practices.form.startTimeA11y', { time: timeText })}
+                    onPress={() => openPicker('time')}
+                    testID="practice-time-button"
+                  />
+                </>
+              ) : (
+                <ThemedText variant="footnote" color="textSecondary" testID="practice-edit-no-time">
+                  {t('practices.form.timeUnavailable', { date: dateText, time: timeText })}
+                </ThemedText>
+              )}
               <ThemedText variant="captionBold" color="textSecondary" style={styles.label}>
                 {t('practices.form.duration')}
               </ThemedText>
@@ -285,9 +306,9 @@ export default function EditPracticeScreen() {
       </KeyboardAvoidingView>
 
       <DateTimePickerSheet
-        visible={picker !== null}
+        visible={picker !== null && wall !== null}
         mode={picker ?? 'date'}
-        value={toPickerDate(wall)}
+        value={wall ? toPickerDate(wall) : start}
         title={picker === 'time' ? t('practices.form.startTime') : t('practices.form.date')}
         onConfirm={onPicked}
         onCancel={() => setPicker(null)}

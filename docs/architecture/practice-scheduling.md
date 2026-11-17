@@ -247,8 +247,12 @@ unchanged.
   zone, so the session keeps its own. Cancel one asks for an optional reason inline; cancel series
   and delete confirm in a second `ActionMenu` that says what goes (upcoming sessions and their
   answers; past ones stay), then return to the schedule. A session of a cancelled series offers
-  Delete only (the API refuses edits); a cancelled occurrence of an active series still offers
-  **Edit all future practices**.
+  Cancel (while still scheduled) and Delete, never an edit (the API refuses edits to history, and
+  the edit screen says so up front if a stale menu led there); a cancelled occurrence of an active
+  series still offers **Edit all future practices**. If the runtime cannot read the practice's
+  zone, the edit screen shows the date and time without offering to change them rather than guess.
+  The create form also checks the API's start window (a series' first date 31 days back to 366
+  ahead, a one-off 31 back to 732 ahead).
 - **Time zones**: every practice time goes through `utils/format-date.ts` with the session's
   `timezone` (`formatShortDate` / `formatLongDate` / `formatClockTime` take `{ timeZone }`); when it
   is not the device zone, the zone's short name follows the range ("6:00 PM – 7:30 PM EST"), so a

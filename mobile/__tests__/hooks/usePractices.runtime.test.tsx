@@ -122,7 +122,7 @@ it('a series cancel refreshes the lists but does not refetch the open practice i
 
   const { result } = renderHook(() => useCancelPracticeSeries(), { wrapper });
   await act(async () => {
-    await result.current.mutateAsync('s1');
+    await result.current.mutateAsync({ seriesId: 's1', practiceId: 'p1' });
   });
 
   expect(mockedDelete).toHaveBeenCalledWith('/practice-series/s1');

@@ -419,7 +419,7 @@ describe('practice detail: the coach', () => {
     await act(async () => {
       fireEvent.press(view.getByText('Cancel all future practices'));
     });
-    expect(mockCancelSeries).toHaveBeenCalledWith('series-1');
+    expect(mockCancelSeries).toHaveBeenCalledWith({ seriesId: 'series-1', practiceId: 'p1' });
     expect(mockToast).toHaveBeenCalledWith('Series cancelled: 7 upcoming practices removed', 'success');
     expect(mockRouter.back).toHaveBeenCalled();
   });
@@ -528,6 +528,31 @@ describe('create practice', () => {
     expect(mockCreateSeries).not.toHaveBeenCalled();
   });
 
+  it('refuses a first date outside the API window, next to the date', async () => {
+    const view = render(<CreatePracticeScreen />);
+    const sheet = view.UNSAFE_getByProps({ mode: 'date' });
+    const farAhead = new Date();
+    farAhead.setDate(farAhead.getDate() + 800);
+    await act(async () => {
+      fireEvent.press(view.getByTestId('practice-date-button'));
+    });
+    await act(async () => {
+      sheet.props.onConfirm(farAhead);
+    });
+    await act(async () => {
+      fireEvent.press(view.getByTestId('practice-create-submit'));
+    });
+    expect(view.getByText('The first date can be at most 732 days ahead.')).toBeTruthy();
+    expect(mockCreateOne).not.toHaveBeenCalled();
+  });
+
+  it('opened without a team, says so with a way back', () => {
+    mockParams = {};
+    const view = render(<CreatePracticeScreen />);
+    expect(view.getByLabelText('Go back')).toBeTruthy();
+    expect(view.queryByTestId('practice-create-submit')).toBeNull();
+  });
+
   it('turns away a member who cannot manage the team', () => {
     signIn('klay');
     render(<CreatePracticeScreen />);
@@ -571,6 +596,14 @@ describe('edit practice', () => {
       fireEvent.press(view.getByTestId('practice-edit-save'));
     });
     expect(mockUpdateOne).toHaveBeenCalledWith({ practiceId: 'p1', data: { startsAt: '2026-11-06T23:00:00.000Z' } });
+  });
+
+  it('refuses up front to edit a practice that is cancelled', () => {
+    mockParams = { id: 'p1', scope: 'one' };
+    mockPractice = practice({ status: 'CANCELLED' });
+    const view = render(<EditPracticeScreen />);
+    expect(view.getByText("This practice is cancelled, or its series is, so it can't be edited.")).toBeTruthy();
+    expect(view.queryByTestId('practice-edit-save')).toBeNull();
   });
 
   it('"all future" on a practice in no series says so instead of loading forever', () => {

@@ -13,6 +13,7 @@ import {
   calendarDaysBetween,
   validateRecurrence,
   daysToOccurrence,
+  validateStartDate,
   practiceRespondents,
 } from '../../utils/practice-schedule';
 import {
@@ -182,19 +183,47 @@ describe('a practice\'s own wall clock', () => {
       hour: 18,
       minute: 0,
     });
-    expect(wallClockIn('2026-12-02T04:30:00Z', 'America/New_York').day).toBe(1);
+    expect(wallClockIn('2026-12-02T04:30:00Z', 'America/New_York')?.day).toBe(1);
   });
 
   it('keeps 18:00 when the date moves across a daylight-saving change', () => {
     // Oct 30 18:00 EDT is 22:00Z; Nov 6 18:00 EST is 23:00Z.
-    const wall = { ...wallClockIn('2026-10-30T22:00:00Z', 'America/New_York'), day: 6, month: 11 };
-    expect(instantFromWallClock(wall, 'America/New_York').toISOString()).toBe('2026-11-06T23:00:00.000Z');
+    const wall = wallClockIn('2026-10-30T22:00:00Z', 'America/New_York');
+    expect(instantFromWallClock({ ...wall!, day: 6, month: 11 }, 'America/New_York')?.toISOString()).toBe(
+      '2026-11-06T23:00:00.000Z'
+    );
+  });
+
+  it('reads a 12-hour string when formatToParts is missing, never the device clock', () => {
+    const parts = jest.spyOn(Intl.DateTimeFormat.prototype, 'formatToParts').mockImplementation(() => {
+      throw new TypeError('formatToParts is not a function');
+    });
+    const text = jest.spyOn(Date.prototype, 'toLocaleString').mockReturnValue('11/6/2026, 6:05\u202fPM');
+    try {
+      expect(wallClockIn('2026-11-06T23:05:00Z', 'America/New_York')).toEqual({
+        year: 2026,
+        month: 11,
+        day: 6,
+        hour: 18,
+        minute: 5,
+      });
+      text.mockReturnValue('not a date');
+      expect(wallClockIn('2026-11-06T23:05:00Z', 'America/New_York')).toBeNull();
+    } finally {
+      parts.mockRestore();
+      text.mockRestore();
+    }
+  });
+
+  it('cannot read a zone the runtime does not know', () => {
+    expect(wallClockIn('2026-11-06T23:05:00Z', 'Not/AZone')).toBeNull();
+    expect(instantFromWallClock({ year: 2026, month: 11, day: 6, hour: 18, minute: 0 }, 'Not/AZone')).toBeNull();
   });
 
   it('moves a time inside the spring-forward gap past the jump', () => {
     // 2027-03-14 02:30 does not exist in New York; 03:30 EDT is 07:30Z.
     const instant = instantFromWallClock({ year: 2027, month: 3, day: 14, hour: 2, minute: 30 }, 'America/New_York');
-    expect(['2027-03-14T07:30:00.000Z', '2027-03-14T06:30:00.000Z']).toContain(instant.toISOString());
+    expect(['2027-03-14T07:30:00.000Z', '2027-03-14T06:30:00.000Z']).toContain(instant?.toISOString());
   });
 });
 
@@ -306,6 +335,16 @@ describe('validateRecurrence', () => {
     expect(daysToOccurrence(start, [6, 0], 'BIWEEKLY', 3)).toBe(14);
     expect(daysToOccurrence(start, [6, 0], 'BIWEEKLY', 4)).toBe(15);
     expect(daysToOccurrence(start, [], 'WEEKLY', 1)).toBeNull();
+  });
+});
+
+describe('validateStartDate', () => {
+  const today = new Date(2027, 0, 10);
+  it('allows a series 31 days back to 366 ahead, a one-off 31 back to 732 ahead', () => {
+    expect(validateStartDate(new Date(2026, 11, 10), true, today)).toBeUndefined();
+    expect(validateStartDate(new Date(2026, 11, 9), true, today)).toBe('The first date can be at most 31 days ago.');
+    expect(validateStartDate(new Date(2028, 0, 12), true, today)).toBe('The first date can be at most 366 days ahead.');
+    expect(validateStartDate(new Date(2028, 0, 12), false, today)).toBeUndefined();
   });
 });
 

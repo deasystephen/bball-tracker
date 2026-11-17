@@ -1093,7 +1093,8 @@
       "timeZoneNote": "Times are in your time zone ({{zone}}).",
       "submitOne": "Schedule practice",
       "submitSeries": "Schedule practices",
-      "practiceZoneNote": "Date and time are in the practice's time zone ({{zone}}), as the team sees them."
+      "practiceZoneNote": "Date and time are in the practice's time zone ({{zone}}), as the team sees them.",
+      "timeUnavailable": "Starts {{date}} at {{time}}. This device can't show the practice's time zone, so the date and time can't be changed here."
     },
     "errors": {
       "weekdaysRequired": "Pick at least one day",
@@ -1109,7 +1110,10 @@
       "countTooFar": "That many practices runs past {{max}} days. Choose fewer.",
       "seriesMissing": "This practice is not part of a series.",
       "noSessions": "None of the chosen days falls between these dates.",
-      "tooManySessions": "That makes {{n}} practices; a series holds at most {{max}}. Pick an earlier last date."
+      "tooManySessions": "That makes {{n}} practices; a series holds at most {{max}}. Pick an earlier last date.",
+      "notEditable": "This practice is cancelled, or its series is, so it can't be edited.",
+      "startTooEarly": "The first date can be at most {{days}} days ago.",
+      "startTooLate": "The first date can be at most {{days}} days ahead."
     },
     "windowNote": "Showing the next {{days}} days."
   }

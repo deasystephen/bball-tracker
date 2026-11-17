@@ -4,9 +4,10 @@
  *
  * Every schedule mutation invalidates `practiceKeys.all` (lists, details,
  * availability, series); an availability answer only that practice's detail
- * and answers, since list rows carry none. The two that delete sessions (delete one, cancel a series) mark the
- * per-session queries (detail, availability) stale without refetching them:
- * the screen that did it is leaving, and a refetch would only fetch a 404.
+ * and answers, since list rows carry none. The two that delete sessions
+ * (delete one, cancel a series) mark only the acted-on practice's detail and
+ * answers stale without refetching them: that screen is leaving, and a
+ * refetch would only fetch a 404.
  */
 
 import { useQuery, useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
@@ -38,24 +39,25 @@ function invalidateAll(queryClient: QueryClient): void {
   queryClient.invalidateQueries({ queryKey: practiceKeys.all });
 }
 
-/** Per-session queries: a deleted session answers 404 to both. */
-const PER_SESSION = new Set(['detail', 'availability']);
-
 /**
- * After a delete: lists and series refetch; per-session queries (detail and
- * availability) are only marked stale, so the mounted screen of a session
- * that no longer exists sends no request before it leaves. A session still
- * there refetches whenever its screen mounts next.
+ * After a delete: everything refetches as usual except the detail and answers
+ * of the practice the screen acted on, which are only marked stale: that
+ * session is gone (404) and its screen is leaving. Any other session, such as
+ * a past one a series cancel kept, refetches and shows the series as ended.
  */
-function invalidateAfterDelete(queryClient: QueryClient): void {
+function invalidateAfterDelete(queryClient: QueryClient, practiceId: string | undefined): void {
+  const gone = practiceId
+    ? [practiceKeys.detail(practiceId), practiceKeys.availability(practiceId)].map((key) => JSON.stringify(key))
+    : [];
+  const isGone = (queryKey: readonly unknown[]) => gone.includes(JSON.stringify(queryKey));
   queryClient.invalidateQueries({
     queryKey: practiceKeys.all,
-    predicate: (query) => PER_SESSION.has(String(query.queryKey[1])),
+    predicate: (query) => isGone(query.queryKey),
     refetchType: 'none',
   });
   queryClient.invalidateQueries({
     queryKey: practiceKeys.all,
-    predicate: (query) => !PER_SESSION.has(String(query.queryKey[1])),
+    predicate: (query) => !isGone(query.queryKey),
   });
 }
 
@@ -224,20 +226,24 @@ export function useCancelPractice() {
   });
 }
 
-/** Cancel a series: the server deletes every session that has not started; past ones stay. */
+/**
+ * Cancel a series: the server deletes every session that has not started;
+ * past ones stay. `practiceId` is the occurrence the screen acted from (it
+ * leaves; its queries are not refetched).
+ */
 export function useCancelPracticeSeries() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (seriesId: string) => {
+    mutationFn: async ({ seriesId }: { seriesId: string; practiceId?: string }) => {
       const response = await apiClient.delete(`/practice-series/${seriesId}`);
       return response.data as { series: PracticeSeries; deletedSessions: number };
     },
-    onSuccess: (result, seriesId) => {
+    onSuccess: (result, variables) => {
       trackEvent(AnalyticsEvents.PRACTICE_SERIES_CANCELLED, {
-        series_id: seriesId,
+        series_id: variables.seriesId,
         deleted_sessions: result.deletedSessions ?? 0,
       });
-      invalidateAfterDelete(queryClient);
+      invalidateAfterDelete(queryClient, variables.practiceId);
     },
   });
 }
@@ -253,7 +259,7 @@ export function useDeletePractice() {
         practice_id: variables.practiceId,
         in_series: variables.inSeries,
       });
-      invalidateAfterDelete(queryClient);
+      invalidateAfterDelete(queryClient, variables.practiceId);
     },
   });
 }

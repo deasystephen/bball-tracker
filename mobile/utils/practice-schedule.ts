@@ -31,6 +31,26 @@ export const AVAILABILITY_COMMENT_MAX = 500;
 /** How far ahead the team schedule looks, in days, from the start of today. */
 export const SCHEDULE_WINDOW_DAYS = 90;
 
+/** The API's start windows, in days from today: a series' first date, and a one-off practice. */
+export const MAX_SERIES_BACKDATE_DAYS = 31;
+export const MAX_SERIES_LEAD_DAYS = 366;
+export const MAX_PRACTICE_PAST_DAYS = 31;
+export const MAX_PRACTICE_FUTURE_DAYS = MAX_SERIES_LEAD_DAYS + MAX_SERIES_SPAN_DAYS;
+
+/**
+ * The start date's window, as the API checks it (in local calendar days from
+ * `today`): a series starts at most 31 days back and 366 ahead, a one-off at
+ * most 31 back and 732 ahead. The message for the date row, or undefined.
+ */
+export function validateStartDate(start: Date, recurring: boolean, today: Date = new Date()): string | undefined {
+  const days = calendarDaysBetween(today, start);
+  const back = recurring ? MAX_SERIES_BACKDATE_DAYS : MAX_PRACTICE_PAST_DAYS;
+  const ahead = recurring ? MAX_SERIES_LEAD_DAYS : MAX_PRACTICE_FUTURE_DAYS;
+  if (days < -back) return i18n.t('practices.errors.startTooEarly', { days: back });
+  if (days > ahead) return i18n.t('practices.errors.startTooLate', { days: ahead });
+  return undefined;
+}
+
 /** Duration choices, in minutes. */
 export const PRACTICE_DURATIONS = [30, 45, 60, 75, 90, 120] as const;
 export const DEFAULT_PRACTICE_DURATION = 90;
@@ -153,6 +173,8 @@ export function calendarDaysBetween(from: Date, to: Date): number {
 }
 
 export interface RecurrenceErrors {
+  /** The start date's window (`validateStartDate`); set by the form, one-off or series. */
+  startDate?: string;
   weekdays?: string;
   endDate?: string;
   count?: string;
