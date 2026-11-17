@@ -12,13 +12,17 @@ import {
   DB_POOL_MAX,
   DB_IDLE_IN_TRANSACTION_TIMEOUT_MS,
   DB_KEEPALIVE_INITIAL_DELAY_MS,
-  DB_POOL_OPTIONS,
   DB_QUERY_TIMEOUT_MARGIN_MS,
+  DB_STATEMENT_TIMEOUT_MAX_MS,
+  DB_STATEMENT_TIMEOUT_MIN_MS,
   DB_STATEMENT_TIMEOUT_MS,
   POOL_TIMEOUT_MESSAGES,
+  QUERY_READ_TIMEOUT_MESSAGE,
+  ReadTimeoutClient,
   TRANSACTION_EXPIRED_MESSAGE,
   TRANSACTION_START_MESSAGE,
   classifyDbError,
+  dbPoolOptionsFromEnv,
   isLockTimeoutError,
   isPoolTimeoutError,
   buildDbPoolOptions,
@@ -31,6 +35,8 @@ import { lockTimeout, transactionClosed } from './factories';
 const TASK_DEFINITION = JSON.parse(
   readFileSync(path.resolve(__dirname, '../../infra/task-definition.json'), 'utf8')
 ) as { containerDefinitions: Array<{ healthCheck?: { timeout?: number } }> };
+
+const DEFAULTS = dbPoolOptionsFromEnv({});
 
 describe('pg pool bounds', () => {
   it('sets a connect/pool timeout at least 1 s under the container health check timeout', () => {
@@ -48,60 +54,44 @@ describe('pg pool bounds', () => {
   it('keeps the per-task ceiling the RDS alarm budget assumes', () => {
     expect(DB_POOL_MAX).toBe(10);
     expect(DB_IDLE_TIMEOUT_MS).toBe(30_000);
-    expect(DB_POOL_OPTIONS).toEqual({
+    expect(DEFAULTS).toEqual({
       max: DB_POOL_MAX,
       connectionTimeoutMillis: DB_CONNECTION_TIMEOUT_MS,
       idleTimeoutMillis: DB_IDLE_TIMEOUT_MS,
       keepAlive: true,
       keepAliveInitialDelayMillis: DB_KEEPALIVE_INITIAL_DELAY_MS,
       query_timeout: DB_STATEMENT_TIMEOUT_MS + DB_QUERY_TIMEOUT_MARGIN_MS,
-      options:
-        `-c lock_timeout=${DB_LOCK_TIMEOUT_MS} -c statement_timeout=${DB_STATEMENT_TIMEOUT_MS} ` +
-        `-c idle_in_transaction_session_timeout=${DB_IDLE_IN_TRANSACTION_TIMEOUT_MS}`,
+      statement_timeout: DB_STATEMENT_TIMEOUT_MS,
+      lock_timeout: DB_LOCK_TIMEOUT_MS,
+      idle_in_transaction_session_timeout: DB_IDLE_IN_TRANSACTION_TIMEOUT_MS,
+      Client: ReadTimeoutClient,
     });
   });
-
-  // Parsed, not rebuilt: pg hands `options` to the server verbatim, so the
-  // flag shape is what matters.
-  const startupFlags = (options: string): Record<string, number> => {
-    const flags: Record<string, number> = {};
-    for (const part of options.split(/(?=-c )/)) {
-      const match = part.trim().match(/^-c ([a-z_]+)=(\d+)$/);
-      expect(match).not.toBeNull();
-      flags[match![1]] = Number(match![2]);
-    }
-    return flags;
-  };
 
   it('bounds every lock wait pool-wide, under Prisma\'s 5 s transaction timeout (#944)', () => {
     expect(DB_LOCK_TIMEOUT_MS).toBeLessThan(5000);
-    expect(startupFlags(DB_POOL_OPTIONS.options).lock_timeout).toBe(DB_LOCK_TIMEOUT_MS);
+    expect(DEFAULTS.lock_timeout).toBe(DB_LOCK_TIMEOUT_MS);
   });
 
   describe('statement bounds (#1036)', () => {
-    const flags = startupFlags(DB_POOL_OPTIONS.options);
-
-    it('sets statement_timeout and idle_in_transaction_session_timeout as startup options', () => {
-      expect(flags.statement_timeout).toBe(DB_STATEMENT_TIMEOUT_MS);
-      expect(flags.idle_in_transaction_session_timeout).toBe(DB_IDLE_IN_TRANSACTION_TIMEOUT_MS);
-    });
-
     it('sits above the slowest legitimate statement: the finalize transaction and its lock wait', () => {
       // statement_timeout counts lock-wait time, so it must not pre-empt the
-      // finalize transaction's own SET LOCAL lock_timeout.
-      expect(DB_STATEMENT_TIMEOUT_MS).toBeGreaterThan(FINALIZE_LOCK_TIMEOUT_MS);
+      // finalize transaction's own SET LOCAL lock_timeout, nor the pool-wide one.
+      for (const bound of [DB_STATEMENT_TIMEOUT_MS, DB_STATEMENT_TIMEOUT_MIN_MS]) {
+        expect(bound).toBeGreaterThan(FINALIZE_LOCK_TIMEOUT_MS);
+        expect(bound).toBeGreaterThan(DB_LOCK_TIMEOUT_MS);
+      }
       expect(DB_STATEMENT_TIMEOUT_MS).toBeGreaterThan(FINALIZE_TRANSACTION_TIMEOUT_MS);
-      expect(DB_STATEMENT_TIMEOUT_MS).toBeGreaterThan(DB_LOCK_TIMEOUT_MS);
       // Prisma closes its own transactions (15 s at most) before the server would.
       expect(DB_IDLE_IN_TRANSACTION_TIMEOUT_MS).toBeGreaterThan(FINALIZE_TRANSACTION_TIMEOUT_MS);
     });
 
-    it('answers inside the ALB idle timeout and the sweep stall report', () => {
+    it('answers inside the ALB idle timeout, pool wait included, and under the sweep stall report', () => {
       const ALB_IDLE_TIMEOUT_MS = 60_000; // AWS default; infra sets no idle_timeout
-      const queryTimeout = DB_POOL_OPTIONS.query_timeout;
-      expect(queryTimeout).toBeGreaterThan(DB_STATEMENT_TIMEOUT_MS);
-      expect(queryTimeout).toBeLessThan(ALB_IDLE_TIMEOUT_MS);
-      expect(queryTimeout).toBeLessThan(REVOCATION_SWEEP_STALL_MS);
+      const worst = DB_CONNECTION_TIMEOUT_MS + DEFAULTS.query_timeout;
+      expect(DEFAULTS.query_timeout).toBeGreaterThan(DB_STATEMENT_TIMEOUT_MS);
+      expect(worst).toBeLessThan(ALB_IDLE_TIMEOUT_MS);
+      expect(worst).toBeLessThan(REVOCATION_SWEEP_STALL_MS);
     });
 
     it('turns the statement and query timeouts off together at 0, keeping the others', () => {
@@ -110,34 +100,45 @@ describe('pg pool bounds', () => {
         lockTimeoutMs: DB_LOCK_TIMEOUT_MS,
         idleInTransactionTimeoutMs: DB_IDLE_IN_TRANSACTION_TIMEOUT_MS,
       });
-      expect(off.query_timeout).toBe(0);
-      expect(startupFlags(off.options)).toEqual({
-        lock_timeout: DB_LOCK_TIMEOUT_MS,
+      expect(off).toMatchObject({
+        query_timeout: 0,
         statement_timeout: 0,
+        lock_timeout: DB_LOCK_TIMEOUT_MS,
         idle_in_transaction_session_timeout: DB_IDLE_IN_TRANSACTION_TIMEOUT_MS,
       });
     });
 
-    it('reads DB_STATEMENT_TIMEOUT_MS strictly', () => {
+    it('reads DB_STATEMENT_TIMEOUT_MS strictly, within its range', () => {
       expect(statementTimeoutFromEnv(undefined)).toBe(DB_STATEMENT_TIMEOUT_MS);
       expect(statementTimeoutFromEnv('')).toBe(DB_STATEMENT_TIMEOUT_MS);
       expect(statementTimeoutFromEnv('0')).toBe(0);
       expect(statementTimeoutFromEnv(' 600000 ')).toBe(600_000);
-      for (const bad of ['-1', '30s', '1.5', 'abc']) {
+      expect(statementTimeoutFromEnv(String(DB_STATEMENT_TIMEOUT_MIN_MS))).toBe(DB_STATEMENT_TIMEOUT_MIN_MS);
+      expect(statementTimeoutFromEnv(String(DB_STATEMENT_TIMEOUT_MAX_MS))).toBe(DB_STATEMENT_TIMEOUT_MAX_MS);
+      const tooHigh = String(DB_STATEMENT_TIMEOUT_MAX_MS + 1);
+      for (const bad of ['-1', '30s', '1.5', 'abc', '2000', String(DB_STATEMENT_TIMEOUT_MIN_MS - 1), tooHigh, '99999999999']) {
         expect(() => statementTimeoutFromEnv(bad)).toThrow('DB_STATEMENT_TIMEOUT_MS');
       }
+      // Inside Node's timer range (2^31 - 1 ms) and PostgreSQL's integer GUC range.
+      expect(DB_STATEMENT_TIMEOUT_MAX_MS + DB_QUERY_TIMEOUT_MARGIN_MS).toBeLessThan(2 ** 31 - 1);
     });
 
     // The keys must be ones the installed pg reads, or they are silently ignored.
-    it('uses option names the installed pg still reads', () => {
+    it('uses option names and the message the installed pg still has', () => {
       const pgDir = path.resolve(__dirname, '../node_modules/pg/lib');
       const params = readFileSync(path.join(pgDir, 'connection-parameters.js'), 'utf8');
       const client = readFileSync(path.join(pgDir, 'client.js'), 'utf8');
-      expect(params).toContain("val('query_timeout', config, false)");
-      expect(params).toContain("val('options', config)");
+      for (const key of ['statement_timeout', 'lock_timeout', 'idle_in_transaction_session_timeout', 'query_timeout']) {
+        expect(params).toContain(`val('${key}', config, false)`);
+      }
+      for (const key of ['statement_timeout', 'lock_timeout', 'idle_in_transaction_session_timeout']) {
+        expect(client).toContain(`data.${key} = String(parseInt(params.${key}, 10))`);
+      }
       expect(client).toContain('keepAlive: c.keepAlive');
       expect(client).toContain('keepAliveInitialDelayMillis: c.keepAliveInitialDelayMillis');
-      expect(client).toContain("new Error('Query read timeout')");
+      expect(client).toContain(`new Error('${QUERY_READ_TIMEOUT_MESSAGE}')`);
+      const pool = readFileSync(path.resolve(__dirname, '../node_modules/pg-pool/index.js'), 'utf8');
+      expect(pool).toContain('this.options.Client');
     });
   });
 
@@ -165,15 +166,16 @@ describe('pg pool bounds', () => {
   };
 
   it('hands the bounds to PrismaPg', () => {
-    expect(loadModels({})).toHaveBeenCalledWith(expect.objectContaining(DB_POOL_OPTIONS));
+    const config = loadModels({}).mock.calls[0][0] as Record<string, unknown>;
+    const { Client, ...rest } = DEFAULTS;
+    expect(config).toEqual(expect.objectContaining(rest));
+    // isolateModules loaded its own copy of the class; same name, same pool slot.
+    expect((config.Client as { name: string }).name).toBe(Client.name);
   });
 
   it('lets DB_STATEMENT_TIMEOUT_MS raise the statement bound for one process (#1036)', () => {
-    const PrismaPg = loadModels({ DB_STATEMENT_TIMEOUT_MS: '0' });
-    const config = PrismaPg.mock.calls[0][0] as { query_timeout: number; options: string };
-    expect(config.query_timeout).toBe(0);
-    expect(config.options).toContain('-c statement_timeout=0');
-    expect(config.options).toContain(`-c lock_timeout=${DB_LOCK_TIMEOUT_MS}`);
+    const config = loadModels({ DB_STATEMENT_TIMEOUT_MS: '0' }).mock.calls[0][0] as Record<string, unknown>;
+    expect(config).toMatchObject({ query_timeout: 0, statement_timeout: 0, lock_timeout: DB_LOCK_TIMEOUT_MS });
   });
 });
 

@@ -223,9 +223,10 @@ export function installSocketRevocation(io: SocketServer): void {
  * skipped while the previous sweep is still running: one query in flight at
  * most. The pool bounds the query (#1036, `models/pool-config.ts`: PostgreSQL's
  * `statement_timeout` and pg's `query_timeout` for a server that never
- * answers), so a hung query fails the sweep within about 35 s and the next
- * tick runs. A sweep running past `REVOCATION_SWEEP_STALL_MS` is therefore a
- * defect beyond a slow query and is reported, once, at error and to Sentry.
+ * answers), so a hung chunk query fails the sweep within about 40 s (3.5 s
+ * pool wait plus the 35 s read timeout) and the next tick runs. A sweep
+ * running past `REVOCATION_SWEEP_STALL_MS` (several slow chunks in a row, or
+ * a defect) is reported, once, at error and to Sentry.
  */
 export function startRevocationSweep(io: SocketServer, intervalMs = REVOCATION_SWEEP_INTERVAL_MS): void {
   stopRevocationSweep();

@@ -249,9 +249,10 @@ current score so a client can drop events and still converge.
     PostgreSQL cancels a statement at `statement_timeout` (30 s, lock waits included), and pg
     rejects one whose server never answers (a half-open connection after a failover) at
     `query_timeout` (35 s). Either is an ordinary failed sweep (the failure path above, sockets
-    kept), and the next tick runs, so a hung query delays the sweep by at most about 35 s rather
-    than stopping it. A sweep still running after `REVOCATION_SWEEP_STALL_MS` (60 s) is therefore
-    a defect beyond a slow query; it is reported once, at `error` and to Sentry
+    kept), and the next tick runs, so a hung chunk query ends the sweep within about 40 s (with
+    the 3.5 s pool wait) rather than stopping it. Chunks run one after another, each with its own
+    bound, so several slow chunks that all succeed can still pass `REVOCATION_SWEEP_STALL_MS`
+    (60 s); a sweep still running then is reported once, at `error` and to Sentry
     (`Socket revocation sweep stalled`). Each start of the timer keeps its own in-flight marker, and
     a query that fails after its timer was stopped (the shutdown routine stops it before the Prisma
     disconnect) is dropped silently rather than reported.
@@ -262,7 +263,8 @@ current score so a client can drop events and still converge.
   - **Bounds.** In-process (the routes): at once for every socket open at the commit; a handshake
     that read the row just before the commit and completes just after it is caught by the next
     sweep, within about 10 s. Operator script, Redis up or down: at most one sweep interval plus
-    the query, about 10 s (about 45 s if the sweep's query hangs until its bound fires); the sweep
+    the query, about 10 s (about 50 s when a hung query runs into its bound and the next sweep
+    catches it); the sweep
     never touches Redis, so a Redis outage changes nothing. During
     a database
     outage the sweep keeps sockets (as the re-check does), so the bound is then the first sweep

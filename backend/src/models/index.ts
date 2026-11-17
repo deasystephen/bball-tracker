@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import type { PoolConfig } from 'pg';
-import { DB_TIMEOUTS, buildDbPoolOptions, statementTimeoutFromEnv } from './pool-config';
+import { dbPoolOptionsFromEnv } from './pool-config';
 
 const connectionString = process.env.DATABASE_URL!;
 
@@ -44,15 +44,10 @@ const ssl = getSslConfig();
 // Explicit pool bounds (#751) and statement bounds (#1036): see
 // ./pool-config.ts for why each exists. `DB_STATEMENT_TIMEOUT_MS` lets an
 // operator script raise or lift the statement bound for its own process.
-const poolOptions = buildDbPoolOptions({
-  ...DB_TIMEOUTS,
-  statementTimeoutMs: statementTimeoutFromEnv(process.env.DB_STATEMENT_TIMEOUT_MS),
-});
-
 const adapter = new PrismaPg({
   connectionString,
   ...(ssl ? { ssl } : {}),
-  ...poolOptions,
+  ...dbPoolOptionsFromEnv(),
 });
 
 const prisma = new PrismaClient({

@@ -22,11 +22,11 @@ import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import prisma from '../../src/models';
 import {
-  DB_IDLE_IN_TRANSACTION_TIMEOUT_MS,
   DB_QUERY_TIMEOUT_MARGIN_MS,
-  DB_STATEMENT_TIMEOUT_MS,
+  QUERY_READ_TIMEOUT_MESSAGE,
   buildDbPoolOptions,
   classifyDbError,
+  dbPoolOptionsFromEnv,
   type DbTimeouts,
 } from '../../src/models/pool-config';
 import { logger } from '../../src/utils/logger';
@@ -84,6 +84,11 @@ async function nameOf(userId: string): Promise<string> {
   return row.name;
 }
 
+async function pidOf(tx: Pick<PrismaClient, '$queryRaw'>): Promise<number> {
+  const [{ pid }] = await tx.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`;
+  return pid;
+}
+
 const clients: PrismaClient[] = [];
 function track(client: PrismaClient): PrismaClient {
   clients.push(client);
@@ -107,9 +112,14 @@ describe('statement bounds on the production pool (#1036)', () => {
     return setting;
   };
 
+  // What this process configured (DB_STATEMENT_TIMEOUT_MS may override the default).
+  const expected = dbPoolOptionsFromEnv();
+
   it('carries statement_timeout and idle_in_transaction_session_timeout', async () => {
-    expect(await settingOf('statement_timeout')).toBe(String(DB_STATEMENT_TIMEOUT_MS));
-    expect(await settingOf('idle_in_transaction_session_timeout')).toBe(String(DB_IDLE_IN_TRANSACTION_TIMEOUT_MS));
+    expect(await settingOf('statement_timeout')).toBe(String(expected.statement_timeout));
+    expect(await settingOf('idle_in_transaction_session_timeout')).toBe(
+      String(expected.idle_in_transaction_session_timeout)
+    );
   });
 
   it('carries them inside an interactive transaction', async () => {
@@ -119,12 +129,12 @@ describe('statement bounds on the production pool (#1036)', () => {
       >`SELECT setting FROM pg_settings WHERE name = 'statement_timeout'`;
       return setting;
     });
-    expect(value).toBe(String(DB_STATEMENT_TIMEOUT_MS));
+    expect(value).toBe(String(expected.statement_timeout));
   });
 });
 
 describe('a statement past statement_timeout (#1036)', () => {
-  it('is cancelled by PostgreSQL and its pool client is returned', async () => {
+  it('is cancelled by PostgreSQL, and the pool answers the next query at once', async () => {
     const app = `stmt-cancel-${fx.run}`;
     const db = track(shortPool({}, app));
     const started = Date.now();
@@ -133,25 +143,30 @@ describe('a statement past statement_timeout (#1036)', () => {
     expect(sqlState(err)).toBe(STATEMENT_CANCELLED);
     // Cancelled server-side: nothing of that pool is still running.
     expect(await activeBackends(app)).toBe(0);
-    // The only client of the pool is free again: the next query answers at once.
+    // The pool's one slot is free again (pg-pool discards a client whose query
+    // failed outside a transaction, so this may be a new connection).
     const next = Date.now();
     await expect(db.$queryRaw`SELECT 1 AS ok`).resolves.toEqual([{ ok: 1 }]);
     expect(Date.now() - next).toBeLessThan(1_000);
   });
 
-  it('rolls an interactive transaction back cleanly', async () => {
+  it('rolls an interactive transaction back cleanly and leaves its connection usable', async () => {
     const userId = await fx.user('rollback', 'PLAYER');
     const before = await nameOf(userId);
     const db = track(shortPool({}, `stmt-tx-${fx.run}`));
+    let cancelledOn: number | undefined;
     const err = await rejectionOf(
       db.$transaction(async (tx) => {
+        cancelledOn = await pidOf(tx);
         await tx.user.update({ where: { id: userId }, data: { name: `changed-${fx.run}` } });
         await tx.$queryRaw`SELECT pg_sleep(10)`;
       })
     );
     expect(sqlState(err)).toBe(STATEMENT_CANCELLED);
     expect(await nameOf(userId)).toBe(before);
-    await expect(db.$transaction(async (tx) => tx.$queryRaw`SELECT 1 AS ok`)).resolves.toEqual([{ ok: 1 }]);
+    // The same backend serves the next transaction: the server-side cancel left
+    // the connection healthy, and the adapter returned it to the pool.
+    await expect(db.$transaction(async (tx) => pidOf(tx))).resolves.toBe(cancelledOn);
   });
 
   it('is answered 500 with the route fallback body, not a retryable 503 and no SQL', async () => {
@@ -281,13 +296,42 @@ describe('a connection whose server never answers (#1036)', () => {
     const started = Date.now();
     const err = await rejectionOf(db.$queryRaw`SELECT 1`);
     const waited = Date.now() - started;
-    expect((err as Error).message).toContain('Query read timeout');
+    expect((err as Error).message).toContain(QUERY_READ_TIMEOUT_MESSAGE);
     expect(waited).toBeGreaterThanOrEqual(statementTimeoutMs + DB_QUERY_TIMEOUT_MARGIN_MS - 50);
     expect(waited).toBeLessThan(statementTimeoutMs + DB_QUERY_TIMEOUT_MARGIN_MS + 2_000);
     expect(classifyDbError(err)).toBeUndefined();
     blackhole = false;
     // Outside a transaction pg-pool destroys the client on the error, so the
     // next query opens a new connection instead of queueing behind the dead one.
+    const next = Date.now();
+    await expect(db.$queryRaw`SELECT 1 AS ok`).resolves.toEqual([{ ok: 1 }]);
+    expect(Date.now() - next).toBeLessThan(1_000);
+  });
+
+  it('inside a transaction fails at query_timeout, not twice that, and the stuck client is dropped', async () => {
+    const statementTimeoutMs = 300;
+    const queryTimeoutMs = statementTimeoutMs + DB_QUERY_TIMEOUT_MARGIN_MS;
+    const db = track(shortPool({ statementTimeoutMs }, `stmt-halfopen-tx-${fx.run}`, proxiedUrl));
+    await db.$queryRaw`SELECT 1`;
+    const started = Date.now();
+    const err = await rejectionOf(
+      db.$transaction(
+        async (tx) => {
+          await tx.$queryRaw`SELECT 1`;
+          blackhole = true;
+          await tx.$queryRaw`SELECT 2`;
+        },
+        { timeout: 30_000 }
+      )
+    );
+    const waited = Date.now() - started;
+    expect((err as Error).message).toContain(QUERY_READ_TIMEOUT_MESSAGE);
+    // Without ReadTimeoutClient the ROLLBACK queues behind the dead query and
+    // times out too: about twice query_timeout.
+    expect(waited).toBeLessThan(queryTimeoutMs + 2_000);
+    blackhole = false;
+    // The stuck client did not go back to the pool: the next query gets a
+    // fresh connection at once instead of queueing behind the lost answer.
     const next = Date.now();
     await expect(db.$queryRaw`SELECT 1 AS ok`).resolves.toEqual([{ ok: 1 }]);
     expect(Date.now() - next).toBeLessThan(1_000);
