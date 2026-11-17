@@ -14,6 +14,7 @@ import {
   BadRequestError,
   ForbiddenError,
   ConflictError,
+  ClaimedAccountError,
 } from '../utils/errors';
 import {
   assertOwnUploadUrl,
@@ -563,6 +564,15 @@ export class PlayerService {
       throw new ForbiddenError('Only administrators can delete players');
     }
 
+    // A claimed account (a login) is deleted only by its owner or an operator,
+    // through AccountService, never as a roster record (#1034). `workosUserId`
+    // is the claim; an unclaimed row (a managed record, an Add Player
+    // pre-provision, or one the age screen un-claimed) has none and stays
+    // deletable. The delete below re-checks it in the write.
+    if (player.workosUserId !== null) {
+      throw new ClaimedAccountError();
+    }
+
     // Check if player is on any teams
     if (player.teamMembers.length > 0) {
       throw new BadRequestError(
@@ -584,15 +594,26 @@ export class PlayerService {
     let deleted: Prisma.UserGetPayload<{ select: typeof DELETED_PLAYER_SELECT }>;
     try {
       deleted = await prisma.user.delete({
-        where: { id: playerId, deletedAt: null },
+        // `workosUserId: null` goes through AND: the unique-where type only takes a string there.
+        where: { id: playerId, deletedAt: null, AND: [{ workosUserId: null }] },
         select: DELETED_PLAYER_SELECT,
       });
     } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
+        // Nothing matched: tombstoned (404) or claimed since the read (#1034).
+        const now = await prisma.user.findUnique({
+          where: { id: playerId },
+          select: { deletedAt: true, workosUserId: true },
+        });
+        if (now && !now.deletedAt && now.workosUserId !== null) {
+          throw new ClaimedAccountError();
+        }
+      }
       throw PlayerService.mapWriteError(error);
     }
 
     logger.info('Player deleted', { playerId, userId });
-    // A claimed player's live sockets go with the row (#1004).
+    // Only unclaimed rows reach here (#1034), which hold no verified socket; kept so a socket opened on a row that was claimed and un-claimed is still closed (#1004).
     revokeUserSockets(playerId);
 
     // Best-effort, after the delete and outside any transaction (#725): the row

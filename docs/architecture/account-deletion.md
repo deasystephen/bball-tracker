@@ -117,6 +117,20 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   owner — never by guardians or ADMINs through the API; emailed requests go through
   `backend/scripts/data-subject-request.ts` (`export` / `delete <email>`, `operator` mode) per
   [`docs/runbooks/data-subject-requests.md`](../runbooks/data-subject-requests.md).
+- **`DELETE /players/:id` never deletes a claimed account (#1034).** A row with `workosUserId` set
+  answers **403 `claimed_account`** for everyone, ADMIN included, with a message naming the owner's
+  route (`DELETE /auth/me`) and the operator script. The hard delete skips `AccountService`: no
+  WorkOS identity or refresh-token removal and none of the retained-row rules, and the next sign-in
+  would mint a fresh account for the same identity. "Claimed" is the `workosUserId` column, the one
+  `deleteAccount`, `syncUser` and `convertToManaged` read, never `role`, name or email. Unclaimed
+  rows still delete through it (when on no team and with no events): a managed roster record, an
+  Add Player pre-provision that never signed in, and a row the age screen un-claimed. The
+  check runs on the unlocked read for the clean 403, and again inside the write (`where: { id,
+  deletedAt: null, AND: [{ workosUserId: null }] }`; the unique-where type takes no bare `null`):
+  a row claimed in between matches nothing, and the P2025 handler re-reads and answers the same
+  403 (a tombstone stays 404). `revokeUserSockets` fires only after a delete that happened. The
+  only client call, mobile `useDeletePlayer`, has no screen. Tests:
+  `tests/api/players-delete-unmocked.test.ts`, `tests/services/player-service.test.ts`.
 - **Last head coach blocks** with 400 `code: 'last_head_coach'` + `teams`, scoped to teams whose
   season `isActive` (a `Team` row is a team-season, so past seasons go headless rather than forcing
   a coach to delete history). The rule is `utils/permissions.ts#lastHeadCoachTeams` (one set-based

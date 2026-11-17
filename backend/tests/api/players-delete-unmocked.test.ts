@@ -35,6 +35,7 @@ jest.mock('../../src/api/auth/middleware', () => ({
   }),
 }));
 
+import { Prisma } from '@prisma/client';
 import request from 'supertest';
 import { app, httpServer } from '../../src/index';
 import { mockPrisma } from '../setup';
@@ -53,6 +54,7 @@ function mockDeletablePlayer(profilePictureUrl: string | null): void {
       id: PLAYER_ID,
       role: 'PLAYER',
       deletedAt: null,
+      workosUserId: null,
       profilePictureUrl,
       teamMembers: [],
       gameEvents: [],
@@ -73,7 +75,7 @@ describe('DELETE /api/v1/players/:id through the real PlayerService (#725)', () 
     expect(response.status).toBe(200);
     expect(response.body).toEqual({ success: true, message: 'Player deleted successfully' });
     expect(mockPrisma.user.delete).toHaveBeenCalledWith({
-      where: { id: PLAYER_ID, deletedAt: null },
+      where: { id: PLAYER_ID, deletedAt: null, AND: [{ workosUserId: null }] },
       select: { profilePictureUrl: true },
     });
     expect(mockS3Send).toHaveBeenCalledTimes(1);
@@ -88,6 +90,60 @@ describe('DELETE /api/v1/players/:id through the real PlayerService (#725)', () 
     expect(response.status).toBe(200);
     expect(mockS3Send).not.toHaveBeenCalled();
     expect(deleteObjectCalls).toEqual([]);
+  });
+});
+
+describe('DELETE /api/v1/players/:id on a claimed account (#1034)', () => {
+  beforeEach(() => {
+    deleteObjectCalls.length = 0;
+  });
+
+  it('answers an ADMIN 403 claimed_account and deletes nothing, S3 included', async () => {
+    (mockPrisma.user.findUnique as jest.Mock)
+      .mockResolvedValueOnce({ id: ADMIN_ID, role: 'ADMIN', deletedAt: null })
+      .mockResolvedValueOnce({
+        id: PLAYER_ID,
+        role: 'PLAYER',
+        deletedAt: null,
+        workosUserId: 'user_01CLAIMED',
+        profilePictureUrl: AVATAR_URL,
+        teamMembers: [],
+        gameEvents: [],
+      });
+
+    const response = await request(app).delete(`/api/v1/players/${PLAYER_ID}`);
+
+    expect(response.status).toBe(403);
+    expect(response.body.code).toBe('claimed_account');
+    expect(response.body.error).toContain('DELETE /auth/me');
+    expect(mockPrisma.user.delete).not.toHaveBeenCalled();
+    expect(mockS3Send).not.toHaveBeenCalled();
+  });
+
+  it('answers 403 claimed_account when the row is claimed after the read (the guarded delete matches nothing)', async () => {
+    (mockPrisma.user.findUnique as jest.Mock)
+      .mockResolvedValueOnce({ id: ADMIN_ID, role: 'ADMIN', deletedAt: null })
+      .mockResolvedValueOnce({
+        id: PLAYER_ID,
+        role: 'PLAYER',
+        deletedAt: null,
+        workosUserId: null,
+        profilePictureUrl: null,
+        teamMembers: [],
+        gameEvents: [],
+      })
+      .mockResolvedValueOnce({ deletedAt: null, workosUserId: 'user_01RACE' });
+    (mockPrisma.user.delete as jest.Mock).mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError('Record not found', { code: 'P2025', clientVersion: 'test' })
+    );
+
+    const response = await request(app).delete(`/api/v1/players/${PLAYER_ID}`);
+
+    expect(response.status).toBe(403);
+    expect(response.body.code).toBe('claimed_account');
+    expect(mockPrisma.user.delete).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: PLAYER_ID, deletedAt: null, AND: [{ workosUserId: null }] } })
+    );
   });
 });
 
