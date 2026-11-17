@@ -14,10 +14,10 @@
  *   -----------------------|-------------
  *   UNLIMITED_TEAMS        | PREMIUM
  *   FULL_SEASON_HISTORY    | PREMIUM
- *   CALENDAR_SYNC          | PREMIUM
  *   STATS_EXPORT           | PREMIUM
  *   ADVANCED_STATS         | PREMIUM
  *   PRACTICE_SCHEDULING    | FREE (every tier; decided 2026-11-15, #33)
+ *   CALENDAR_SYNC          | FREE (every tier; decided 2026-11-17, #1037)
  *   AD_FREE                | PREMIUM
  *   REGISTRATION_PAYMENTS  | LEAGUE
  *   TOURNAMENT_BRACKETS    | LEAGUE
@@ -51,8 +51,8 @@
 import { SubscriptionTier } from '@prisma/client';
 
 /**
- * All named product features, gated by tier (one, PRACTICE_SCHEDULING, is on
- * every tier today). The enum VALUES are the stable UPPER_SNAKE
+ * All named product features, gated by tier (two, PRACTICE_SCHEDULING and
+ * CALENDAR_SYNC, are on every tier today). The enum VALUES are the stable UPPER_SNAKE
  * identifiers exposed by GET /auth/entitlements (`getAllFeatures` keys). The
  * 402 upgrade-hint payload emits the lowercased form (see `featureCode`).
  */
@@ -63,9 +63,9 @@ export enum Feature {
 
   // Every tier (FREE_FEATURES)
   PRACTICE_SCHEDULING = 'PRACTICE_SCHEDULING',
+  CALENDAR_SYNC = 'CALENDAR_SYNC',
 
   // Premium features
-  CALENDAR_SYNC = 'CALENDAR_SYNC',
   STATS_EXPORT = 'STATS_EXPORT',
   ADVANCED_STATS = 'ADVANCED_STATS',
   AD_FREE = 'AD_FREE',
@@ -84,16 +84,22 @@ export enum Feature {
  * `requireEntitlement` on the create routes, as the usage caps stay mounted
  * at `Infinity`. To make it paid again, MOVE it: remove it here and add it to
  * `PREMIUM_FEATURES` (which spreads this set, so leaving it here keeps it
- * free). Exported only so the API test can take the feature off and prove the
+ * free). CALENDAR_SYNC is the same (owner decision 2026-11-17, #1037): the
+ * team iCal feed carries practices, so a free family must be able to
+ * subscribe; `requireEntitlement` and the per-fetch tier check in
+ * `calendar-service.ts#resolveToken` stay mounted and both pass for FREE.
+ * Exported only so the API test can take the feature off and prove the
  * gate is mounted; application code never mutates it.
  */
-export const FREE_FEATURES = new Set<Feature>([Feature.PRACTICE_SCHEDULING]);
+export const FREE_FEATURES = new Set<Feature>([
+  Feature.PRACTICE_SCHEDULING,
+  Feature.CALENDAR_SYNC,
+]);
 
 const PREMIUM_FEATURES = new Set<Feature>([
   ...FREE_FEATURES,
   Feature.UNLIMITED_TEAMS,
   Feature.FULL_SEASON_HISTORY,
-  Feature.CALENDAR_SYNC,
   Feature.STATS_EXPORT,
   Feature.ADVANCED_STATS,
   Feature.AD_FREE,

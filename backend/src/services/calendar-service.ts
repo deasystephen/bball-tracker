@@ -157,8 +157,11 @@ export class CalendarService {
    *   - not revoked
    *   - token's teamId matches the URL's teamId
    *   - user still has access to the team
-   *   - user's *current* tier still includes CALENDAR_SYNC (admins bypass), so
-   *     a feed stops serving when the subscription lapses (audit #43)
+   *   - user's *current* tier still includes CALENDAR_SYNC (admins bypass). Free
+   *     for every tier since 2026-11-17 (#1037), so this passes for FREE; the check
+   *     stays mounted so that moving the feature back to PREMIUM (a two-line move in
+   *     `entitlements/index.ts`) makes a feed stop serving when a subscription lapses
+   *     (audit #43)
    */
   static async resolveToken(
     teamId: string,
@@ -191,7 +194,8 @@ export class CalendarService {
     }
 
     // Re-check the entitlement on every fetch: subscribe-time gating alone
-    // would keep serving the feed forever after a downgrade/expiry.
+    // would keep serving the feed forever after a downgrade/expiry. Passes for
+    // every tier while CALENDAR_SYNC is in FREE_FEATURES (#1037).
     const user = await prisma.user.findUnique({
       where: { id: tokenRow.userId },
       select: { role: true, subscriptionTier: true, subscriptionExpiresAt: true },

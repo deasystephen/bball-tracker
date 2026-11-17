@@ -162,8 +162,8 @@ sign-in and keeps its role.
   upgrade to buy). No PREMIUM tier is needed for D.1.
 - **Team season-stats CSV** (`GET /teams/:id/season-stats.csv`) requires the PREMIUM
   `STATS_EXPORT` feature (402 for FREE); per-game `export.csv` / `boxscore.pdf` are open.
-  Calendar subscribe requires `CALENDAR_SYNC` (PREMIUM). Run those as ADMIN, who bypasses all
-  entitlement checks. The mobile app has **no entitlement UI** and no entry point for the
+  Calendar subscribe (`CALENDAR_SYNC`) is free for every tier since 2026-11-17 (#1037), so any
+  team member can run it. Run the CSV export as ADMIN, who bypasses all entitlement checks. The mobile app has **no entitlement UI** and no entry point for the
   exports or calendar feed — exercise them with `curl`.
 
 See `backend/src/services/entitlements/` and `backend/src/api/middleware/entitlements.ts`.

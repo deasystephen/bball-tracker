@@ -14,7 +14,7 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
 
 ## Entitlements / Feature Gating
 
-**Mobile has no entitlement UI (decision 2026-08-23).** `FeatureGate`, `UpgradePrompt` and `store/entitlements-store.ts` were dead code (never rendered/fetched) and were removed; the app exposes no entry point for the PREMIUM-gated features (team CSV export, calendar subscribe). The backend gates stay as the single source of truth. **No 402 is reachable from the app today**: the only one a user could hit was the FREE team cap on team create, lifted in #445 (the `isUpgradeRequiredError` branch in `app/teams/create.tsx` stays for the day a cap returns). `UsageMeter` on Profile renders plain counts ("4 · Unlimited", no bar, no CTA) because every limit is `null` (`__tests__/components/UsageMeter.test.tsx`). Re-add a client layer together with a real purchase flow when monetisation is scheduled.
+**Mobile has no entitlement UI (decision 2026-08-23).** `FeatureGate`, `UpgradePrompt` and `store/entitlements-store.ts` were dead code (never rendered/fetched) and were removed; the app exposes no entry point for the team CSV export (PREMIUM) or the calendar subscribe (free since 2026-11-17, #1037; still no client entry point). The backend gates stay as the single source of truth. **No 402 is reachable from the app today**: the only one a user could hit was the FREE team cap on team create, lifted in #445 (the `isUpgradeRequiredError` branch in `app/teams/create.tsx` stays for the day a cap returns). `UsageMeter` on Profile renders plain counts ("4 · Unlimited", no bar, no CTA) because every limit is `null` (`__tests__/components/UsageMeter.test.tsx`). Re-add a client layer together with a real purchase flow when monetisation is scheduled.
 
 Subscription feature gating has a **single source of truth**:
 `backend/src/services/entitlements/index.ts`. It owns the `Feature` enum, the
@@ -22,11 +22,13 @@ feature->tier map (FREE / PREMIUM / LEAGUE) and the usage limits
 (`USAGE_LIMITS`). Do not redefine tier rules elsewhere — import from there
 (issue #43's usage metering reuses them).
 
-**What FREE gets today (#445):** unlimited teams and seasons, and practice
+**What FREE gets today (#445):** unlimited teams and seasons, practice
 scheduling (`PRACTICE_SCHEDULING` is in `FREE_FEATURES` since 2026-11-15, #33:
-table stakes for a team); none of the other gated features (team season-stats
-CSV export and calendar subscribe are PREMIUM and answer 402 — neither has a
-client entry point). There is no `FREE_TEAM_LIMIT` any more.
+table stakes for a team) and calendar sync (`CALENDAR_SYNC`, in `FREE_FEATURES`
+since 2026-11-17, #1037: the team iCal feed carries the practices, so a free
+family must be able to subscribe); none of the other gated features (team
+season-stats CSV export is PREMIUM and answers 402 — it has no client entry
+point). There is no `FREE_TEAM_LIMIT` any more.
 
 Enforcement lives in `backend/src/api/middleware/entitlements.ts` (the only entitlement middleware —
 the old unmounted `requireFeature` / `requireUsageLimit` in `api/auth/middleware.ts`, which answered
@@ -38,7 +40,11 @@ the old unmounted `requireFeature` / `requireUsageLimit` in `api/auth/middleware
   it never denies today; it stays mounted like the `Infinity` caps; to make it paid, move it from
   `FREE_FEATURES` to `PREMIUM_FEATURES`;
   `docs/architecture/practice-scheduling.md#entitlement`), team season-stats CSV export (`STATS_EXPORT`) and calendar
-  subscribe (`CALENDAR_SYNC`). System `ADMIN`s bypass all checks. Expired paid
+  subscribe (`CALENDAR_SYNC`, which every tier has since 2026-11-17, #1037, so it never denies today either;
+  the per-fetch tier check in `CalendarService.resolveToken` stays mounted too, and making the feed paid
+  again is the same two-line move out of `FREE_FEATURES`; `tests/api/calendar.test.ts` and
+  `tests/services/calendar-service.test.ts` prove both gates by taking the feature off FREE).
+  System `ADMIN`s bypass all checks. Expired paid
   subscriptions resolve to an effective FREE tier.
 - `requireTeamCreateLimit()` — enforces a tier's team cap on `POST /teams`
   when the tier has one. **No tier does since #445**, so it calls `next()`

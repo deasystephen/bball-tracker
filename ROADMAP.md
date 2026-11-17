@@ -121,7 +121,7 @@ enforces today:** teams and seasons are unlimited on every tier, FREE included
 (`USAGE_LIMITS` in `backend/src/services/entitlements/index.ts`). The FREE team
 limit of 3 was lifted in #445 because enforcement had shipped without a purchase
 path, leaving a dead-end paywall in front of a product that sells nothing. The
-PREMIUM feature gates (stats export, calendar sync) are still enforced by the
+PREMIUM feature gates (stats export) are still enforced by the
 API. Until a purchase flow exists (#41) the only way onto a paid tier is a
 system ADMIN comping the account (`PATCH /api/v1/admin/users/:userId/subscription`,
 see `docs/architecture/entitlements-and-usage.md`). Re-introduce a cap only alongside a real upgrade flow, and
@@ -130,7 +130,7 @@ change the number in `USAGE_LIMITS` only — never inline.
 | Tier | Price | Audience | Key features |
 |---|---|---|---|
 | Free | $0 | Independent coaches, tryouts | Unlimited teams (no cap today; any future cap ships with the upgrade flow), full stat tracking, basic schedule, push notifications |
-| Coach Premium | ~$9.99/mo or ~$79/yr | Serious coaches, club teams | Unlimited teams, email/SMS, calendar sync, stats export, photo gallery, ad-free |
+| Coach Premium | ~$9.99/mo or ~$79/yr | Serious coaches, club teams | Unlimited teams, email/SMS, stats export, photo gallery, ad-free |
 | League | ~$49–99/mo | Multi-team orgs | Everything above + org messaging, tournament brackets, admin dashboards |
 | Registration payments | 2.9% + $0.30 take-rate | Leagues collecting dues | Stripe Connect; highest-ARPU feature |
 

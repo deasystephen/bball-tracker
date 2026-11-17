@@ -149,7 +149,7 @@ Keepalive needs a dead peer, so only the unit test pins it.
   POST, baked at build time) pointed at the API host.
 
 ## Calendar feed (`services/calendar-service.ts`, `api/teams/calendar.ts`)
-- `resolveToken` checks, on **every** fetch: token exists, not revoked, team matches, user still has team access, and the user's *current* effective tier still includes `CALENDAR_SYNC` (system ADMINs bypass) — a downgraded/expired subscription stops the feed with 403 instead of serving forever (audit #43).
+- `resolveToken` checks, on **every** fetch: token exists, not revoked, team matches, user still has team access, and the user's *current* effective tier still includes `CALENDAR_SYNC` (system ADMINs bypass). `CALENDAR_SYNC` is in `FREE_FEATURES` since 2026-11-17 (#1037), so every tier passes this check and `requireEntitlement` on `subscribe`; both stay mounted, so moving the feature back to `PREMIUM_FEATURES` makes a downgraded/expired subscription stop the feed with 403 instead of serving forever (audit #43). The app has no client entry point for the feed.
 - The calendar router is mounted on `/teams` ahead of the main teams router so the public `GET /teams/:id/calendar.ics` skips auth. Because of that ordering, `authenticate` is attached **per route** to `subscribe`/`revoke` — never `router.use(authenticate)` there, or every `/teams/*` request verifies the JWT twice (audit #71).
 - The feed lists the team's games and then its practice sessions (`practice-<id>@` UIDs, #33); detail in `docs/architecture/practice-scheduling.md#calendar-feed`.
 
