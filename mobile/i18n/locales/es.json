@@ -1106,7 +1106,9 @@
       "deleteFailed": "No se pudo eliminar el entrenamiento",
       "answerFailed": "No se pudo guardar tu respuesta",
       "countTooFar": "Con tantos entrenamientos se superan los {{max}} días. Elige menos.",
-      "seriesMissing": "Este entrenamiento no forma parte de una serie."
+      "seriesMissing": "Este entrenamiento no forma parte de una serie.",
+      "noSessions": "Ninguno de los días elegidos cae entre estas fechas.",
+      "tooManySessions": "Eso suma {{n}} entrenamientos; una serie admite como máximo {{max}}. Elige una última fecha anterior."
     },
     "windowNote": "Se muestran los próximos {{days}} días."
   }

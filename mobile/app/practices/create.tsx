@@ -145,7 +145,11 @@ export default function CreatePracticeScreen() {
   const recurring = repeat !== 'NONE';
   const timeZone = deviceTimeZone();
 
+  // A shown error goes as soon as the coach changes anything it is about.
+  const clearErrors = () => setErrors({});
+
   const toggleWeekday = (day: number) => {
+    clearErrors();
     setWeekdays((current) =>
       current.includes(day) ? current.filter((d) => d !== day) : [...current, day]
     );
@@ -156,16 +160,22 @@ export default function CreatePracticeScreen() {
     setPicker(target);
   };
 
+  const [endTouched, setEndTouched] = useState(false);
+
   const onPicked = (value: Date) => {
+    clearErrors();
     if (picker === 'date') {
       const next = combineDateAndTime(value, start);
       // A one-day pick for a weekly practice usually means "starting this day":
       // carry the weekday along while only one is chosen.
       if (weekdays.length === 1 && weekdays[0] === start.getDay()) setWeekdays([next.getDay()]);
+      // Until the coach picks a last date, it stays the default distance from the first.
+      if (!endTouched) setEndDate(defaultEnd(next));
       setStart(next);
     } else if (picker === 'time') {
       setStart(combineDateAndTime(start, value));
     } else if (picker === 'endDate') {
+      setEndTouched(true);
       setEndDate(value);
     }
     setPicker(null);
@@ -261,7 +271,7 @@ export default function CreatePracticeScreen() {
             <SortPills
               options={repeatOptions}
               selected={repeat}
-              onSelect={setRepeat}
+              onSelect={(key) => { clearErrors(); setRepeat(key); }}
               labelPrefix={t('practices.form.repeatsA11yPrefix')}
               style={styles.pills}
             />
@@ -332,7 +342,7 @@ export default function CreatePracticeScreen() {
                 <SortPills
                   options={endOptions}
                   selected={endMode}
-                  onSelect={setEndMode}
+                  onSelect={(key) => { clearErrors(); setEndMode(key); }}
                   labelPrefix={t('practices.form.endsA11yPrefix')}
                   style={styles.pills}
                 />
@@ -355,7 +365,7 @@ export default function CreatePracticeScreen() {
                   <Input
                     label={t('practices.form.count')}
                     value={count}
-                    onChangeText={setCount}
+                    onChangeText={(text) => { clearErrors(); setCount(text); }}
                     keyboardType="number-pad"
                     error={errors.count}
                     testID="practice-count-input"

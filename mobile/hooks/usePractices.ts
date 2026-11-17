@@ -2,8 +2,9 @@
  * TanStack Query hooks for practice scheduling (#33): sessions, recurring
  * series and availability. API: docs/architecture/practice-scheduling.md.
  *
- * Every mutation invalidates `practiceKeys.all` (lists, details, availability,
- * series). The two that delete sessions (delete one, cancel a series) mark the
+ * Every schedule mutation invalidates `practiceKeys.all` (lists, details,
+ * availability, series); an availability answer only that practice's detail
+ * and answers, since list rows carry none. The two that delete sessions (delete one, cancel a series) mark the
  * per-session queries (detail, availability) stale without refetching them:
  * the screen that did it is leaving, and a refetch would only fetch a 404.
  */
@@ -289,7 +290,9 @@ export function useSubmitPracticeAvailability() {
         on_behalf_of_child: !!variables.playerId,
         has_comment: !!variables.comment,
       });
-      invalidateAll(queryClient);
+      // An answer changes this practice's counts and rows only; list rows carry no answers.
+      queryClient.invalidateQueries({ queryKey: practiceKeys.detail(variables.practiceId) });
+      queryClient.invalidateQueries({ queryKey: practiceKeys.availability(variables.practiceId) });
     },
   });
 }

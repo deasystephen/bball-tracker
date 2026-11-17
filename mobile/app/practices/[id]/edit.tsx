@@ -115,7 +115,7 @@ export default function EditPracticeScreen() {
       />
     );
   }
-  if (seriesScope && seriesQuery.error) {
+  if (seriesScope && seriesQuery.error && !seriesQuery.data) {
     return (
       <ErrorState
         message={seriesQuery.error instanceof Error ? seriesQuery.error.message : t('practices.notFound')}
@@ -162,7 +162,8 @@ export default function EditPracticeScreen() {
   };
 
   const device = deviceTimeZone();
-  const otherZone = isOtherTimeZone(practice.timezone);
+  // At the practice's own start: two zones can agree today and differ then (daylight saving).
+  const otherZone = isOtherTimeZone(practice.timezone, start);
 
   return (
     <ThemedView variant="background" style={styles.container}>

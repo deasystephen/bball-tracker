@@ -121,7 +121,8 @@ export default function PracticeDetailScreen() {
   if (isLoading) {
     return <LoadingSpinner message={t('common.loading')} fullScreen />;
   }
-  if (error || !practice) {
+  // A failed background refetch keeps the loaded practice on screen.
+  if (!practice) {
     return (
       <ErrorState
         message={error instanceof Error ? error.message : t('practices.notFound')}
@@ -385,7 +386,7 @@ export default function PracticeDetailScreen() {
                             selected && { backgroundColor: colors.primary, borderColor: colors.primary },
                           ]}
                         >
-                          <ThemedText variant="captionBold" style={selected ? styles.onPrimary : undefined}>
+                          <ThemedText variant="captionBold" style={selected ? { color: colors.textInverse } : undefined}>
                             {respondent.name}
                           </ThemedText>
                         </TouchableOpacity>
@@ -416,7 +417,7 @@ export default function PracticeDetailScreen() {
                         selected && { backgroundColor: colors.primary, borderColor: colors.primary },
                       ]}
                     >
-                      <ThemedText variant="captionBold" style={selected ? styles.onPrimary : undefined}>
+                      <ThemedText variant="captionBold" style={selected ? { color: colors.textInverse } : undefined}>
                         {t(key)}
                       </ThemedText>
                     </TouchableOpacity>
@@ -569,6 +570,5 @@ const styles = StyleSheet.create({
     minHeight: MIN_TOUCH_TARGET,
     justifyContent: 'center',
   },
-  onPrimary: { color: '#FFFFFF' },
   memberRow: { paddingVertical: spacing.xs },
 });

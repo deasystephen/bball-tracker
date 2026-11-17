@@ -152,6 +152,17 @@ describe('time zones', () => {
     expect(formatZoneName('2026-12-01T23:00:00Z', 'Not/AZone')).toBe('');
   });
 
+  it('still names the zone on a runtime whose formatToParts has no zone part', () => {
+    const spy = jest
+      .spyOn(Intl.DateTimeFormat.prototype, 'formatToParts')
+      .mockReturnValue([{ type: 'literal', value: '' }]);
+    try {
+      expect(formatZoneName('2026-12-01T23:00:00Z', 'America/New_York')).toBe('EST');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it('falls back to the device zone for a name the runtime does not know', () => {
     expect(() => formatClockTime('2026-12-01T23:00:00Z', { timeZone: 'Not/AZone' })).not.toThrow();
     expect(formatClockTime('2026-12-01T23:00:00Z', { timeZone: 'Not/AZone' })).toBe(
@@ -246,6 +257,17 @@ describe('validateRecurrence', () => {
     // Every other week: 100 is far past it; two days a week fits 100 weekly.
     expect(count('100', 'BIWEEKLY')).toBeTruthy();
     expect(count('100', 'WEEKLY', [1, 2, 4])).toBeUndefined();
+  });
+
+  it('refuses an end date that holds no practice, or more than 100', () => {
+    // Friday 2027-01-01 to Saturday 2027-01-02: no Tuesday.
+    expect(validateRecurrence({ ...base, endDate: new Date(2027, 0, 2) }).endDate).toBe(
+      'None of the chosen days falls between these dates.'
+    );
+    // Monday to Friday weekly for six months: about 130 practices.
+    expect(
+      validateRecurrence({ ...base, weekdays: [1, 2, 3, 4, 5], endDate: new Date(2027, 6, 1) }).endDate
+    ).toMatch(/^That makes 1\d\d practices; a series holds at most 100/);
   });
 
   it('walks every other Monday-to-Sunday week from the first chosen day, as the API does', () => {

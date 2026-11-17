@@ -1106,7 +1106,9 @@
       "deleteFailed": "Couldn't delete the practice",
       "answerFailed": "Couldn't save your answer",
       "countTooFar": "That many practices runs past {{max}} days. Choose fewer.",
-      "seriesMissing": "This practice is not part of a series."
+      "seriesMissing": "This practice is not part of a series.",
+      "noSessions": "None of the chosen days falls between these dates.",
+      "tooManySessions": "That makes {{n}} practices; a series holds at most {{max}}. Pick an earlier last date."
     },
     "windowNote": "Showing the next {{days}} days."
   }

@@ -100,15 +100,26 @@ export function isOtherTimeZone(timeZone: string, at: Date | string = new Date()
 
 /**
  * The zone's short name at that instant, e.g. "EST" or "GMT-5", read from the
- * formatter's `timeZoneName` part (locales put it before or after the time);
- * `''` when the runtime has none.
+ * formatter's `timeZoneName` part (locales put it before or after the time).
+ * A runtime whose `formatToParts` has no such part (Hermes' is not
+ * guaranteed to split it out) falls back to the time with the zone minus the
+ * same time without it. `''` when neither yields a name.
  */
 export function formatZoneName(value: Date | string, timeZone: string): string {
+  const locale = deviceLocale();
+  const instant = toDate(value);
   try {
-    const parts = new Intl.DateTimeFormat(deviceLocale(), { timeZone, timeZoneName: 'short' }).formatToParts(
-      toDate(value),
-    );
-    return parts.find((part) => part.type === 'timeZoneName')?.value ?? '';
+    const parts = new Intl.DateTimeFormat(locale, { timeZone, timeZoneName: 'short' }).formatToParts(instant);
+    const part = parts.find((p) => p.type === 'timeZoneName')?.value;
+    if (part) return part;
+  } catch {
+    // fall through to the string difference
+  }
+  try {
+    const base: Intl.DateTimeFormatOptions = { timeZone, hour: 'numeric', minute: '2-digit' };
+    const withZone = instant.toLocaleTimeString(locale, { ...base, timeZoneName: 'short' });
+    const without = instant.toLocaleTimeString(locale, base);
+    return withZone.includes(without) ? withZone.replace(without, '').trim() : '';
   } catch {
     return '';
   }

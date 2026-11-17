@@ -67,7 +67,10 @@ it('answers for a child with playerId, leaves a missing comment out, and refresh
     on_behalf_of_child: true,
     has_comment: false,
   });
-  expect(invalidate).toHaveBeenCalledWith({ queryKey: practiceKeys.all });
+  // Only this practice's detail and answers: list rows carry no availability.
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: practiceKeys.detail('p1') });
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: practiceKeys.availability('p1') });
+  expect(invalidate).not.toHaveBeenCalledWith({ queryKey: practiceKeys.all });
 });
 
 it('sends an empty comment to clear it', async () => {

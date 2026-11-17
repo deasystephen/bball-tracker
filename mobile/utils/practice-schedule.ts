@@ -171,24 +171,36 @@ export function daysToOccurrence(
   frequency: PracticeFrequency,
   count: number
 ): number | null {
-  if (weekdays.length === 0 || count < 1) return null;
+  if (count < 1) return null;
+  return occurrenceOffsets(startDate, weekdays, frequency, 2 * MAX_SERIES_SPAN_DAYS)[count - 1] ?? null;
+}
+
+/**
+ * Day offsets from `startDate` of every occurrence up to `maxDays` days later
+ * (inclusive), walking the local calendar as the API's `expandRecurrence` does.
+ */
+export function occurrenceOffsets(
+  startDate: Date,
+  weekdays: readonly number[],
+  frequency: PracticeFrequency,
+  maxDays: number
+): number[] {
   const mondayIndex = (date: Date) => {
     const day = new Date(date.getFullYear(), date.getMonth(), date.getDate());
     day.setDate(day.getDate() - ((day.getDay() + 6) % 7));
     return Math.round(Date.UTC(day.getFullYear(), day.getMonth(), day.getDate()) / (7 * 86_400_000));
   };
+  const offsets: number[] = [];
   let firstWeek: number | null = null;
-  let seen = 0;
-  for (let offset = 0; offset <= 2 * MAX_SERIES_SPAN_DAYS; offset += 1) {
+  for (let offset = 0; offset <= maxDays; offset += 1) {
     const date = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate() + offset);
     if (!weekdays.includes(date.getDay())) continue;
     const week = mondayIndex(date);
     if (firstWeek === null) firstWeek = week;
     if (frequency === 'BIWEEKLY' && (week - firstWeek) % 2 !== 0) continue;
-    seen += 1;
-    if (seen === count) return offset;
+    offsets.push(offset);
   }
-  return null;
+  return offsets;
 }
 
 /** The create form's recurrence checks, mirroring the API's (it stays the authority). */
@@ -207,6 +219,13 @@ export function validateRecurrence(input: {
     if (span < 0) errors.endDate = i18n.t('practices.errors.endBeforeStart');
     else if (span > MAX_SERIES_SPAN_DAYS) {
       errors.endDate = i18n.t('practices.errors.endTooFar', { max: MAX_SERIES_SPAN_DAYS });
+    } else if (input.weekdays.length > 0) {
+      // As the API: the range must hold at least one practice and at most the cap.
+      const sessions = occurrenceOffsets(input.startDate, input.weekdays, input.frequency, span).length;
+      if (sessions === 0) errors.endDate = i18n.t('practices.errors.noSessions');
+      else if (sessions > MAX_SERIES_OCCURRENCES) {
+        errors.endDate = i18n.t('practices.errors.tooManySessions', { n: sessions, max: MAX_SERIES_OCCURRENCES });
+      }
     }
   } else {
     const count = Number(input.count);

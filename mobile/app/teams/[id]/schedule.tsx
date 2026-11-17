@@ -86,8 +86,9 @@ export default function TeamScheduleScreen() {
   const insets = useSafeAreaInsets();
   const user = useAuthUser();
 
-  // Fixed for the screen's life, so the query keys stay stable.
-  const [{ from, to }] = useState(scheduleWindow);
+  // Held in state so the query keys stay stable between renders; a refresh on
+  // a later day moves it (a screen left open overnight).
+  const [{ from, to }, setWindow] = useState(scheduleWindow);
   const { data: team } = useTeam(id);
   const gamesQuery = useGamesPage({ teamId: id, startDate: from, endDate: to, limit: SCHEDULE_GAMES_LIMIT });
   const practicesQuery = usePractices({ teamId: id, from, to, limit: SCHEDULE_PRACTICES_LIMIT });
@@ -106,6 +107,12 @@ export default function TeamScheduleScreen() {
   );
 
   const refetchAll = () => {
+    const next = scheduleWindow();
+    if (next.from !== from) {
+      // New keys: both queries load the new window.
+      setWindow(next);
+      return;
+    }
     gamesQuery.refetch();
     practicesQuery.refetch();
   };

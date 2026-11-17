@@ -301,6 +301,20 @@ describe('practice detail: availability', () => {
     );
   });
 
+  it('keeps a loaded practice on screen when a background refetch fails', () => {
+    signIn('klay');
+    const hooks = jest.requireMock('../../hooks/usePractices') as { usePractice: () => unknown };
+    const original = hooks.usePractice;
+    hooks.usePractice = () => ({ data: mockPractice, isLoading: false, error: new Error('offline'), refetch: jest.fn() });
+    try {
+      const view = render(<PracticeDetailScreen />);
+      expect(view.getByText('Availability')).toBeTruthy();
+      expect(view.queryByText('offline')).toBeNull();
+    } finally {
+      hooks.usePractice = original;
+    }
+  });
+
   it('a cancelled practice shows why and takes no answers', () => {
     signIn('klay');
     mockPractice = practice({ status: 'CANCELLED', cancelReason: 'Gym closed', cancelledAt: '2026-11-20T00:00:00Z' });
@@ -475,6 +489,21 @@ describe('create practice', () => {
     );
     expect(mockCreateSeries.mock.calls[0][0]).not.toHaveProperty('endDate');
     expect(mockToast).toHaveBeenCalledWith('3 practices scheduled', 'success');
+  });
+
+  it('clears a shown error as soon as the coach changes the days', async () => {
+    const view = render(<CreatePracticeScreen />);
+    fireEvent.press(view.getByLabelText('Repeats: Weekly'));
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const names = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    fireEvent.press(view.getByLabelText(names[tomorrow.getDay()]));
+    await act(async () => {
+      fireEvent.press(view.getByTestId('practice-create-submit'));
+    });
+    expect(view.getByText('Pick at least one day')).toBeTruthy();
+    fireEvent.press(view.getByLabelText(names[tomorrow.getDay()]));
+    expect(view.queryByText('Pick at least one day')).toBeNull();
   });
 
   it('refuses a series with no weekday, before calling the API', async () => {
