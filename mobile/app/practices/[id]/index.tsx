@@ -88,7 +88,7 @@ export default function PracticeDetailScreen() {
   const toast = useToast();
   const user = useAuthUser();
 
-  const { data: team } = useTeam(teamId);
+  const { data: team, error: teamError, refetch: refetchTeam } = useTeam(teamId);
   const { data: availabilityData } = usePracticeAvailability(id);
   const submit = useSubmitPracticeAvailability();
   const cancelOne = useCancelPractice();
@@ -120,7 +120,13 @@ export default function PracticeDetailScreen() {
   const setComment = (text: string) => setDraft({ subjectId, baseline: storedComment, text });
   // The text last saved for this person: Save note hides at once after a
   // save, not only once the refetched note arrives.
-  const [savedNote, setSavedNote] = useState<{ subjectId: string | undefined; text: string } | null>(null);
+  // Tied to the stored note it was saved over, so it stops counting once
+  // that note changes (the save landing, or an edit elsewhere).
+  const [savedNote, setSavedNote] = useState<{
+    subjectId: string | undefined;
+    baseline: string;
+    text: string;
+  } | null>(null);
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirm, setConfirm] = useState<Confirm>(null);
@@ -136,6 +142,18 @@ export default function PracticeDetailScreen() {
       <ErrorState
         message={error instanceof Error ? error.message : t('practices.notFound')}
         onRetry={refetch}
+        onBack={goBack}
+      />
+    );
+  }
+
+  // Without the team there is no roster to answer for and no permission to
+  // read, so the screen would quietly lose its answers and its menu.
+  if (!team && teamError) {
+    return (
+      <ErrorState
+        message={teamError instanceof Error ? teamError.message : t('teams.notFound')}
+        onRetry={refetchTeam}
         onBack={goBack}
       />
     );
@@ -162,7 +180,7 @@ export default function PracticeDetailScreen() {
         // The draft stays until the refetched note replaces it (see `draft`),
         // so the field never flashes the old note in between.
         onSuccess: (_row, variables) => {
-          setSavedNote({ subjectId, text: variables.comment ?? '' });
+          setSavedNote({ subjectId, baseline: storedComment, text: variables.comment ?? '' });
           toast.showToast(t('practices.noteSaved'), 'success');
         },
         onError: (err) => toast.showToast(getApiErrorMessage(err, t('practices.errors.answerFailed')), 'error'),
@@ -449,7 +467,12 @@ export default function PracticeDetailScreen() {
               />
               {myRow &&
               comment.trim() !== storedComment &&
-              !(savedNote && savedNote.subjectId === subjectId && savedNote.text === comment.trim()) ? (
+              !(
+                savedNote &&
+                savedNote.subjectId === subjectId &&
+                savedNote.baseline === storedComment &&
+                savedNote.text === comment.trim()
+              ) ? (
                 <Button
                   title={t('practices.saveNote')}
                   variant="outline"

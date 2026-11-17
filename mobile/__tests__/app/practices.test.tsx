@@ -315,6 +315,20 @@ describe('practice detail: availability', () => {
     }
   });
 
+  it('says so when the team cannot load, instead of quietly dropping the answers', () => {
+    signIn('klay');
+    const hooks = jest.requireMock('../../hooks/useTeams') as { useTeam: () => unknown };
+    const original = hooks.useTeam;
+    hooks.useTeam = () => ({ data: undefined, isLoading: false, error: new Error('Team offline'), refetch: jest.fn() });
+    try {
+      const view = render(<PracticeDetailScreen />);
+      expect(view.getByText('Team offline')).toBeTruthy();
+      expect(view.getByLabelText('Go back')).toBeTruthy();
+    } finally {
+      hooks.useTeam = original;
+    }
+  });
+
   it('a cancelled practice shows why and takes no answers', () => {
     signIn('klay');
     mockPractice = practice({ status: 'CANCELLED', cancelReason: 'Gym closed', cancelledAt: '2026-11-20T00:00:00Z' });
@@ -512,6 +526,28 @@ describe('create practice', () => {
     expect(view.getByText('Pick at least one day')).toBeTruthy();
     fireEvent.press(view.getByLabelText(names[tomorrow.getDay()]));
     expect(view.queryByText('Pick at least one day')).toBeNull();
+  });
+
+  it('keeps the days the coach picked when the first date moves', async () => {
+    const view = render(<CreatePracticeScreen />);
+    fireEvent.press(view.getByLabelText('Repeats: Weekly'));
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const names = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const day = tomorrow.getDay();
+    // Untick and tick the preselected day again: an explicit choice.
+    fireEvent.press(view.getByLabelText(names[day]));
+    fireEvent.press(view.getByLabelText(names[day]));
+    const sheet = view.UNSAFE_getByProps({ mode: 'date' });
+    const nextDay = new Date(tomorrow);
+    nextDay.setDate(nextDay.getDate() + 1);
+    await act(async () => {
+      sheet.props.onConfirm(nextDay);
+    });
+    expect(view.getByLabelText(names[day]).props.accessibilityState).toEqual(expect.objectContaining({ checked: true }));
+    expect(view.getByLabelText(names[nextDay.getDay()]).props.accessibilityState).toEqual(
+      expect.objectContaining({ checked: false })
+    );
   });
 
   it('refuses a series with no weekday, before calling the API', async () => {

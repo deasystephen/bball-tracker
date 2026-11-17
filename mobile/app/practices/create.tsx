@@ -152,8 +152,12 @@ export default function CreatePracticeScreen() {
   // A shown error goes as soon as the coach changes anything it is about.
   const clearErrors = () => setErrors({});
 
+  // Once the coach has picked days, a new start date no longer changes them.
+  const [weekdaysTouched, setWeekdaysTouched] = useState(false);
+
   const toggleWeekday = (day: number) => {
     clearErrors();
+    setWeekdaysTouched(true);
     setWeekdays((current) =>
       current.includes(day) ? current.filter((d) => d !== day) : [...current, day]
     );
@@ -172,7 +176,9 @@ export default function CreatePracticeScreen() {
       const next = combineDateAndTime(value, start);
       // A one-day pick for a weekly practice usually means "starting this day":
       // carry the weekday along while only one is chosen.
-      if (weekdays.length === 1 && weekdays[0] === start.getDay()) setWeekdays([next.getDay()]);
+      if (!weekdaysTouched && weekdays.length === 1 && weekdays[0] === start.getDay()) {
+        setWeekdays([next.getDay()]);
+      }
       // Until the coach picks a last date, it stays the default distance from the first.
       if (!endTouched) setEndDate(defaultEnd(next));
       setStart(next);

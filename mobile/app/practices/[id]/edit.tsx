@@ -55,7 +55,7 @@ import { spacing } from '../../../theme';
 import { getHorizontalPadding } from '../../../utils/responsive';
 import { MIN_TOUCH_TARGET } from '../../../utils/touch-target';
 import { formatClockTime, formatLongDate, formatZoneName, isOtherTimeZone } from '../../../utils/format-date';
-import { combineDateAndTime } from '../../../utils/practice-schedule';
+import { combineDateAndTime, validateStartDate } from '../../../utils/practice-schedule';
 import type { PracticeDetailsInput, UpdatePracticeInput } from '../../../types/practice';
 
 function detailsOf(source: {
@@ -178,6 +178,12 @@ export default function EditPracticeScreen() {
           // would not be the team's, so refuse it rather than save it shifted.
           if (isOtherTimeZone(timeZone, start)) {
             Alert.alert(t('common.error'), t('practices.errors.zoneShift', { zone: timeZone }));
+            return;
+          }
+          // The API's one-off window, in the device language before a round trip.
+          const windowError = validateStartDate(start, false);
+          if (windowError) {
+            Alert.alert(t('common.error'), windowError);
             return;
           }
           data.startsAt = start.toISOString();
