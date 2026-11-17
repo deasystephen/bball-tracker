@@ -46,7 +46,7 @@ import { Prisma } from '@prisma/client';
 import { PlayerService } from '../../src/services/player-service';
 import { teamAccessWhere } from '../../src/utils/permissions';
 import { emailEquals } from '../../src/utils/email-match';
-import { BadRequestError, ConflictError, NotFoundError, UploadExpiredError } from '../../src/utils/errors';
+import { BadRequestError, ClaimedAccountError, ConflictError, NotFoundError, UploadExpiredError } from '../../src/utils/errors';
 import { mockPrisma } from '../setup';
 import {
   createPlayer,
@@ -1194,9 +1194,15 @@ describe('PlayerService', () => {
 
   describe('deletePlayer', () => {
     const adminUser = { id: 'admin-id', role: 'ADMIN', email: 'admin@test.com', name: 'Admin' };
+    /** An unclaimed row: no login. The factory defaults to a claimed one (`createUser` ignores a null `workosUserId`). */
+    const unclaimedPlayer = (opts: Parameters<typeof createPlayer>[0] = {}): ReturnType<typeof createPlayer> => ({
+      ...createPlayer(opts),
+      workosUserId: null,
+    });
+
 
     it('should delete player successfully', async () => {
-      const player = createPlayer();
+      const player = unclaimedPlayer();
       const infoSpy = spyOnInfo();
       const revokeSpy = jest.spyOn(ioRegistry, 'revokeUserSockets');
 
@@ -1213,8 +1219,9 @@ describe('PlayerService', () => {
 
       expect(result).toEqual({ success: true });
       // Guarded like every User write (#643); reads back the avatar (#725).
+      // Guarded like every User write (#643); also refuses a row claimed since the read (#1034).
       expect(mockPrisma.user.delete).toHaveBeenCalledWith({
-        where: { id: player.id, deletedAt: null },
+        where: { id: player.id, deletedAt: null, AND: [{ workosUserId: null }] },
         select: { profilePictureUrl: true },
       });
       // One domain event, ids only.
@@ -1232,7 +1239,7 @@ describe('PlayerService', () => {
       );
 
       function mockDeletablePlayer(profilePictureUrl: string | null): ReturnType<typeof createPlayer> {
-        const player = { ...createPlayer(), profilePictureUrl };
+        const player = { ...unclaimedPlayer(), profilePictureUrl };
         (mockPrisma.user.findUnique as jest.Mock)
           .mockResolvedValueOnce(adminUser)
           .mockResolvedValueOnce({ ...player, teamMembers: [], gameEvents: [] });
@@ -1264,6 +1271,7 @@ describe('PlayerService', () => {
       it('does not call deletePreviousAvatar when the delete throws', async () => {
         const player = mockDeletablePlayer(bucketUrl);
         (mockPrisma.user.delete as jest.Mock).mockRejectedValueOnce(p2025());
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValueOnce(null); // re-read: gone
 
         await expect(PlayerService.deletePlayer(player.id, 'admin-id')).rejects.toMatchObject({ statusCode: 404 });
 
@@ -1297,7 +1305,7 @@ describe('PlayerService', () => {
     });
 
     it('logs one `Player deleted` domain event with ids only (#686)', async () => {
-      const player = createPlayer();
+      const player = unclaimedPlayer();
       (mockPrisma.user.findUnique as jest.Mock)
         .mockResolvedValueOnce(adminUser)
         .mockResolvedValueOnce({ ...player, teamMembers: [], gameEvents: [] });
@@ -1312,7 +1320,7 @@ describe('PlayerService', () => {
     });
 
     it('treats a tombstone as not found, even for an admin (#643)', async () => {
-      const tombstone = { ...createPlayer({ name: 'Deleted user' }), email: null, deletedAt: new Date() };
+      const tombstone = { ...unclaimedPlayer({ name: 'Deleted user' }), email: null, deletedAt: new Date() };
       (mockPrisma.user.findUnique as jest.Mock)
         .mockResolvedValueOnce(adminUser)
         .mockResolvedValueOnce({ ...tombstone, teamMembers: [], gameEvents: [] });
@@ -1325,16 +1333,67 @@ describe('PlayerService', () => {
     });
 
     it('answers 404 when the row is tombstoned between the read and the delete (#643)', async () => {
-      const player = createPlayer();
+      const player = unclaimedPlayer();
       (mockPrisma.user.findUnique as jest.Mock)
         .mockResolvedValueOnce(adminUser)
         .mockResolvedValueOnce({ ...player, teamMembers: [], gameEvents: [] });
       (mockPrisma.user.delete as jest.Mock).mockRejectedValueOnce(p2025());
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValueOnce({
+        deletedAt: new Date(),
+        workosUserId: null,
+      }); // re-read: tombstoned
 
       await expect(PlayerService.deletePlayer(player.id, 'admin-id')).rejects.toMatchObject({
         statusCode: 404,
         message: 'Player not found',
       });
+    });
+
+    it('refuses a claimed account for an admin: 403 claimed_account, nothing deleted (#1034)', async () => {
+      const claimed = createPlayer({ workosUserId: 'user_workos_1' });
+      const revokeSpy = jest.spyOn(ioRegistry, 'revokeUserSockets');
+      (mockPrisma.user.findUnique as jest.Mock)
+        .mockResolvedValueOnce(adminUser)
+        .mockResolvedValueOnce({ ...claimed, teamMembers: [], gameEvents: [] });
+
+      const error = await PlayerService.deletePlayer(claimed.id, 'admin-id').catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(ClaimedAccountError);
+      expect((error as ClaimedAccountError).statusCode).toBe(403);
+      expect((error as ClaimedAccountError).body().code).toBe('claimed_account');
+      expect((error as ClaimedAccountError).message).toContain('DELETE /auth/me');
+      expect(mockPrisma.user.delete).not.toHaveBeenCalled();
+      expect(revokeSpy).not.toHaveBeenCalled();
+      revokeSpy.mockRestore();
+    });
+
+    it.each([
+      ['a managed roster record', { isManaged: true, managedById: 'coach-1' }],
+      ['an Add Player pre-provision (not managed, never signed in)', { isManaged: false, managedById: null }],
+      ['a row the age screen un-claimed (managed, no coach, no login)', { isManaged: true, managedById: null }],
+    ])('still deletes %s: no login, so no claim (#1034)', async (_label, flags) => {
+      const row = { ...unclaimedPlayer(), ...flags };
+      (mockPrisma.user.findUnique as jest.Mock)
+        .mockResolvedValueOnce(adminUser)
+        .mockResolvedValueOnce({ ...row, teamMembers: [], gameEvents: [] });
+      (mockPrisma.user.delete as jest.Mock).mockResolvedValue(row);
+
+      await expect(PlayerService.deletePlayer(row.id, 'admin-id')).resolves.toEqual({ success: true });
+    });
+
+    it('answers 403 claimed_account when the row is claimed between the read and the delete (#1034)', async () => {
+      const player = unclaimedPlayer();
+      (mockPrisma.user.findUnique as jest.Mock)
+        .mockResolvedValueOnce(adminUser)
+        .mockResolvedValueOnce({ ...player, teamMembers: [], gameEvents: [] })
+        .mockResolvedValueOnce({ deletedAt: null, workosUserId: 'user_workos_2' }); // re-read after P2025
+      // The guarded write matches nothing once `workosUserId` is set.
+      (mockPrisma.user.delete as jest.Mock).mockRejectedValueOnce(p2025());
+      const revokeSpy = jest.spyOn(ioRegistry, 'revokeUserSockets');
+
+      await expect(PlayerService.deletePlayer(player.id, 'admin-id')).rejects.toBeInstanceOf(ClaimedAccountError);
+      expect(revokeSpy).not.toHaveBeenCalled();
+      revokeSpy.mockRestore();
     });
 
     it('should throw NotFoundError if admin user does not exist', async () => {
@@ -1378,7 +1437,7 @@ describe('PlayerService', () => {
     });
 
     it('should throw BadRequestError if player is on teams', async () => {
-      const player = createPlayer();
+      const player = unclaimedPlayer();
       const team = createTeam();
       const member = createTeamMember({ teamId: team.id, playerId: player.id });
 
@@ -1401,7 +1460,7 @@ describe('PlayerService', () => {
     });
 
     it('should throw BadRequestError if player has game events', async () => {
-      const player = createPlayer();
+      const player = unclaimedPlayer();
       const event = createGameEvent({ playerId: player.id });
 
       (mockPrisma.user.findUnique as jest.Mock)
@@ -1423,7 +1482,7 @@ describe('PlayerService', () => {
     });
 
     it('should throw ForbiddenError for non-admin users', async () => {
-      const player = createPlayer();
+      const player = unclaimedPlayer();
       const coach = createCoach();
 
       (mockPrisma.user.findUnique as jest.Mock)
@@ -1449,7 +1508,7 @@ describe('PlayerService', () => {
     it('lets the creator delete a just-created, un-rostered managed player', async () => {
       const coach = createCoach();
       const managed = {
-        ...createPlayer(),
+        ...unclaimedPlayer(),
         isManaged: true,
         managedById: coach.id,
         createdAt: new Date(),
@@ -1469,7 +1528,7 @@ describe('PlayerService', () => {
     it('forbids the creator from deleting an old un-rostered managed player (B2.10)', async () => {
       const coach = createCoach();
       const managed = {
-        ...createPlayer(),
+        ...unclaimedPlayer(),
         isManaged: true,
         managedById: coach.id,
         createdAt: new Date(Date.now() - 3 * DAY_MS),

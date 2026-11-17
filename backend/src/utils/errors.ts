@@ -317,6 +317,25 @@ export class StaffTargetNeedsInvitationError extends DetailedError<Record<string
   }
 }
 
+/**
+ * 403 `claimed_account` — `DELETE /players/:id` was aimed at an account that
+ * has a login (`workosUserId` set), ADMIN callers included (#1034). Such an
+ * account is deleted only by its owner (`DELETE /auth/me`, which runs
+ * `AccountService.deleteAccount` and removes the WorkOS identity), or by an
+ * operator through `backend/scripts/data-subject-request.ts`.
+ */
+export class ClaimedAccountError extends DetailedError<Record<string, never>> {
+  constructor() {
+    super(
+      'claimed_account',
+      {},
+      'This account has its own sign-in, so it cannot be deleted as a roster record. Its owner deletes it from the app (DELETE /auth/me); an operator uses the data-subject-request script.',
+      403
+    );
+    Object.setPrototypeOf(this, ClaimedAccountError.prototype);
+  }
+}
+
 export class ConflictError extends AppError {
   constructor(message: string = 'Conflict') {
     super(message, 409);
