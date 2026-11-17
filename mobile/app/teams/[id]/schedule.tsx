@@ -15,7 +15,7 @@
  * around) a page that is short of its total.
  */
 
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useReducer } from 'react';
 import { View, StyleSheet, FlatList, RefreshControl } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -73,10 +73,13 @@ export default function TeamScheduleScreen() {
   const insets = useSafeAreaInsets();
   const user = useAuthUser();
 
-  // Held in state so the query keys stay stable between renders; a refresh on
-  // a later day moves it (a screen left open overnight).
-  const [{ from, to }, setWindow] = useState(scheduleWindow);
-  const { data: team } = useTeam(id);
+  // Derived on every render: it is the same all day (local midnight), so the
+  // query keys are stable, and the first render after midnight moves to the
+  // new day by itself; a refresh forces that render.
+  const { from, to } = scheduleWindow();
+  const [, rerender] = useReducer((n: number) => n + 1, 0);
+  const teamQuery = useTeam(id);
+  const team = teamQuery.data;
   const gamesQuery = useGamesPage({ teamId: id, startDate: from, endDate: to, limit: SCHEDULE_GAMES_LIMIT });
   const practicesQuery = usePractices({ teamId: id, from, to, limit: SCHEDULE_PRACTICES_LIMIT });
 
@@ -94,21 +97,26 @@ export default function TeamScheduleScreen() {
   );
 
   const refetchAll = () => {
-    const next = scheduleWindow();
-    if (next.from !== from) {
-      // New keys: both queries load the new window.
-      setWindow(next);
+    if (scheduleWindow().from !== from) {
+      // A new day: the next render carries the new window's keys, which load.
+      rerender();
       return;
     }
     gamesQuery.refetch();
     practicesQuery.refetch();
+    if (teamQuery.error) teamQuery.refetch();
   };
 
   const loading = gamesQuery.isLoading || practicesQuery.isLoading;
   // Either list failing with nothing to show fails the schedule (half a
   // schedule would read as complete); the message is that list's own.
+  // The team too: without it "Add practice" would vanish for a coach with no
+  // word why.
   const loadError =
-    (!gamesQuery.data && gamesQuery.error) || (!practicesQuery.data && practicesQuery.error) || null;
+    (!gamesQuery.data && gamesQuery.error) ||
+    (!practicesQuery.data && practicesQuery.error) ||
+    (!team && teamQuery.error) ||
+    null;
 
   if (loading) {
     return <LoadingSpinner message={t('practices.loadingSchedule')} fullScreen />;

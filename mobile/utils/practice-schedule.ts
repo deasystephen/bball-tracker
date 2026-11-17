@@ -134,14 +134,21 @@ export function formatWeekdayList(weekdays: readonly number[]): string {
     .join(', ');
 }
 
-/** "Weekly on Tue, Thu at 6:00 PM" / "Every 2 weeks on …" for a series occurrence. */
-export function formatRecurrence(series: {
-  frequency: PracticeFrequency;
-  weekdays: number[];
-  startTime: string;
-}): string {
+/**
+ * "Weekly on Tue, Thu at 6:00 PM" / "Every 2 weeks on …" for a series
+ * occurrence. The start time is the series' wall time in its zone, so, like
+ * the time range, it names the zone for a viewer elsewhere (`zone.at` is the
+ * occurrence the line sits next to).
+ */
+export function formatRecurrence(
+  series: { frequency: PracticeFrequency; weekdays: number[]; startTime: string },
+  zone?: { timeZone: string; at: Date | string }
+): string {
   const key = series.frequency === 'BIWEEKLY' ? 'practices.recurrenceBiweekly' : 'practices.recurrenceWeekly';
-  return i18n.t(key, { days: formatWeekdayList(series.weekdays), time: formatWallClock(series.startTime) });
+  const line = i18n.t(key, { days: formatWeekdayList(series.weekdays), time: formatWallClock(series.startTime) });
+  if (!zone || !isOtherTimeZone(zone.timeZone, zone.at)) return line;
+  const name = formatZoneName(zone.at, zone.timeZone);
+  return name ? `${line} ${name}` : line;
 }
 
 function pad(value: number): string {

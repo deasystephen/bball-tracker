@@ -249,19 +249,22 @@ unchanged.
   answers; past ones stay), then return to the schedule. A session of a cancelled series offers
   Cancel (while still scheduled) and Delete, never an edit (the API refuses edits to history, and
   the edit screen says so up front if a stale menu led there); a cancelled occurrence of an active
-  series still offers **Edit all future practices**. If the runtime cannot read the practice's
-  zone, the edit screen shows the date and time without offering to change them rather than guess.
+  series still offers **Edit all future practices**. A series cancel from an occurrence that has
+  already started keeps that occurrence (the API deletes only later ones) and refreshes it.
   The create form also checks the API's start window (a series' first date 31 days back to 366
   ahead, a one-off 31 back to 732 ahead).
 - **Time zones**: every practice time goes through `utils/format-date.ts` with the session's
   `timezone` (`formatShortDate` / `formatLongDate` / `formatClockTime` take `{ timeZone }`); when it
   is not the device zone, the zone's short name follows the range ("6:00 PM – 7:30 PM EST"), so a
   traveller sees the coach's wall time and knows it is not theirs. An unknown zone name falls back
-  to the device zone instead of throwing. The edit form works on the practice's own wall clock in
-  its own zone (`format-date.ts#wallClockIn` / `instantFromWallClock`), whatever the device zone,
-  and names that zone when it differs: moving an 18:00 New York practice across a daylight-saving
-  change keeps it at 18:00 New York even when edited from Phoenix. An untouched start is sent back
-  as the stored instant.
+  to the device zone instead of throwing. The recurrence line names the zone the same way. The edit
+  form changes the date and time only when the device's clock shows the practice's own wall time
+  (`isOtherTimeZone` false at its start): the pickers then edit the device-local start, as on the
+  create form. Otherwise it shows the time in the practice's zone and says to cancel and reschedule
+  (or edit from a device in that zone); a new start that lands on a day the two zones disagree
+  (daylight saving) is refused rather than saved an hour off. Converting wall times between zones
+  on the device was tried during review and kept meeting gaps and repeated hours, so it is not
+  done; a traveling coach who must move a practice is the case this leaves out.
 - **Hooks** (`hooks/usePractices.ts`, keys `hooks/query-keys.ts#practiceKeys`): every schedule
   mutation invalidates `practiceKeys.all`; an availability answer only that practice's detail and
   answers (list rows carry none); delete and series cancel mark the per-session queries (detail,

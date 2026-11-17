@@ -1093,8 +1093,7 @@
       "timeZoneNote": "Las horas están en tu zona horaria ({{zone}}).",
       "submitOne": "Programar entrenamiento",
       "submitSeries": "Programar entrenamientos",
-      "practiceZoneNote": "La fecha y la hora están en la zona horaria del entrenamiento ({{zone}}), como las ve el equipo.",
-      "timeUnavailable": "Empieza el {{date}} a las {{time}}. Este dispositivo no puede mostrar la zona horaria del entrenamiento, así que aquí no se pueden cambiar la fecha ni la hora."
+      "timeOtherZone": "Empieza el {{date}} a las {{time}} {{zone}}, la zona horaria del entrenamiento, que no es la de este dispositivo. Para cambiar la fecha o la hora, cancélalo y programa uno nuevo, o edítalo desde un dispositivo en esa zona horaria."
     },
     "errors": {
       "weekdaysRequired": "Elige al menos un día",
@@ -1113,7 +1112,8 @@
       "tooManySessions": "Eso suma {{n}} entrenamientos; una serie admite como máximo {{max}}. Elige una última fecha anterior.",
       "notEditable": "Este entrenamiento, o su serie, está cancelado, así que no se puede editar.",
       "startTooEarly": "La primera fecha puede ser como mucho de hace {{days}} días.",
-      "startTooLate": "La primera fecha puede estar como mucho a {{days}} días vista."
+      "startTooLate": "La primera fecha puede estar como mucho a {{days}} días vista.",
+      "zoneShift": "En esa fecha la zona horaria de tu dispositivo y la del entrenamiento ({{zone}}) no coinciden, así que la hora sería incorrecta para el equipo. Cancela este entrenamiento y programa uno nuevo."
     },
     "windowNote": "Se muestran los próximos {{days}} días."
   }

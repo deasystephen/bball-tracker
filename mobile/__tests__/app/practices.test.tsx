@@ -581,21 +581,30 @@ describe('edit practice', () => {
     expect(mockUpdateOne).toHaveBeenCalledWith({ practiceId: 'p1', data: { location: 'Gym B', durationMinutes: 60 } });
   });
 
-  it('edits the time as the practice zone\'s wall clock, whatever the device zone', async () => {
+  it('edits the date and time when the device shows the practice zone\'s time', async () => {
     mockParams = { id: 'p1', scope: 'one' };
-    // 18:00 in New York on Oct 30 (EDT).
-    mockPractice = practice({ startsAt: '2026-10-30T22:00:00Z', timezone: 'America/New_York' });
+    mockPractice = practice({ timezone: deviceTimeZone() ?? 'UTC' });
     const view = render(<EditPracticeScreen />);
-    expect(view.getByTestId('practice-time-button').props.accessibilityLabel).toMatch(/^Start time: 6:00\sPM$/);
-    // Move it a week, across the end of daylight saving: still 18:00 New York.
     const sheet = view.UNSAFE_getByProps({ mode: 'date' });
+    // Same time of day, a week later.
+    const later = new Date(new Date(mockPractice.startsAt).getTime() + 7 * 86_400_000);
     await act(async () => {
-      sheet.props.onConfirm(new Date(2026, 10, 6, 9, 0));
+      sheet.props.onConfirm(later);
     });
     await act(async () => {
       fireEvent.press(view.getByTestId('practice-edit-save'));
     });
-    expect(mockUpdateOne).toHaveBeenCalledWith({ practiceId: 'p1', data: { startsAt: '2026-11-06T23:00:00.000Z' } });
+    const sent = mockUpdateOne.mock.calls[0][0].data.startsAt as string;
+    expect(new Date(sent).getTime() - new Date(mockPractice.startsAt).getTime()).toBeGreaterThan(6 * 86_400_000);
+  });
+
+  it('shows a practice in another zone at its own time and does not offer to move it', () => {
+    mockParams = { id: 'p1', scope: 'one' };
+    const other = deviceTimeZone() === 'Asia/Tokyo' ? 'Europe/Paris' : 'Asia/Tokyo';
+    mockPractice = practice({ timezone: other, startsAt: other === 'Asia/Tokyo' ? '2026-12-01T09:00:00Z' : '2026-12-01T17:00:00Z' });
+    const view = render(<EditPracticeScreen />);
+    expect(view.queryByTestId('practice-date-button')).toBeNull();
+    expect(view.getByTestId('practice-edit-no-time').props.children).toMatch(/at 6:00\sPM .*cancel it and schedule a new one/);
   });
 
   it('refuses up front to edit a practice that is cancelled', () => {

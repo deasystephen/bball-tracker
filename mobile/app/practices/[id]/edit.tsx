@@ -10,13 +10,18 @@
  *   that was not changed on its own. Dates and times cannot change for a
  *   series (cancel it and create a new one); the screen says so.
  *
- * Date and time are the practice's own wall time in its own zone, as the
- * detail screen shows them, whatever zone the device is in: the pickers edit
- * a `WallClock`, and the new start is the instant that clock shows in
- * `practice.timezone` (`instantFromWallClock`), so moving an 18:00 practice
- * across a daylight-saving change keeps it at 18:00 for the team. The zone is
- * named when it is not the device's. Only changed fields are sent; the start
- * goes without a zone, so the session keeps its own.
+ * Date and time change only where the device's clock and the practice's
+ * zone agree. The pickers edit the device-local start, as on the create
+ * screen, which is the practice's own wall time exactly when the two zones
+ * show the same time. When they do not (a coach travelling, or a practice
+ * scheduled elsewhere), the time is shown in the practice's zone and not
+ * offered for change: cancel and reschedule, or edit from a device in that
+ * zone. A new start that lands where the two zones disagree (a
+ * daylight-saving difference) is refused rather than saved an hour off.
+ * Converting wall times between zones on the device was tried and kept
+ * meeting gaps and repeated hours (review of #1049); this keeps it out.
+ * Only changed fields are sent; the start goes without a zone, so the
+ * session keeps its own.
  */
 
 import React, { useState } from 'react';
@@ -49,14 +54,8 @@ import { useTranslation } from '../../../i18n';
 import { spacing } from '../../../theme';
 import { getHorizontalPadding } from '../../../utils/responsive';
 import { MIN_TOUCH_TARGET } from '../../../utils/touch-target';
-import {
-  formatClockTime,
-  formatLongDate,
-  instantFromWallClock,
-  isOtherTimeZone,
-  wallClockIn,
-  type WallClock,
-} from '../../../utils/format-date';
+import { formatClockTime, formatLongDate, formatZoneName, isOtherTimeZone } from '../../../utils/format-date';
+import { combineDateAndTime } from '../../../utils/practice-schedule';
 import type { PracticeDetailsInput, UpdatePracticeInput } from '../../../types/practice';
 
 function detailsOf(source: {
@@ -81,14 +80,6 @@ function changedDetails(before: PracticeDetailsValue, after: PracticeDetailsValu
     if (after[key].trim() !== before[key].trim()) patch[key] = after[key].trim();
   }
   return patch;
-}
-
-/**
- * The picker works on a device `Date`; it only carries the wall clock across
- * (its own zone never matters, its fields are read back as they were set).
- */
-function toPickerDate(wall: WallClock): Date {
-  return new Date(wall.year, wall.month - 1, wall.day, wall.hour, wall.minute);
 }
 
 export default function EditPracticeScreen() {
@@ -120,7 +111,7 @@ export default function EditPracticeScreen() {
 
   // The loaded session ("this one") or series ("all future"), with the user's edits on top.
   const [edits, setEdits] = useState<Partial<PracticeDetailsValue>>({});
-  const [wallEdit, setWallEdit] = useState<WallClock | null>(null);
+  const [startEdit, setStartEdit] = useState<Date | null>(null);
   const [durationEdit, setDurationEdit] = useState<number | null>(null);
   const [picker, setPicker] = useState<'date' | 'time' | null>(null);
 
@@ -164,13 +155,10 @@ export default function EditPracticeScreen() {
   const timeZone = practice.timezone;
   const initial = detailsOf(source);
   const details: PracticeDetailsValue = { ...initial, ...edits };
-  // The practice's own clock. `null` when this runtime cannot read its zone:
-  // then date and time are not offered at all, rather than guessed.
-  const storedWall = wallClockIn(practice.startsAt, timeZone);
-  const wall = wallEdit ?? storedWall;
-  // Untouched, the start is the stored instant itself (a repeated autumn hour
-  // has two instants for one wall time; the round trip would pick the first).
-  const start = (wallEdit && instantFromWallClock(wallEdit, timeZone)) || new Date(practice.startsAt);
+  const stored = new Date(practice.startsAt);
+  // The device clock reads the practice's own wall time: the pickers may edit it.
+  const canEditTime = !isOtherTimeZone(timeZone, stored);
+  const start = startEdit ?? stored;
   const duration = durationEdit ?? practice.durationMinutes;
   const dateText = formatLongDate(start, { timeZone });
   const timeText = formatClockTime(start, { timeZone });
@@ -185,7 +173,15 @@ export default function EditPracticeScreen() {
         }
       } else {
         const data: UpdatePracticeInput = { ...patch };
-        if (start.getTime() !== new Date(practice.startsAt).getTime()) data.startsAt = start.toISOString();
+        if (start.getTime() !== stored.getTime()) {
+          // The picked wall time is the device's; on a day the zones differ it
+          // would not be the team's, so refuse it rather than save it shifted.
+          if (isOtherTimeZone(timeZone, start)) {
+            Alert.alert(t('common.error'), t('practices.errors.zoneShift', { zone: timeZone }));
+            return;
+          }
+          data.startsAt = start.toISOString();
+        }
         if (duration !== practice.durationMinutes) data.durationMinutes = duration;
         if (Object.keys(data).length > 0) {
           await updateOne.mutateAsync({ practiceId: practice.id, data });
@@ -204,12 +200,7 @@ export default function EditPracticeScreen() {
   };
 
   const onPicked = (value: Date) => {
-    if (!wall) return;
-    setWallEdit(
-      picker === 'time'
-        ? { ...wall, hour: value.getHours(), minute: value.getMinutes() }
-        : { ...wall, year: value.getFullYear(), month: value.getMonth() + 1, day: value.getDate() }
-    );
+    setStartEdit(picker === 'time' ? combineDateAndTime(start, value) : combineDateAndTime(value, start));
     setPicker(null);
   };
 
@@ -256,7 +247,7 @@ export default function EditPracticeScreen() {
 
           {!seriesScope ? (
             <Card variant="default" style={styles.section}>
-              {wall ? (
+              {canEditTime ? (
                 <>
                   <PickerRow
                     icon="calendar"
@@ -275,18 +266,17 @@ export default function EditPracticeScreen() {
                 </>
               ) : (
                 <ThemedText variant="footnote" color="textSecondary" testID="practice-edit-no-time">
-                  {t('practices.form.timeUnavailable', { date: dateText, time: timeText })}
+                  {t('practices.form.timeOtherZone', {
+                    date: dateText,
+                    time: timeText,
+                    zone: formatZoneName(stored, timeZone) || timeZone,
+                  })}
                 </ThemedText>
               )}
               <ThemedText variant="captionBold" color="textSecondary" style={styles.label}>
                 {t('practices.form.duration')}
               </ThemedText>
               <DurationPills value={duration} onChange={setDurationEdit} />
-              {isOtherTimeZone(timeZone, start) ? (
-                <ThemedText variant="footnote" color="textTertiary" testID="practice-edit-zone">
-                  {t('practices.form.practiceZoneNote', { zone: timeZone })}
-                </ThemedText>
-              ) : null}
             </Card>
           ) : null}
 
@@ -306,9 +296,9 @@ export default function EditPracticeScreen() {
       </KeyboardAvoidingView>
 
       <DateTimePickerSheet
-        visible={picker !== null && wall !== null}
+        visible={picker !== null && canEditTime}
         mode={picker ?? 'date'}
-        value={wall ? toPickerDate(wall) : start}
+        value={start}
         title={picker === 'time' ? t('practices.form.startTime') : t('practices.form.date')}
         onConfirm={onPicked}
         onCancel={() => setPicker(null)}

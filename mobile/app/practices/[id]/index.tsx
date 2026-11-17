@@ -118,6 +118,9 @@ export default function PracticeDetailScreen() {
   const comment =
     draft && draft.subjectId === subjectId && draft.baseline === storedComment ? draft.text : storedComment;
   const setComment = (text: string) => setDraft({ subjectId, baseline: storedComment, text });
+  // The text last saved for this person: Save note hides at once after a
+  // save, not only once the refetched note arrives.
+  const [savedNote, setSavedNote] = useState<{ subjectId: string | undefined; text: string } | null>(null);
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirm, setConfirm] = useState<Confirm>(null);
@@ -158,7 +161,10 @@ export default function PracticeDetailScreen() {
       {
         // The draft stays until the refetched note replaces it (see `draft`),
         // so the field never flashes the old note in between.
-        onSuccess: () => toast.showToast(t('practices.noteSaved'), 'success'),
+        onSuccess: (_row, variables) => {
+          setSavedNote({ subjectId, text: variables.comment ?? '' });
+          toast.showToast(t('practices.noteSaved'), 'success');
+        },
         onError: (err) => toast.showToast(getApiErrorMessage(err, t('practices.errors.answerFailed')), 'error'),
       }
     );
@@ -178,7 +184,13 @@ export default function PracticeDetailScreen() {
   const confirmCancelSeries = async () => {
     if (!series) return;
     try {
-      const result = await cancelSeries.mutateAsync({ seriesId: series.id, practiceId: practice.id });
+      // Only sessions that have not started are deleted; one that has stays
+      // (history) and is refreshed like any other.
+      const deletesThis = new Date(practice.startsAt).getTime() > Date.now();
+      const result = await cancelSeries.mutateAsync({
+        seriesId: series.id,
+        practiceId: deletesThis ? practice.id : undefined,
+      });
       toast.showToast(t('practices.seriesCancelledToast', { count: result.deletedSessions ?? 0 }), 'success');
       goBack();
     } catch (err) {
@@ -308,7 +320,9 @@ export default function PracticeDetailScreen() {
           </InfoRow>
           {series ? (
             <InfoRow icon="repeat" label={t('practices.repeats')}>
-              {series.cancelledAt ? t('practices.seriesEnded') : formatRecurrence(series)}
+              {series.cancelledAt
+                ? t('practices.seriesEnded')
+                : formatRecurrence(series, { timeZone: practice.timezone, at: practice.startsAt })}
             </InfoRow>
           ) : null}
           {practice.location ? (
@@ -433,7 +447,9 @@ export default function PracticeDetailScreen() {
                 maxLength={AVAILABILITY_COMMENT_MAX}
                 testID="practice-note-input"
               />
-              {myRow && comment.trim() !== storedComment ? (
+              {myRow &&
+              comment.trim() !== storedComment &&
+              !(savedNote && savedNote.subjectId === subjectId && savedNote.text === comment.trim()) ? (
                 <Button
                   title={t('practices.saveNote')}
                   variant="outline"
