@@ -37,7 +37,14 @@ The node-postgres pool behind `@prisma/adapter-pg` has explicit bounds (#751): `
 - Destroying the socket to fix that misfires on a query that was only queued behind a slow one, because the timer starts at enqueue.
 - Destroying the socket also orphans the server backend.
 
-The open follow-up is #1050.
+**Accepted as a known gap (owner decision, 2026-11-17, #1050).** It needs a Multi-AZ failover plus a query sent in that 20 s window, and every other case is bounded. What it costs when it happens, reasoned from the code and not exercised against a real failover:
+
+- The request that sent the query hangs until the ALB's 504 at 60 s.
+- Its pool client stays checked out until the kernel gives up (about 15 minutes), so the pool runs with `DB_POOL_MAX` (10) minus the stuck clients for that time. Idle clients are not affected: keepalive drops them, and new connections reach the new primary.
+- The task is **not** replaced while any client is free: `/health` runs `SELECT 1` on a healthy connection and answers 200.
+- If every client is stuck, `/health` waits out the pool timeout and answers 503 (`db: timeout`), and after three failed checks (about 90 s) ECS replaces the task, which clears it.
+
+On call, the sign is 504s that start at a failover and `Socket revocation sweep stalled`; restarting the task (a forced new deployment) clears stuck clients at once. Revisit before real load. The option not taken is lowering `net.ipv4.tcp_retries2` through ECS `systemControls` in `infra/task-definition.json`: Fargate may refuse that sysctl, a refused task definition fails the deploy, and it shortens retries for every outbound connection (Redis, WorkOS, SES, S3).
 
 **The value.** 30 s sits above the slowest legitimate statement and below what waits on it:
 
