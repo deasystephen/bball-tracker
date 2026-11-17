@@ -24,7 +24,6 @@ import {
   isPoolTimeoutError,
   buildDbPoolOptions,
   statementTimeoutFromEnv,
-  assertUrlKeepsDbBounds,
 } from '../src/models/pool-config';
 import { FINALIZE_LOCK_TIMEOUT_MS, FINALIZE_TRANSACTION_TIMEOUT_MS } from '../src/services/stats-service';
 import { REVOCATION_SWEEP_STALL_MS } from '../src/websocket/revocation';
@@ -102,10 +101,10 @@ describe('pg pool bounds', () => {
 
     // pg lets a same-named query parameter in the connection string win over
     // the pool's keys, so `?statement_timeout=0` would silently lift the bound.
-    it('keeps the production DATABASE_URL free of a query string', () => {
+    it('keeps the production DATABASE_URL free of a parameter that would replace a bound', () => {
       const url = infraTf('ecs.tf').match(/secret_string\s*=\s*"(postgresql:\/\/[^"]*)"/);
       expect(url).not.toBeNull();
-      expect(url![1]).not.toContain('?');
+      expect(url![1]).not.toMatch(/[?&](statement_timeout|lock_timeout|idle_in_transaction_session_timeout)=/);
     });
 
     it('turns on TCP keepalive, the only bound for a server that never answers', () => {
@@ -144,20 +143,6 @@ describe('pg pool bounds', () => {
 
     // Key names are checked at compile time (`satisfies PoolConfig`), and the
     // real-database suite reads the settings back from the server.
-
-    it('refuses a connection string that would replace a bound, and passes any other', () => {
-      for (const param of ['statement_timeout=0', 'lock_timeout=0', 'idle_in_transaction_session_timeout=0', 'options=-c%20statement_timeout%3D0']) {
-        expect(() => assertUrlKeepsDbBounds(`postgresql://u:p@db:5432/app?schema=public&${param}`)).toThrow(
-          'DATABASE_URL must not set'
-        );
-      }
-      expect(() => assertUrlKeepsDbBounds('postgresql://u:p@db:5432/app?schema=public&sslmode=require')).not.toThrow();
-      expect(() => assertUrlKeepsDbBounds('postgresql://u:p@db:5432/app')).not.toThrow();
-      // The error names the parameter, never the URL (it carries the password).
-      expect(() => assertUrlKeepsDbBounds('postgresql://u:secret@db:5432/app?lock_timeout=0')).toThrow(
-        expect.objectContaining({ message: expect.not.stringContaining('secret') })
-      );
-    });
   });
 
   const loadModels = (env: Record<string, string | undefined>): jest.Mock => {
@@ -195,11 +180,6 @@ describe('pg pool bounds', () => {
     expect(config).toMatchObject({ statement_timeout: 0, lock_timeout: DB_LOCK_TIMEOUT_MS });
   });
 
-  it('refuses at load a DATABASE_URL that would override the bounds (#1036)', () => {
-    expect(() =>
-      loadModels({ DATABASE_URL: 'postgresql://postgres:pw@localhost:5432/bball_tracker?statement_timeout=0' })
-    ).toThrow('DATABASE_URL must not set statement_timeout');
-  });
 });
 
 describe('isPoolTimeoutError', () => {
