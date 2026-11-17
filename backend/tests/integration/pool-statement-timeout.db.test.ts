@@ -1,7 +1,7 @@
 /**
  * Real-database proof of the statement bounds `models/pool-config.ts` puts on
- * every pooled connection (#1036): `statement_timeout`,
- * `idle_in_transaction_session_timeout` and pg's client-side `query_timeout`.
+ * every pooled connection (#1036): `statement_timeout` and
+ * `idle_in_transaction_session_timeout`.
  *
  * The production pool is checked for the settings it carries. The cancels are
  * proven on a second pool built the way `src/models/index.ts` builds the
@@ -9,21 +9,17 @@
  * injected and `max: 1`, so "the pool client is returned" is observable: the
  * next query on that one-client pool answers at once.
  *
- * The half-open case runs through an in-process TCP proxy that stops
- * forwarding (and stops passing on the server's close) without closing the
- * client's socket: the server never answers, as after a failover to a dead
- * peer. Rows carry the run id and are removed in afterAll.
+ * TCP keepalive, the bound for a server that never answers, needs a dead peer
+ * and is pinned in `tests/models-pool.test.ts` only. Rows carry the run id and
+ * are removed in afterAll.
  */
 jest.unmock('../../src/models');
 
-import net from 'node:net';
 import type { Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import prisma from '../../src/models';
 import {
-  DB_QUERY_TIMEOUT_MARGIN_MS,
-  QUERY_READ_TIMEOUT_MESSAGE,
   buildDbPoolOptions,
   classifyDbError,
   dbPoolOptionsFromEnv,
@@ -245,95 +241,5 @@ describe('a lock wait (#1036)', () => {
     expect(err).toBeInstanceOf(Error);
     // pg-pool dropped the ended client; the pool answers with a fresh one.
     await expect(db.$queryRaw`SELECT 1 AS ok`).resolves.toEqual([{ ok: 1 }]);
-  });
-});
-
-describe('a connection whose server never answers (#1036)', () => {
-  let proxy: net.Server;
-  let blackhole = false;
-  const sockets: net.Socket[] = [];
-  let proxiedUrl: string;
-
-  beforeAll(async () => {
-    const target = new URL(process.env.DATABASE_URL!);
-    proxy = net.createServer((client) => {
-      const server = net.connect(Number(target.port || 5432), target.hostname);
-      sockets.push(client, server);
-      client.on('data', (chunk) => {
-        if (!blackhole) server.write(chunk);
-      });
-      server.on('data', (chunk) => {
-        if (!blackhole) client.write(chunk);
-      });
-      client.on('error', () => undefined);
-      server.on('error', () => undefined);
-      client.on('close', () => server.destroy());
-      // A dead peer sends no FIN either.
-      server.on('close', () => {
-        if (!blackhole) client.destroy();
-      });
-    });
-    await new Promise<void>((resolve) => proxy.listen(0, '127.0.0.1', resolve));
-    const proxied = new URL(target.toString());
-    proxied.host = `127.0.0.1:${(proxy.address() as net.AddressInfo).port}`;
-    proxiedUrl = proxied.toString();
-  });
-
-  afterEach(() => {
-    blackhole = false;
-  });
-
-  afterAll(async () => {
-    for (const socket of sockets) socket.destroy();
-    await new Promise<void>((resolve) => proxy.close(() => resolve()));
-  });
-
-  it('is rejected at query_timeout and its client replaced', async () => {
-    const statementTimeoutMs = 300;
-    const db = track(shortPool({ statementTimeoutMs }, `stmt-halfopen-${fx.run}`, proxiedUrl));
-    await db.$queryRaw`SELECT 1`;
-    blackhole = true;
-    const started = Date.now();
-    const err = await rejectionOf(db.$queryRaw`SELECT 1`);
-    const waited = Date.now() - started;
-    expect((err as Error).message).toContain(QUERY_READ_TIMEOUT_MESSAGE);
-    expect(waited).toBeGreaterThanOrEqual(statementTimeoutMs + DB_QUERY_TIMEOUT_MARGIN_MS - 50);
-    expect(waited).toBeLessThan(statementTimeoutMs + DB_QUERY_TIMEOUT_MARGIN_MS + 2_000);
-    expect(classifyDbError(err)).toBeUndefined();
-    blackhole = false;
-    // Outside a transaction pg-pool destroys the client on the error, so the
-    // next query opens a new connection instead of queueing behind the dead one.
-    const next = Date.now();
-    await expect(db.$queryRaw`SELECT 1 AS ok`).resolves.toEqual([{ ok: 1 }]);
-    expect(Date.now() - next).toBeLessThan(1_000);
-  });
-
-  it('inside a transaction fails at query_timeout, not twice that, and the stuck client is dropped', async () => {
-    const statementTimeoutMs = 300;
-    const queryTimeoutMs = statementTimeoutMs + DB_QUERY_TIMEOUT_MARGIN_MS;
-    const db = track(shortPool({ statementTimeoutMs }, `stmt-halfopen-tx-${fx.run}`, proxiedUrl));
-    await db.$queryRaw`SELECT 1`;
-    const started = Date.now();
-    const err = await rejectionOf(
-      db.$transaction(
-        async (tx) => {
-          await tx.$queryRaw`SELECT 1`;
-          blackhole = true;
-          await tx.$queryRaw`SELECT 2`;
-        },
-        { timeout: 30_000 }
-      )
-    );
-    const waited = Date.now() - started;
-    expect((err as Error).message).toContain(QUERY_READ_TIMEOUT_MESSAGE);
-    // Without ReadTimeoutClient the ROLLBACK queues behind the dead query and
-    // times out too: about twice query_timeout.
-    expect(waited).toBeLessThan(queryTimeoutMs + 2_000);
-    blackhole = false;
-    // The stuck client did not go back to the pool: the next query gets a
-    // fresh connection at once instead of queueing behind the lost answer.
-    const next = Date.now();
-    await expect(db.$queryRaw`SELECT 1 AS ok`).resolves.toEqual([{ ok: 1 }]);
-    expect(Date.now() - next).toBeLessThan(1_000);
   });
 });

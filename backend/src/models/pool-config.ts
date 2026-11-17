@@ -17,8 +17,6 @@
  * `src/models` itself is mocked.
  */
 
-import pg from 'pg';
-
 /**
  * Per-task client ceiling (pg's implicit default, now explicit). A rolling
  * deploy briefly runs two tasks plus `prisma migrate deploy`, so the app's
@@ -88,8 +86,13 @@ export const DB_LOCK_TIMEOUT_MS = 4_000;
  * - every other interactive transaction is cut by Prisma at 5 s, and every
  *   other statement (exports, account deletion, usage counts) is an indexed
  *   read or write measured in milliseconds;
- * - with `query_timeout` and the 3.5 s pool wait, below the ALB's 60 s idle
- *   timeout, so a request still answers its own 5xx.
+ * - with the 3.5 s pool wait, under the ALB's 60 s idle timeout and the
+ *   revocation sweep's 60 s stall report for any one statement (a request
+ *   that runs two statements that slow can still pass the ALB's 60 s).
+ *
+ * It needs the server to answer. A connection whose server vanished without
+ * closing it (a half-open TCP connection after a failover) is the keepalive's
+ * job below, which covers it only partly; see `DB_KEEPALIVE_INITIAL_DELAY_MS`.
  *
  * `DB_STATEMENT_TIMEOUT_MS` in the environment overrides it for one process
  * (`statementTimeoutFromEnv`), for an operator script whose statement
@@ -98,11 +101,10 @@ export const DB_LOCK_TIMEOUT_MS = 4_000;
 export const DB_STATEMENT_TIMEOUT_MS = 30_000;
 
 /**
- * The range `DB_STATEMENT_TIMEOUT_MS` may take besides `0` (off). The floor
- * keeps the override above finalize's 14 s lock wait and the pool-wide 4 s
+ * The range `DB_STATEMENT_TIMEOUT_MS` may take besides `0`. The floor keeps
+ * the override above finalize's 14 s lock wait and the pool-wide 4 s
  * `lock_timeout`, so a lock wait still ends as the retryable 503 and never as
- * a statement timeout; the ceiling keeps `query_timeout` far inside Node's
- * timer range and PostgreSQL's integer one. A longer job turns it off.
+ * a statement timeout; the ceiling is a sanity bound (a longer job uses `0`).
  */
 export const DB_STATEMENT_TIMEOUT_MIN_MS = 15_000;
 export const DB_STATEMENT_TIMEOUT_MAX_MS = 3_600_000;
@@ -119,71 +121,19 @@ export const DB_STATEMENT_TIMEOUT_MAX_MS = 3_600_000;
 export const DB_IDLE_IN_TRANSACTION_TIMEOUT_MS = 30_000;
 
 /**
- * pg's client-side `query_timeout` is the statement timeout plus this margin:
- * how long the driver waits for any answer before rejecting the query
- * (`QUERY_READ_TIMEOUT_MESSAGE`). The server-side bounds need the server to
- * answer; this is the backstop for when it never does (a half-open connection
- * after a Multi-AZ failover, where a query written to a dead peer would
- * otherwise wait out the kernel's TCP retransmission, about 15 minutes on
- * Linux). The margin lets a live server always answer first with its own
- * 57014, so this fires only on a dead connection. It cancels nothing
- * server-side, and pg leaves the client waiting on the lost answer, so
- * `ReadTimeoutClient` destroys the socket (see there).
- */
-export const DB_QUERY_TIMEOUT_MARGIN_MS = 5_000;
-
-/** pg's message when `query_timeout` fires. */
-export const QUERY_READ_TIMEOUT_MESSAGE = 'Query read timeout';
-
-/**
  * TCP keepalive on every pooled socket, first probe after 10 s of silence
- * (Node then probes every 1 s, 10 times). Detects a dead peer under an idle
- * pooled client or a query whose bytes the server acknowledged before it
- * vanished, so pg errors the client out instead of waiting on the kernel.
+ * (Node then probes every 1 s, 10 times). It is the only bound here that
+ * works when the server never answers: a dead peer under an idle pooled
+ * client, or one that vanished after acknowledging a query's bytes, is found
+ * within about 20 s and pg errors the client out of the pool. It does not
+ * cover a query written to a peer that is already dead: unacknowledged data
+ * suspends keepalive, and the kernel retransmits for about 15 minutes on Linux
+ * before the socket errors. pg's `query_timeout` would bound that case but
+ * leaves the client stuck behind the lost answer, and every fix for that
+ * (destroying the socket) misfires on a query that was only queued and
+ * orphans the server backend, so it is not used (#1036; follow-up #1050).
  */
 export const DB_KEEPALIVE_INITIAL_DELAY_MS = 10_000;
-
-/**
- * The pg client class the pool builds. pg's `query_timeout` rejects the query
- * but leaves the client waiting for the answer it lost: every later query on
- * it queues behind that one. Outside a transaction pg-pool discards the client
- * on the error anyway; inside one, Prisma's `ROLLBACK` would queue behind the
- * dead query until its own read timeout (another 35 s, past the ALB's 60 s),
- * and the adapter would then hand the stuck client back to the pool for the
- * next request to fail on. Destroying the socket on a read timeout makes pg
- * fail what is queued at once ("Connection terminated unexpectedly") and mark
- * the client unusable, so the pool drops it and the next request gets a fresh
- * connection. pg does the same itself in pipeline mode. Covers the two ways
- * this stack calls `query`: a returned promise (the Prisma adapter) and a
- * trailing callback (`pool.query`).
- */
-export class ReadTimeoutClient extends pg.Client {
-  constructor(config?: string | pg.ClientConfig) {
-    super(config);
-    const query = pg.Client.prototype.query as (...args: unknown[]) => unknown;
-    const bounded = (...args: unknown[]): unknown => {
-      const callback = args[args.length - 1];
-      if (typeof callback === 'function') {
-        args[args.length - 1] = (err: unknown, res: unknown): void => {
-          this.dropOnReadTimeout(err);
-          (callback as (e: unknown, r: unknown) => void)(err, res);
-        };
-      }
-      const result = query.apply(this, args);
-      if (result instanceof Promise) {
-        result.catch((err: unknown) => this.dropOnReadTimeout(err));
-      }
-      return result;
-    };
-    this.query = bounded as pg.Client['query'];
-  }
-
-  private dropOnReadTimeout(err: unknown): void {
-    if (err instanceof Error && err.message === QUERY_READ_TIMEOUT_MESSAGE) {
-      this.connection.stream.destroy();
-    }
-  }
-}
 
 export interface DbTimeouts {
   statementTimeoutMs: number;
@@ -203,11 +153,9 @@ export interface DbPoolOptions {
   idleTimeoutMillis: number;
   keepAlive: true;
   keepAliveInitialDelayMillis: number;
-  query_timeout: number;
   statement_timeout: number;
   lock_timeout: number;
   idle_in_transaction_session_timeout: number;
-  Client: typeof ReadTimeoutClient;
 }
 
 /**
@@ -215,8 +163,9 @@ export interface DbPoolOptions {
  * `dbPoolOptionsFromEnv`, the real-database suites build a pool with short
  * values. The three server settings are pg's own config keys, which pg sends
  * as startup parameters in the StartupMessage (after the TLS handshake), so a
- * connection starts with them set and nothing runs unbounded first. `0` means
- * off in PostgreSQL and in pg's `query_timeout` alike (pg then sends nothing).
+ * connection starts with them set and nothing runs unbounded first. pg sends
+ * nothing for `0`, so the server's own default applies (none is set on RDS or
+ * locally, so that is off).
  */
 export function buildDbPoolOptions(timeouts: DbTimeouts = DB_TIMEOUTS): DbPoolOptions {
   const { statementTimeoutMs, lockTimeoutMs, idleInTransactionTimeoutMs } = timeouts;
@@ -226,21 +175,18 @@ export function buildDbPoolOptions(timeouts: DbTimeouts = DB_TIMEOUTS): DbPoolOp
     idleTimeoutMillis: DB_IDLE_TIMEOUT_MS,
     keepAlive: true,
     keepAliveInitialDelayMillis: DB_KEEPALIVE_INITIAL_DELAY_MS,
-    query_timeout: statementTimeoutMs > 0 ? statementTimeoutMs + DB_QUERY_TIMEOUT_MARGIN_MS : 0,
     statement_timeout: statementTimeoutMs,
     lock_timeout: lockTimeoutMs,
     idle_in_transaction_session_timeout: idleInTransactionTimeoutMs,
-    Client: ReadTimeoutClient,
   };
 }
 
 /**
  * The statement timeout for this process: `DB_STATEMENT_TIMEOUT_MS` when set,
- * else the default. `0` turns the statement and query timeouts off (the lock
- * and idle-in-transaction bounds stay); any other value must be an integer
- * within `DB_STATEMENT_TIMEOUT_MIN_MS`..`DB_STATEMENT_TIMEOUT_MAX_MS`.
- * Anything else throws at startup rather than running with a bound nobody
- * meant.
+ * else the default. `0` sends none (the server default applies: off today);
+ * any other value must be an integer within
+ * `DB_STATEMENT_TIMEOUT_MIN_MS`..`DB_STATEMENT_TIMEOUT_MAX_MS`. Anything else
+ * throws at startup rather than running with a bound nobody meant.
  */
 export function statementTimeoutFromEnv(raw: string | undefined): number {
   const value = raw?.trim() ?? '';

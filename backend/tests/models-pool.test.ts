@@ -12,13 +12,10 @@ import {
   DB_POOL_MAX,
   DB_IDLE_IN_TRANSACTION_TIMEOUT_MS,
   DB_KEEPALIVE_INITIAL_DELAY_MS,
-  DB_QUERY_TIMEOUT_MARGIN_MS,
   DB_STATEMENT_TIMEOUT_MAX_MS,
   DB_STATEMENT_TIMEOUT_MIN_MS,
   DB_STATEMENT_TIMEOUT_MS,
   POOL_TIMEOUT_MESSAGES,
-  QUERY_READ_TIMEOUT_MESSAGE,
-  ReadTimeoutClient,
   TRANSACTION_EXPIRED_MESSAGE,
   TRANSACTION_START_MESSAGE,
   classifyDbError,
@@ -60,11 +57,9 @@ describe('pg pool bounds', () => {
       idleTimeoutMillis: DB_IDLE_TIMEOUT_MS,
       keepAlive: true,
       keepAliveInitialDelayMillis: DB_KEEPALIVE_INITIAL_DELAY_MS,
-      query_timeout: DB_STATEMENT_TIMEOUT_MS + DB_QUERY_TIMEOUT_MARGIN_MS,
       statement_timeout: DB_STATEMENT_TIMEOUT_MS,
       lock_timeout: DB_LOCK_TIMEOUT_MS,
       idle_in_transaction_session_timeout: DB_IDLE_IN_TRANSACTION_TIMEOUT_MS,
-      Client: ReadTimeoutClient,
     });
   });
 
@@ -86,22 +81,26 @@ describe('pg pool bounds', () => {
       expect(DB_IDLE_IN_TRANSACTION_TIMEOUT_MS).toBeGreaterThan(FINALIZE_TRANSACTION_TIMEOUT_MS);
     });
 
-    it('answers inside the ALB idle timeout, pool wait included, and under the sweep stall report', () => {
+    it('ends one statement, pool wait included, inside the ALB idle timeout and the sweep stall report', () => {
       const ALB_IDLE_TIMEOUT_MS = 60_000; // AWS default; infra sets no idle_timeout
-      const worst = DB_CONNECTION_TIMEOUT_MS + DEFAULTS.query_timeout;
-      expect(DEFAULTS.query_timeout).toBeGreaterThan(DB_STATEMENT_TIMEOUT_MS);
+      const worst = DB_CONNECTION_TIMEOUT_MS + DEFAULTS.statement_timeout;
       expect(worst).toBeLessThan(ALB_IDLE_TIMEOUT_MS);
       expect(worst).toBeLessThan(REVOCATION_SWEEP_STALL_MS);
     });
 
-    it('turns the statement and query timeouts off together at 0, keeping the others', () => {
+    it('turns on TCP keepalive, the only bound for a server that never answers', () => {
+      expect(DEFAULTS.keepAlive).toBe(true);
+      // Detection (first probe + Node's 10 probes 1 s apart) well inside the stall report.
+      expect(DB_KEEPALIVE_INITIAL_DELAY_MS + 10_000).toBeLessThan(REVOCATION_SWEEP_STALL_MS);
+    });
+
+    it('turns only the statement timeout off at 0, keeping the others', () => {
       const off = buildDbPoolOptions({
         statementTimeoutMs: 0,
         lockTimeoutMs: DB_LOCK_TIMEOUT_MS,
         idleInTransactionTimeoutMs: DB_IDLE_IN_TRANSACTION_TIMEOUT_MS,
       });
       expect(off).toMatchObject({
-        query_timeout: 0,
         statement_timeout: 0,
         lock_timeout: DB_LOCK_TIMEOUT_MS,
         idle_in_transaction_session_timeout: DB_IDLE_IN_TRANSACTION_TIMEOUT_MS,
@@ -119,26 +118,21 @@ describe('pg pool bounds', () => {
       for (const bad of ['-1', '30s', '1.5', 'abc', '2000', String(DB_STATEMENT_TIMEOUT_MIN_MS - 1), tooHigh, '99999999999']) {
         expect(() => statementTimeoutFromEnv(bad)).toThrow('DB_STATEMENT_TIMEOUT_MS');
       }
-      // Inside Node's timer range (2^31 - 1 ms) and PostgreSQL's integer GUC range.
-      expect(DB_STATEMENT_TIMEOUT_MAX_MS + DB_QUERY_TIMEOUT_MARGIN_MS).toBeLessThan(2 ** 31 - 1);
+      // Inside PostgreSQL's integer GUC range.
+      expect(DB_STATEMENT_TIMEOUT_MAX_MS).toBeLessThan(2 ** 31 - 1);
     });
 
     // The keys must be ones the installed pg reads, or they are silently ignored.
-    it('uses option names and the message the installed pg still has', () => {
+    it('uses option names the installed pg still reads and sends', () => {
       const pgDir = path.resolve(__dirname, '../node_modules/pg/lib');
       const params = readFileSync(path.join(pgDir, 'connection-parameters.js'), 'utf8');
       const client = readFileSync(path.join(pgDir, 'client.js'), 'utf8');
-      for (const key of ['statement_timeout', 'lock_timeout', 'idle_in_transaction_session_timeout', 'query_timeout']) {
-        expect(params).toContain(`val('${key}', config, false)`);
-      }
       for (const key of ['statement_timeout', 'lock_timeout', 'idle_in_transaction_session_timeout']) {
+        expect(params).toContain(`val('${key}', config, false)`);
         expect(client).toContain(`data.${key} = String(parseInt(params.${key}, 10))`);
       }
       expect(client).toContain('keepAlive: c.keepAlive');
       expect(client).toContain('keepAliveInitialDelayMillis: c.keepAliveInitialDelayMillis');
-      expect(client).toContain(`new Error('${QUERY_READ_TIMEOUT_MESSAGE}')`);
-      const pool = readFileSync(path.resolve(__dirname, '../node_modules/pg-pool/index.js'), 'utf8');
-      expect(pool).toContain('this.options.Client');
     });
   });
 
@@ -146,7 +140,10 @@ describe('pg pool bounds', () => {
     const ORIGINAL = { DATABASE_URL: process.env.DATABASE_URL, DB_STATEMENT_TIMEOUT_MS: process.env.DB_STATEMENT_TIMEOUT_MS };
     process.env.DATABASE_URL = 'postgresql://postgres:pw@localhost:5432/bball_tracker';
     delete process.env.DB_STATEMENT_TIMEOUT_MS;
-    Object.assign(process.env, env);
+    for (const [key, value] of Object.entries(env)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
     const PrismaPg = jest.fn();
     try {
       jest.isolateModules(() => {
@@ -166,16 +163,12 @@ describe('pg pool bounds', () => {
   };
 
   it('hands the bounds to PrismaPg', () => {
-    const config = loadModels({}).mock.calls[0][0] as Record<string, unknown>;
-    const { Client, ...rest } = DEFAULTS;
-    expect(config).toEqual(expect.objectContaining(rest));
-    // isolateModules loaded its own copy of the class; same name, same pool slot.
-    expect((config.Client as { name: string }).name).toBe(Client.name);
+    expect(loadModels({})).toHaveBeenCalledWith(expect.objectContaining(DEFAULTS));
   });
 
   it('lets DB_STATEMENT_TIMEOUT_MS raise the statement bound for one process (#1036)', () => {
     const config = loadModels({ DB_STATEMENT_TIMEOUT_MS: '0' }).mock.calls[0][0] as Record<string, unknown>;
-    expect(config).toMatchObject({ query_timeout: 0, statement_timeout: 0, lock_timeout: DB_LOCK_TIMEOUT_MS });
+    expect(config).toMatchObject({ statement_timeout: 0, lock_timeout: DB_LOCK_TIMEOUT_MS });
   });
 });
 
