@@ -1092,7 +1092,8 @@
       "count": "Número de entrenamientos",
       "timeZoneNote": "Las horas están en tu zona horaria ({{zone}}).",
       "submitOne": "Programar entrenamiento",
-      "submitSeries": "Programar entrenamientos"
+      "submitSeries": "Programar entrenamientos",
+      "practiceZoneNote": "La fecha y la hora están en la zona horaria del entrenamiento ({{zone}}), como las ve el equipo."
     },
     "errors": {
       "weekdaysRequired": "Elige al menos un día",

@@ -150,10 +150,10 @@ export default function PracticeDetailScreen() {
     submit.mutate(
       { practiceId: practice.id, status: myRow.status, playerId, comment: comment.trim() },
       {
-        onSuccess: () => {
-          setDraft(null);
-          toast.showToast(t('practices.noteSaved'), 'success');
-        },
+        // The draft stays: it is what was saved, so the field never shows the
+        // old note while (or if) the refetch is in flight; once the stored
+        // note matches it, Save note hides.
+        onSuccess: () => toast.showToast(t('practices.noteSaved'), 'success'),
         onError: (err) => toast.showToast(getApiErrorMessage(err, t('practices.errors.answerFailed')), 'error'),
       }
     );
@@ -191,20 +191,22 @@ export default function PracticeDetailScreen() {
     }
   };
 
+  // ActionMenu closes itself before it runs an item.
   const menuItems: ActionMenuItem[] = [];
-  // A session of a cancelled series is history: the API refuses to edit it.
-  const editable = !cancelled && (!series || seriesActive);
-  if (editable) {
+  // This session is editable while scheduled and in no cancelled series (the
+  // API refuses edits to history); the series edit only needs the series
+  // active, so a cancelled occurrence still reaches it.
+  if (!cancelled && (!series || seriesActive)) {
     menuItems.push({
       label: series ? t('practices.menu.editOne') : t('practices.menu.edit'),
       onPress: () => router.push(`/practices/${practice.id}/edit?scope=one`),
     });
-    if (seriesActive) {
-      menuItems.push({
-        label: t('practices.menu.editSeries'),
-        onPress: () => router.push(`/practices/${practice.id}/edit?scope=series`),
-      });
-    }
+  }
+  if (seriesActive) {
+    menuItems.push({
+      label: t('practices.menu.editSeries'),
+      onPress: () => router.push(`/practices/${practice.id}/edit?scope=series`),
+    });
   }
   if (!cancelled) {
     menuItems.push({
@@ -230,18 +232,10 @@ export default function PracticeDetailScreen() {
     onPress: () => setConfirm('delete'),
   });
 
-  const runMenuItem = (item: ActionMenuItem): ActionMenuItem => ({
-    ...item,
-    onPress: () => {
-      setMenuOpen(false);
-      item.onPress();
-    },
-  });
-
   const confirmItems: ActionMenuItem[] =
     confirm === 'series'
-      ? [{ label: t('practices.menu.cancelSeries'), destructive: true, onPress: () => { setConfirm(null); confirmCancelSeries(); } }]
-      : [{ label: t('practices.menu.deleteConfirm'), destructive: true, onPress: () => { setConfirm(null); confirmDelete(); } }];
+      ? [{ label: t('practices.menu.cancelSeries'), destructive: true, onPress: confirmCancelSeries }]
+      : [{ label: t('practices.menu.deleteConfirm'), destructive: true, onPress: confirmDelete }];
 
   const members = sortRosterMembers(team?.members ?? [], 'name');
   const rowsByPlayer = new Map((availabilityData?.availability ?? []).map((row) => [row.userId, row]));
@@ -497,7 +491,7 @@ export default function PracticeDetailScreen() {
       <ActionMenu
         visible={menuOpen}
         title={practiceTitle(practice)}
-        items={menuItems.map(runMenuItem)}
+        items={menuItems}
         onClose={() => setMenuOpen(false)}
       />
       <ActionMenu

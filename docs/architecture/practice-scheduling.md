@@ -247,13 +247,17 @@ unchanged.
   zone, so the session keeps its own. Cancel one asks for an optional reason inline; cancel series
   and delete confirm in a second `ActionMenu` that says what goes (upcoming sessions and their
   answers; past ones stay), then return to the schedule. A session of a cancelled series offers
-  Delete only (the API refuses edits).
+  Delete only (the API refuses edits); a cancelled occurrence of an active series still offers
+  **Edit all future practices**.
 - **Time zones**: every practice time goes through `utils/format-date.ts` with the session's
   `timezone` (`formatShortDate` / `formatLongDate` / `formatClockTime` take `{ timeZone }`); when it
   is not the device zone, the zone's short name follows the range ("6:00 PM – 7:30 PM EST"), so a
   traveller sees the coach's wall time and knows it is not theirs. An unknown zone name falls back
-  to the device zone instead of throwing. The edit form's pickers show device wall time and name
-  the device zone when it differs.
+  to the device zone instead of throwing. The edit form works on the practice's own wall clock in
+  its own zone (`format-date.ts#wallClockIn` / `instantFromWallClock`), whatever the device zone,
+  and names that zone when it differs: moving an 18:00 New York practice across a daylight-saving
+  change keeps it at 18:00 New York even when edited from Phoenix. An untouched start is sent back
+  as the stored instant.
 - **Hooks** (`hooks/usePractices.ts`, keys `hooks/query-keys.ts#practiceKeys`): every schedule
   mutation invalidates `practiceKeys.all`; an availability answer only that practice's detail and
   answers (list rows carry none); delete and series cancel mark the per-session queries (detail,

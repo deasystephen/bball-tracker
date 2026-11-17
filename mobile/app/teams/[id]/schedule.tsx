@@ -36,7 +36,7 @@ import { useTeam, hasTeamPermission } from '../../../hooks/useTeams';
 import { useGoBack } from '../../../hooks/useGoBack';
 import { useTheme } from '../../../hooks/useTheme';
 import { useAuthUser } from '../../../store/auth-store';
-import { useTranslation, i18n } from '../../../i18n';
+import { useTranslation } from '../../../i18n';
 import { spacing, borderRadius } from '../../../theme';
 import { getHorizontalPadding } from '../../../utils/responsive';
 import { formatClockTime, formatShortDate } from '../../../utils/format-date';
@@ -47,25 +47,12 @@ import {
   formatPracticeTimeRange,
   type ScheduleItem,
 } from '../../../utils/practice-schedule';
-import type { GameStatus } from '../../../types/game';
+import { getStatusLabel as gameStatusLabel } from '../../../components/game/GameCard';
 
 /** The most games one schedule load asks for (the API's maximum page). */
 const SCHEDULE_GAMES_LIMIT = 100;
 /** The most practices one schedule load asks for (the API's maximum page). */
 const SCHEDULE_PRACTICES_LIMIT = 200;
-
-function gameStatusLabel(status: GameStatus): string {
-  switch (status) {
-    case 'IN_PROGRESS':
-      return i18n.t('games.statusLive');
-    case 'FINISHED':
-      return i18n.t('games.statusFinal');
-    case 'CANCELLED':
-      return i18n.t('games.cancelled');
-    default:
-      return i18n.t('games.scheduled');
-  }
-}
 
 /** Midnight at the start of the device's today, and the end of the window, as ISO instants. */
 function scheduleWindow(): { from: string; to: string } {
@@ -118,13 +105,15 @@ export default function TeamScheduleScreen() {
   };
 
   const loading = gamesQuery.isLoading || practicesQuery.isLoading;
-  const failed = (gamesQuery.error && !gamesQuery.data) || (practicesQuery.error && !practicesQuery.data);
+  // Either list failing with nothing to show fails the schedule (half a
+  // schedule would read as complete); the message is that list's own.
+  const loadError =
+    (!gamesQuery.data && gamesQuery.error) || (!practicesQuery.data && practicesQuery.error) || null;
 
   if (loading) {
     return <LoadingSpinner message={t('practices.loadingSchedule')} fullScreen />;
   }
-  const loadError = gamesQuery.error ?? practicesQuery.error;
-  if (failed) {
+  if (loadError) {
     return (
       <ErrorState
         message={loadError instanceof Error ? loadError.message : t('practices.scheduleLoadFailed')}

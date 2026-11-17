@@ -26,6 +26,7 @@ import {
   Input,
   Button,
   LoadingSpinner,
+  ErrorState,
   Card,
   SortPills,
 } from '../../components';
@@ -100,13 +101,15 @@ export default function CreatePracticeScreen() {
   const toast = useToast();
   const user = useAuthUser();
 
-  const { data: team, isLoading: teamLoading } = useTeam(teamId);
+  const { data: team, error: teamError, refetch: refetchTeam } = useTeam(teamId);
   const createPractice = useCreatePractice();
   const createSeries = useCreatePracticeSeries();
   const saving = createPractice.isPending || createSeries.isPending;
 
+  // Decided only once the team is loaded: a failed team load is an error
+  // below, never a permission refusal.
   const canManageTeam = hasTeamPermission(team, user?.id, 'canManageTeam', user?.role, user?.leagueAdminOf);
-  const allowed = useAccessGuard(!teamLoading && !!user, canManageTeam, t('practices.notAllowed'), {
+  const allowed = useAccessGuard(!!team && !!user, canManageTeam, t('practices.notAllowed'), {
     fallback: teamId ? `/teams/${teamId}` : '/(tabs)/teams',
   });
 
@@ -219,7 +222,16 @@ export default function CreatePracticeScreen() {
     }
   };
 
-  if (teamLoading || !allowed) {
+  if (!team && teamError) {
+    return (
+      <ErrorState
+        message={teamError instanceof Error ? teamError.message : t('teams.notFound')}
+        onRetry={refetchTeam}
+        onBack={goBack}
+      />
+    );
+  }
+  if (!team || !allowed) {
     return <LoadingSpinner message={t('common.loading')} fullScreen />;
   }
 

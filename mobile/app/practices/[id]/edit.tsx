@@ -10,10 +10,13 @@
  *   that was not changed on its own. Dates and times cannot change for a
  *   series (cancel it and create a new one); the screen says so.
  *
- * Only changed fields are sent. A new start is an instant and is sent without
- * a zone, so the session keeps the zone it was scheduled in; the pickers show
- * the device's wall time, and the screen names the device zone when it is
- * not the session's.
+ * Date and time are the practice's own wall time in its own zone, as the
+ * detail screen shows them, whatever zone the device is in: the pickers edit
+ * a `WallClock`, and the new start is the instant that clock shows in
+ * `practice.timezone` (`instantFromWallClock`), so moving an 18:00 practice
+ * across a daylight-saving change keeps it at 18:00 for the team. The zone is
+ * named when it is not the device's. Only changed fields are sent; the start
+ * goes without a zone, so the session keeps its own.
  */
 
 import React, { useState } from 'react';
@@ -46,8 +49,14 @@ import { useTranslation } from '../../../i18n';
 import { spacing } from '../../../theme';
 import { getHorizontalPadding } from '../../../utils/responsive';
 import { MIN_TOUCH_TARGET } from '../../../utils/touch-target';
-import { deviceTimeZone, formatClockTime, formatLongDate, isOtherTimeZone } from '../../../utils/format-date';
-import { combineDateAndTime } from '../../../utils/practice-schedule';
+import {
+  formatClockTime,
+  formatLongDate,
+  instantFromWallClock,
+  isOtherTimeZone,
+  wallClockIn,
+  type WallClock,
+} from '../../../utils/format-date';
 import type { PracticeDetailsInput, UpdatePracticeInput } from '../../../types/practice';
 
 function detailsOf(source: {
@@ -74,6 +83,14 @@ function changedDetails(before: PracticeDetailsValue, after: PracticeDetailsValu
   return patch;
 }
 
+/**
+ * The picker works on a device `Date`; it only carries the wall clock across
+ * (its own zone never matters, its fields are read back as they were set).
+ */
+function toPickerDate(wall: WallClock): Date {
+  return new Date(wall.year, wall.month - 1, wall.day, wall.hour, wall.minute);
+}
+
 export default function EditPracticeScreen() {
   const { id, scope } = useLocalSearchParams<{ id: string; scope?: string }>();
   const seriesScope = scope === 'series';
@@ -85,63 +102,71 @@ export default function EditPracticeScreen() {
   const toast = useToast();
   const user = useAuthUser();
 
-  const { data: practice, isLoading, error, refetch } = usePractice(id);
+  const practiceQuery = usePractice(id);
+  const practice = practiceQuery.data;
   const seriesQuery = usePracticeSeries(seriesScope ? practice?.seriesId : null);
-  const { data: team, isLoading: teamLoading } = useTeam(practice?.teamId ?? '');
+  const teamQuery = useTeam(practice?.teamId ?? '');
+  const team = teamQuery.data;
   const updateOne = useUpdatePractice();
   const updateSeries = useUpdatePracticeSeries();
   const saving = updateOne.isPending || updateSeries.isPending;
 
+  // Decided only once the team is loaded: a failed team load is an error
+  // below, never a permission refusal.
   const canManageTeam = hasTeamPermission(team, user?.id, 'canManageTeam', user?.role, user?.leagueAdminOf);
-  const allowed = useAccessGuard(!!practice && !teamLoading && !!user, canManageTeam, t('practices.notAllowed'), {
+  const allowed = useAccessGuard(!!team && !!user, canManageTeam, t('practices.notAllowed'), {
     fallback: `/practices/${id}`,
   });
 
-  // The form shows the session ("this one") or the series ("all future") as
-  // loaded, with the user's edits on top; only edited fields are sent.
-  const source = seriesScope ? seriesQuery.data : practice;
+  // The loaded session ("this one") or series ("all future"), with the user's edits on top.
   const [edits, setEdits] = useState<Partial<PracticeDetailsValue>>({});
-  const [startEdit, setStartEdit] = useState<Date | null>(null);
+  const [wallEdit, setWallEdit] = useState<WallClock | null>(null);
   const [durationEdit, setDurationEdit] = useState<number | null>(null);
   const [picker, setPicker] = useState<'date' | 'time' | null>(null);
 
-  const loadError = error || (seriesScope && seriesQuery.error);
-  if (loadError && !practice) {
+  // One failure path: whichever load failed with nothing to show.
+  const failed =
+    (!practice && practiceQuery.error) ||
+    (!!practice && !team && teamQuery.error) ||
+    (seriesScope && !seriesQuery.data && seriesQuery.error);
+  if (failed) {
+    const retry = () => {
+      if (practiceQuery.error) practiceQuery.refetch();
+      if (teamQuery.error) teamQuery.refetch();
+      if (seriesQuery.error) seriesQuery.refetch();
+    };
     return (
       <ErrorState
-        message={loadError instanceof Error ? loadError.message : t('practices.notFound')}
-        onRetry={refetch}
+        message={failed instanceof Error ? failed.message : t('practices.notFound')}
+        onRetry={retry}
         onBack={goBack}
       />
     );
   }
-  if (seriesScope && seriesQuery.error && !seriesQuery.data) {
-    return (
-      <ErrorState
-        message={seriesQuery.error instanceof Error ? seriesQuery.error.message : t('practices.notFound')}
-        onRetry={() => seriesQuery.refetch()}
-        onBack={goBack}
-      />
-    );
-  }
-  // "All future" on a practice that belongs to no series (a stale link): say so.
+  // "All future" on a practice that belongs to no series (a stale link).
   if (seriesScope && practice && !practice.seriesId) {
     return <ErrorState message={t('practices.errors.seriesMissing')} onBack={goBack} />;
   }
-  if (isLoading || !allowed || !practice || !source) {
+  const source = seriesScope ? seriesQuery.data : practice;
+  if (!practice || !source || !allowed) {
     return <LoadingSpinner message={t('common.loading')} fullScreen />;
   }
 
+  const timeZone = practice.timezone;
   const initial = detailsOf(source);
   const details: PracticeDetailsValue = { ...initial, ...edits };
-  const start = startEdit ?? new Date(practice.startsAt);
+  const wall = wallEdit ?? wallClockIn(practice.startsAt, timeZone);
+  // Untouched, the start is the stored instant itself (a repeated autumn hour
+  // has two instants for one wall time; the round trip would pick the first).
+  const start = wallEdit ? instantFromWallClock(wallEdit, timeZone) : new Date(practice.startsAt);
   const duration = durationEdit ?? practice.durationMinutes;
+  const dateText = formatLongDate(start, { timeZone });
+  const timeText = formatClockTime(start, { timeZone });
 
   const handleSave = async () => {
     const patch = changedDetails(initial, details);
     try {
-      if (seriesScope) {
-        if (!practice.seriesId) return;
+      if (seriesScope && practice.seriesId) {
         if (Object.keys(patch).length > 0) {
           const result = await updateSeries.mutateAsync({ seriesId: practice.seriesId, data: patch });
           toast.showToast(t('practices.seriesUpdatedToast', { count: result.updatedSessions ?? 0 }), 'success');
@@ -161,9 +186,19 @@ export default function EditPracticeScreen() {
     }
   };
 
-  const device = deviceTimeZone();
-  // At the practice's own start: two zones can agree today and differ then (daylight saving).
-  const otherZone = isOtherTimeZone(practice.timezone, start);
+  const openPicker = (mode: 'date' | 'time') => {
+    Keyboard.dismiss();
+    setPicker(mode);
+  };
+
+  const onPicked = (value: Date) => {
+    setWallEdit(
+      picker === 'time'
+        ? { ...wall, hour: value.getHours(), minute: value.getMinutes() }
+        : { ...wall, year: value.getFullYear(), month: value.getMonth() + 1, day: value.getDate() }
+    );
+    setPicker(null);
+  };
 
   return (
     <ThemedView variant="background" style={styles.container}>
@@ -176,7 +211,11 @@ export default function EditPracticeScreen() {
         <BackButton onPress={goBack} style={styles.backButton} icon="close" />
         <View style={styles.headerContent}>
           <ThemedText variant="h3" heading numberOfLines={1}>
-            {seriesScope ? t('practices.menu.editSeries') : practice.seriesId ? t('practices.menu.editOne') : t('practices.menu.edit')}
+            {seriesScope
+              ? t('practices.menu.editSeries')
+              : practice.seriesId
+                ? t('practices.menu.editOne')
+                : t('practices.menu.edit')}
           </ThemedText>
         </View>
         <View style={styles.headerSpacer} />
@@ -196,38 +235,35 @@ export default function EditPracticeScreen() {
           </ThemedText>
 
           <Card variant="default" style={styles.section}>
-            <PracticeDetailsFields value={details} onChange={(patch) => setEdits((current) => ({ ...current, ...patch }))} />
+            <PracticeDetailsFields
+              value={details}
+              onChange={(patch) => setEdits((current) => ({ ...current, ...patch }))}
+            />
           </Card>
 
           {!seriesScope ? (
             <Card variant="default" style={styles.section}>
               <PickerRow
                 icon="calendar"
-                text={formatLongDate(start)}
-                accessibilityLabel={t('practices.form.dateA11y', { date: formatLongDate(start) })}
-                onPress={() => {
-                  Keyboard.dismiss();
-                  setPicker('date');
-                }}
+                text={dateText}
+                accessibilityLabel={t('practices.form.dateA11y', { date: dateText })}
+                onPress={() => openPicker('date')}
                 testID="practice-date-button"
               />
               <PickerRow
                 icon="time"
-                text={formatClockTime(start)}
-                accessibilityLabel={t('practices.form.startTimeA11y', { time: formatClockTime(start) })}
-                onPress={() => {
-                  Keyboard.dismiss();
-                  setPicker('time');
-                }}
+                text={timeText}
+                accessibilityLabel={t('practices.form.startTimeA11y', { time: timeText })}
+                onPress={() => openPicker('time')}
                 testID="practice-time-button"
               />
               <ThemedText variant="captionBold" color="textSecondary" style={styles.label}>
                 {t('practices.form.duration')}
               </ThemedText>
               <DurationPills value={duration} onChange={setDurationEdit} />
-              {otherZone && device ? (
-                <ThemedText variant="footnote" color="textTertiary">
-                  {t('practices.form.timeZoneNote', { zone: device })}
+              {isOtherTimeZone(timeZone, start) ? (
+                <ThemedText variant="footnote" color="textTertiary" testID="practice-edit-zone">
+                  {t('practices.form.practiceZoneNote', { zone: timeZone })}
                 </ThemedText>
               ) : null}
             </Card>
@@ -251,12 +287,9 @@ export default function EditPracticeScreen() {
       <DateTimePickerSheet
         visible={picker !== null}
         mode={picker ?? 'date'}
-        value={start}
+        value={toPickerDate(wall)}
         title={picker === 'time' ? t('practices.form.startTime') : t('practices.form.date')}
-        onConfirm={(value) => {
-          setStartEdit(picker === 'time' ? combineDateAndTime(start, value) : combineDateAndTime(value, start));
-          setPicker(null);
-        }}
+        onConfirm={onPicked}
         onCancel={() => setPicker(null)}
       />
     </ThemedView>

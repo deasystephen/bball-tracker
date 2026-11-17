@@ -1092,7 +1092,8 @@
       "count": "Number of practices",
       "timeZoneNote": "Times are in your time zone ({{zone}}).",
       "submitOne": "Schedule practice",
-      "submitSeries": "Schedule practices"
+      "submitSeries": "Schedule practices",
+      "practiceZoneNote": "Date and time are in the practice's time zone ({{zone}}), as the team sees them."
     },
     "errors": {
       "weekdaysRequired": "Pick at least one day",

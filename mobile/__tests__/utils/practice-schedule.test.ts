@@ -23,6 +23,8 @@ import {
   formatWeekdayName,
   formatZoneName,
   isOtherTimeZone,
+  wallClockIn,
+  instantFromWallClock,
 } from '../../utils/format-date';
 import { i18n } from '../../i18n';
 import type { Game } from '../../types/game';
@@ -168,6 +170,31 @@ describe('time zones', () => {
     expect(formatClockTime('2026-12-01T23:00:00Z', { timeZone: 'Not/AZone' })).toBe(
       formatClockTime('2026-12-01T23:00:00Z')
     );
+  });
+});
+
+describe('a practice\'s own wall clock', () => {
+  it('reads the clock in the practice zone', () => {
+    expect(wallClockIn('2026-10-30T22:00:00Z', 'America/New_York')).toEqual({
+      year: 2026,
+      month: 10,
+      day: 30,
+      hour: 18,
+      minute: 0,
+    });
+    expect(wallClockIn('2026-12-02T04:30:00Z', 'America/New_York').day).toBe(1);
+  });
+
+  it('keeps 18:00 when the date moves across a daylight-saving change', () => {
+    // Oct 30 18:00 EDT is 22:00Z; Nov 6 18:00 EST is 23:00Z.
+    const wall = { ...wallClockIn('2026-10-30T22:00:00Z', 'America/New_York'), day: 6, month: 11 };
+    expect(instantFromWallClock(wall, 'America/New_York').toISOString()).toBe('2026-11-06T23:00:00.000Z');
+  });
+
+  it('moves a time inside the spring-forward gap past the jump', () => {
+    // 2027-03-14 02:30 does not exist in New York; 03:30 EDT is 07:30Z.
+    const instant = instantFromWallClock({ year: 2027, month: 3, day: 14, hour: 2, minute: 30 }, 'America/New_York');
+    expect(['2027-03-14T07:30:00.000Z', '2027-03-14T06:30:00.000Z']).toContain(instant.toISOString());
   });
 });
 

@@ -424,6 +424,14 @@ describe('practice detail: the coach', () => {
     expect(mockRouter.back).toHaveBeenCalled();
   });
 
+  it('a cancelled occurrence of an active series still reaches "Edit all future"', () => {
+    mockPractice = practice({ seriesId: 'series-1', series: SERIES_INFO, status: 'CANCELLED' });
+    const view = render(<PracticeDetailScreen />);
+    fireEvent.press(view.getByLabelText('Practice options'));
+    expect(view.queryByText('Edit this practice')).toBeNull();
+    expect(view.getByText('Edit all future practices')).toBeTruthy();
+  });
+
   it('a session of a cancelled series can be deleted but not edited', () => {
     mockPractice = practice({ seriesId: 'series-1', series: { ...SERIES_INFO, cancelledAt: '2026-11-10T00:00:00Z' } });
     const view = render(<PracticeDetailScreen />);
@@ -546,6 +554,23 @@ describe('edit practice', () => {
       fireEvent.press(view.getByTestId('practice-edit-save'));
     });
     expect(mockUpdateOne).toHaveBeenCalledWith({ practiceId: 'p1', data: { location: 'Gym B', durationMinutes: 60 } });
+  });
+
+  it('edits the time as the practice zone\'s wall clock, whatever the device zone', async () => {
+    mockParams = { id: 'p1', scope: 'one' };
+    // 18:00 in New York on Oct 30 (EDT).
+    mockPractice = practice({ startsAt: '2026-10-30T22:00:00Z', timezone: 'America/New_York' });
+    const view = render(<EditPracticeScreen />);
+    expect(view.getByTestId('practice-time-button').props.accessibilityLabel).toMatch(/^Start time: 6:00\sPM$/);
+    // Move it a week, across the end of daylight saving: still 18:00 New York.
+    const sheet = view.UNSAFE_getByProps({ mode: 'date' });
+    await act(async () => {
+      sheet.props.onConfirm(new Date(2026, 10, 6, 9, 0));
+    });
+    await act(async () => {
+      fireEvent.press(view.getByTestId('practice-edit-save'));
+    });
+    expect(mockUpdateOne).toHaveBeenCalledWith({ practiceId: 'p1', data: { startsAt: '2026-11-06T23:00:00.000Z' } });
   });
 
   it('"all future" on a practice in no series says so instead of loading forever', () => {

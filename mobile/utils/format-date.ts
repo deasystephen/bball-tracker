@@ -125,6 +125,74 @@ export function formatZoneName(value: Date | string, timeZone: string): string {
   }
 }
 
+/** A wall-clock reading: what a clock in some zone shows. `month` is 1–12. */
+export interface WallClock {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+}
+
+/**
+ * What a clock in `timeZone` shows at that instant (a practice's own wall
+ * time, #33). Not display text: it is parsed from a fixed `en-US` 24-hour
+ * form. A zone the runtime does not know reads as the device's clock.
+ */
+export function wallClockIn(value: Date | string, timeZone: string): WallClock {
+  const instant = toDate(value);
+  const options: Intl.DateTimeFormatOptions = {
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: 'numeric',
+    hour12: false,
+  };
+  let text: string;
+  try {
+    text = instant.toLocaleString('en-US', { ...options, timeZone });
+  } catch {
+    text = instant.toLocaleString('en-US', options);
+  }
+  // "11/6/2026, 18:05"; some runtimes write midnight as 24.
+  const match = /(\d+)\/(\d+)\/(\d+),?\s+(\d+):(\d+)/.exec(text);
+  if (!match) {
+    return {
+      year: instant.getFullYear(),
+      month: instant.getMonth() + 1,
+      day: instant.getDate(),
+      hour: instant.getHours(),
+      minute: instant.getMinutes(),
+    };
+  }
+  return {
+    year: Number(match[3]),
+    month: Number(match[1]),
+    day: Number(match[2]),
+    hour: Number(match[4]) % 24,
+    minute: Number(match[5]),
+  };
+}
+
+/**
+ * The instant at which a clock in `timeZone` shows `wall`: the inverse of
+ * `wallClockIn`, using that zone's offset on that day (so 18:00 stays 18:00
+ * across daylight saving). A time skipped by a spring-forward lands just
+ * after the jump, as on the server.
+ */
+export function instantFromWallClock(wall: WallClock, timeZone: string): Date {
+  const target = Date.UTC(wall.year, wall.month - 1, wall.day, wall.hour, wall.minute);
+  let guess = target;
+  for (let i = 0; i < 3; i += 1) {
+    const shown = wallClockIn(new Date(guess), timeZone);
+    const shownUtc = Date.UTC(shown.year, shown.month - 1, shown.day, shown.hour, shown.minute);
+    if (shownUtc === target) break;
+    guess += target - shownUtc;
+  }
+  return new Date(guess);
+}
+
 /** Short game date, e.g. "Sat, Oct 3" / "Sáb, 3 oct" (GameCard). Starts its label, so capitalized. */
 export function formatShortDate(value: Date | string, options: ZoneOption = {}): string {
   const locale = deviceLocale();

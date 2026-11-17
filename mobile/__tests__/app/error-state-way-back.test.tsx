@@ -35,6 +35,7 @@ import TeamStatsScreen from '../../app/teams/[id]/stats';
 import TeamScheduleScreen from '../../app/teams/[id]/schedule';
 import PracticeDetailScreen from '../../app/practices/[id]/index';
 import EditPracticeScreen from '../../app/practices/[id]/edit';
+import CreatePracticeScreen from '../../app/practices/create';
 import { apiClient } from '../../services/api-client';
 import { useAuthStore } from '../../store/auth-store';
 
@@ -109,6 +110,8 @@ const SCREENS: ScreenCase[] = [
     params: { id: 'p1', scope: 'one' },
     fallback: '/practices/p1',
   },
+  // The team failed to load: an error with a way back, never "not allowed".
+  { name: 'practices/create', Screen: CreatePracticeScreen, params: { teamId: 't1' }, fallback: '/teams/t1/schedule' },
 ];
 
 function renderScreen(Screen: React.ComponentType): ReturnType<typeof render> {
