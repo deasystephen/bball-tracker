@@ -244,10 +244,17 @@ current score so a client can drop events and still converge.
     and reports the first failure of a streak to Sentry (`flow: 'socket-revocation-sweep'`). A
     cut that throws is logged at `error` and reported once per socket (`flow:
     'socket-revocation'`), does not stop the others, and is retried by every later sweep. A tick
-    is skipped while the previous sweep runs, so at most one query is in flight. The pool has no
-    statement timeout, so a query that never settled would stop the sweep with it (a hazard every
-    REST request shares; the expiry re-check still bounds such a socket): a sweep still running
-    after `REVOCATION_SWEEP_STALL_MS` (60 s) is reported once, at `error` and to Sentry
+    is skipped while the previous sweep runs, so at most one query is in flight. Since #1036 the
+    pool bounds a started query (`models/pool-config.ts`, `backend-services.md#database-pool-modelspool-configts`):
+    PostgreSQL cancels a statement at `statement_timeout` (30 s, lock waits included), an ordinary
+    failed sweep (the failure path above, sockets kept), and the next tick runs, so a slow or
+    lock-blocked chunk query ends the sweep within about 34 s (with the 3.5 s pool wait) rather
+    than stopping it. TCP keepalive errors a connection whose server vanished after taking the
+    query within about 20 s. Still unbounded: a query written to a server that is already gone (a
+    half-open connection in the seconds after a failover), which waits out the kernel's TCP
+    retransmission, about 15 minutes. Chunks run one after another, each with its own bound, so
+    several slow chunks that all succeed can also pass `REVOCATION_SWEEP_STALL_MS` (60 s). A
+    sweep still running then is reported once, at `error` and to Sentry
     (`Socket revocation sweep stalled`). Each start of the timer keeps its own in-flight marker, and
     a query that fails after its timer was stopped (the shutdown routine stops it before the Prisma
     disconnect) is dropped silently rather than reported.
@@ -258,7 +265,9 @@ current score so a client can drop events and still converge.
   - **Bounds.** In-process (the routes): at once for every socket open at the commit; a handshake
     that read the row just before the commit and completes just after it is caught by the next
     sweep, within about 10 s. Operator script, Redis up or down: at most one sweep interval plus
-    the query, about 10 s; the sweep never touches Redis, so a Redis outage changes nothing. During
+    the query, about 10 s (about 45 s when a slow query runs into `statement_timeout` and the
+    next sweep catches it, longer only in the half-open case above); the sweep
+    never touches Redis, so a Redis outage changes nothing. During
     a database
     outage the sweep keeps sockets (as the re-check does), so the bound is then the first sweep
     after recovery; REST is down too meanwhile.

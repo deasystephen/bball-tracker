@@ -221,10 +221,14 @@ export function installSocketRevocation(io: SocketServer): void {
  * Start the periodic sweep for `io` (a second call replaces the first). The
  * timer is unref'd, so it never keeps the process alive, and a tick is
  * skipped while the previous sweep is still running: one query in flight at
- * most. A query that never settles would stop the sweep with it (the pool has
- * no statement timeout, a hazard every REST request shares; the expiry
- * re-check in `game-events.ts` still bounds such a socket), so a sweep running
- * past `REVOCATION_SWEEP_STALL_MS` is reported, once, at error and to Sentry.
+ * most. The pool bounds the query where the server answers (#1036,
+ * `models/pool-config.ts`: PostgreSQL's `statement_timeout`, TCP keepalive),
+ * so a slow chunk query fails the sweep within about 34 s (3.5 s pool wait
+ * plus 30 s) and the next tick runs. A query written to a server that is
+ * already gone (half-open after a failover) is not bounded, and the expiry
+ * re-check in `game-events.ts` still bounds such a socket. A sweep running
+ * past `REVOCATION_SWEEP_STALL_MS` (that case, several slow chunks in a row,
+ * or a defect) is reported, once, at error and to Sentry.
  */
 export function startRevocationSweep(io: SocketServer, intervalMs = REVOCATION_SWEEP_INTERVAL_MS): void {
   stopRevocationSweep();

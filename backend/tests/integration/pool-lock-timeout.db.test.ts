@@ -1,6 +1,6 @@
 /**
  * Real-database proof that every pooled connection carries the lock_timeout
- * `models/pool-config.ts#DB_POOL_OPTIONS` sets as a pg startup option (#944),
+ * `models/pool-config.ts#buildDbPoolOptions` sets as a pg startup parameter (#944),
  * outside and inside a transaction. The cancel itself is proven per lock site
  * by the supersede, team-staff, account-deletion and stats-finalize suites.
  */

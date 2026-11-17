@@ -17,6 +17,8 @@
  * `src/models` itself is mocked.
  */
 
+import type { PoolConfig } from 'pg';
+
 /**
  * Per-task client ceiling (pg's implicit default, now explicit). A rolling
  * deploy briefly runs two tasks plus `prisma migrate deploy`, so the app's
@@ -48,8 +50,8 @@ export const DB_IDLE_TIMEOUT_MS = 30_000;
 /**
  * How long any statement may wait for a row or table lock before PostgreSQL
  * cancels it (SQLSTATE 55P03, `classifyDbError` → the retryable 503
- * `transaction_timeout`). Set once, for every pooled connection, as the
- * `lock_timeout` startup option below (#944; #908 and #934 had set it per
+ * `transaction_timeout`). Set once, for every pooled connection, as pg's
+ * `lock_timeout` startup parameter below (#944; #908 and #934 had set it per
  * transaction with `SET LOCAL`). Under Prisma's 5 s interactive-transaction
  * timeout so PostgreSQL gives up first and the connection is freed: Prisma's
  * timeout alone only stops Prisma waiting while the statement stays blocked
@@ -68,13 +70,148 @@ export const DB_IDLE_TIMEOUT_MS = 30_000;
  */
 export const DB_LOCK_TIMEOUT_MS = 4_000;
 
-export const DB_POOL_OPTIONS = {
-  max: DB_POOL_MAX,
-  connectionTimeoutMillis: DB_CONNECTION_TIMEOUT_MS,
-  idleTimeoutMillis: DB_IDLE_TIMEOUT_MS,
-  /** pg passes this to the server as the connection's startup `options`. */
-  options: `-c lock_timeout=${DB_LOCK_TIMEOUT_MS}`,
-} as const;
+/**
+ * How long any one statement may run, lock waits included, before PostgreSQL
+ * cancels it (SQLSTATE 57014, #1036). Without it a statement that never
+ * settles holds its pool client for as long as it hangs: the socket
+ * revocation sweep (one query at a time) stops, enough of them exhaust the
+ * pool, and a lock wait under a raised `lock_timeout` has no other limit.
+ * PostgreSQL cancels server-side and the connection answers the error: inside
+ * a transaction it stays in the pool; outside one pg-pool discards it and
+ * opens a new one, as it does after any failed `pool.query`.
+ *
+ * 30 s because it must sit above the slowest legitimate statement and below
+ * what waits on it:
+ * - above `StatsService`'s finalize transaction (15 s, its `SET LOCAL`
+ *   lock_timeout 14 s): statement_timeout counts lock-wait time too, so a
+ *   lower value would cancel that wait before its own bound;
+ * - every other interactive transaction is cut by Prisma at 5 s, and every
+ *   other statement (exports, account deletion, usage counts) is an indexed
+ *   read or write measured in milliseconds;
+ * - with the 3.5 s pool wait, under the ALB's 60 s idle timeout and the
+ *   revocation sweep's 60 s stall report for any one statement (a request
+ *   that runs two statements that slow can still pass the ALB's 60 s).
+ *
+ * It needs the server to answer. A connection whose server vanished without
+ * closing it (a half-open TCP connection after a failover) is the keepalive's
+ * job below, which covers it only partly; see `DB_KEEPALIVE_INITIAL_DELAY_MS`.
+ *
+ * `DB_STATEMENT_TIMEOUT_MS` in the environment overrides it for one process
+ * (`statementTimeoutFromEnv`), for an operator script whose statement
+ * legitimately needs longer. Tests pin the order above.
+ */
+export const DB_STATEMENT_TIMEOUT_MS = 30_000;
+
+/**
+ * The range `DB_STATEMENT_TIMEOUT_MS` may take besides `0`. The floor keeps
+ * the override above finalize's whole 15 s transaction (and so its 14 s lock
+ * wait) and the pool-wide 4 s `lock_timeout`, so a lock wait still ends as
+ * the retryable 503 and never as a statement timeout; the ceiling is a sanity
+ * bound (a longer job uses `0`).
+ */
+export const DB_STATEMENT_TIMEOUT_MIN_MS = 20_000;
+export const DB_STATEMENT_TIMEOUT_MAX_MS = 3_600_000;
+
+/**
+ * How long a connection may sit inside an open transaction without running a
+ * statement before PostgreSQL ends the session (SQLSTATE 25P03), releasing
+ * every lock it holds. Prisma rolls its own transactions back at their
+ * timeout (5 s, 15 s for finalize) while the API is alive, so this fires only
+ * when the API side is gone or wedged mid-transaction, the stuck holder that
+ * otherwise makes every `FOR UPDATE` behind it wait. pg-pool drops the ended
+ * client (PrismaPg listens for its error, so nothing crashes).
+ */
+export const DB_IDLE_IN_TRANSACTION_TIMEOUT_MS = 30_000;
+
+/**
+ * TCP keepalive on every pooled socket, first probe after 10 s of silence
+ * (Node then probes every 1 s, 10 times). It is the only bound here that
+ * works when the server never answers: a dead peer under an idle pooled
+ * client, or one that vanished after acknowledging a query's bytes, is found
+ * within about 20 s and pg errors the client out of the pool. It does not
+ * cover a query written to a peer that is already dead: unacknowledged data
+ * suspends keepalive, and the kernel retransmits for about 15 minutes on Linux
+ * before the socket errors. pg's `query_timeout` would bound that case but
+ * leaves the client stuck behind the lost answer, and every fix for that
+ * (destroying the socket) misfires on a query that was only queued and
+ * orphans the server backend, so it is not used (#1036; follow-up #1050).
+ */
+export const DB_KEEPALIVE_INITIAL_DELAY_MS = 10_000;
+
+export interface DbTimeouts {
+  statementTimeoutMs: number;
+  lockTimeoutMs: number;
+  idleInTransactionTimeoutMs: number;
+}
+
+export const DB_TIMEOUTS: Readonly<DbTimeouts> = Object.freeze({
+  statementTimeoutMs: DB_STATEMENT_TIMEOUT_MS,
+  lockTimeoutMs: DB_LOCK_TIMEOUT_MS,
+  idleInTransactionTimeoutMs: DB_IDLE_IN_TRANSACTION_TIMEOUT_MS,
+});
+
+/** What `buildDbPoolOptions` returns; the literal there is also checked against pg's `PoolConfig`. */
+export interface DbPoolOptions {
+  max: number;
+  connectionTimeoutMillis: number;
+  idleTimeoutMillis: number;
+  keepAlive: true;
+  keepAliveInitialDelayMillis: number;
+  statement_timeout: number;
+  lock_timeout: number;
+  idle_in_transaction_session_timeout: number;
+}
+
+/**
+ * The pg pool options for a set of timeouts; production's come from
+ * `dbPoolOptionsFromEnv`, the real-database suites build a pool with short
+ * values. The three server settings are pg's own config keys, which pg sends
+ * as startup parameters in the StartupMessage (after the TLS handshake), so a
+ * connection starts with them set and nothing runs unbounded first. pg sends
+ * nothing for `0`, so the server's own default applies (none is set on RDS or
+ * locally, so that is off; a `PGOPTIONS` in the environment could also set
+ * it then). pg lets a query parameter of the same name in `DATABASE_URL` win
+ * over these keys: the production URL (`infra/ecs.tf`) carries none, and a
+ * test keeps it that way. A `-c` switch in a URL `options` cannot, since
+ * PostgreSQL applies explicit startup parameters after `options`.
+ * `satisfies PoolConfig` checks the key names against pg's own types.
+ */
+export function buildDbPoolOptions(timeouts: DbTimeouts): DbPoolOptions {
+  const { statementTimeoutMs, lockTimeoutMs, idleInTransactionTimeoutMs } = timeouts;
+  return {
+    max: DB_POOL_MAX,
+    connectionTimeoutMillis: DB_CONNECTION_TIMEOUT_MS,
+    idleTimeoutMillis: DB_IDLE_TIMEOUT_MS,
+    keepAlive: true,
+    keepAliveInitialDelayMillis: DB_KEEPALIVE_INITIAL_DELAY_MS,
+    statement_timeout: statementTimeoutMs,
+    lock_timeout: lockTimeoutMs,
+    idle_in_transaction_session_timeout: idleInTransactionTimeoutMs,
+  } satisfies PoolConfig;
+}
+
+/**
+ * The statement timeout for this process: `DB_STATEMENT_TIMEOUT_MS` when set,
+ * else the default. `0` sends none (the server default applies: off today);
+ * any other value must be an integer within
+ * `DB_STATEMENT_TIMEOUT_MIN_MS`..`DB_STATEMENT_TIMEOUT_MAX_MS`. Anything else
+ * throws at startup rather than running with a bound nobody meant.
+ */
+export function statementTimeoutFromEnv(raw: string | undefined): number {
+  const value = raw?.trim() ?? '';
+  if (value === '') return DB_STATEMENT_TIMEOUT_MS;
+  const ms = /^\d+$/.test(value) ? Number(value) : NaN;
+  if (ms === 0 || (ms >= DB_STATEMENT_TIMEOUT_MIN_MS && ms <= DB_STATEMENT_TIMEOUT_MAX_MS)) return ms;
+  throw new Error(
+    `DB_STATEMENT_TIMEOUT_MS must be 0 (off) or an integer of milliseconds from ${DB_STATEMENT_TIMEOUT_MIN_MS} ` +
+      `to ${DB_STATEMENT_TIMEOUT_MAX_MS}, got "${raw}"`
+  );
+}
+
+/** The pool options `src/models/index.ts` hands to `PrismaPg`. */
+export function dbPoolOptionsFromEnv(env: NodeJS.ProcessEnv = process.env): DbPoolOptions {
+  return buildDbPoolOptions({ ...DB_TIMEOUTS, statementTimeoutMs: statementTimeoutFromEnv(env.DB_STATEMENT_TIMEOUT_MS) });
+}
 
 /**
  * The two messages pg-pool uses when `connectionTimeoutMillis` fires: its wait
