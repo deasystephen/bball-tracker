@@ -43,7 +43,8 @@ function shortPool(
   connectionString = process.env.DATABASE_URL!
 ): PrismaClient {
   const options = buildDbPoolOptions({
-    statementTimeoutMs: 300,
+    // Long enough for the setup statements on a slow CI database; pg_sleep(10) still passes it.
+    statementTimeoutMs: 1_000,
     lockTimeoutMs: 10_000,
     idleInTransactionTimeoutMs: 60_000,
     ...timeouts,
@@ -202,7 +203,7 @@ describe('a lock wait (#1036)', () => {
     const held = await fx.user('held', 'PLAYER');
     const touched = await fx.user('touched', 'PLAYER');
     const before = await nameOf(touched);
-    const db = track(shortPool({ statementTimeoutMs: 500, lockTimeoutMs: 10_000 }, `stmt-lock-${fx.run}`));
+    const db = track(shortPool({ statementTimeoutMs: 1_500, lockTimeoutMs: 10_000 }, `stmt-lock-${fx.run}`));
 
     let waiterError: unknown;
     await prisma.$transaction(
@@ -227,17 +228,19 @@ describe('a lock wait (#1036)', () => {
     const held = await fx.user('idle-holder', 'PLAYER');
     const db = track(shortPool({ idleInTransactionTimeoutMs: 500 }, `stmt-idle-${fx.run}`));
 
-    // A holder that takes the lock and then stalls, as a wedged API would. It
-    // stalls far longer than the idle limit, so the probe below has room.
+    // A holder that takes the lock and then stalls, as a wedged API would,
+    // until the probe below is done (8 s at most, far past the idle limit).
     let locked!: () => void;
     const lockTaken = new Promise<void>((resolve) => (locked = resolve));
+    let release!: () => void;
+    const probed = new Promise<void>((resolve) => (release = resolve));
     let stalled = true;
     const holder = rejectionOf(
       db.$transaction(
         async (tx) => {
           await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${held} FOR UPDATE`;
           locked();
-          await pause(8_000);
+          await Promise.race([probed, pause(8_000)]);
           stalled = false;
           await tx.$queryRaw`SELECT 1`;
         },
@@ -260,6 +263,7 @@ describe('a lock wait (#1036)', () => {
     }
     expect(freed).toBe(true);
     expect(stalled).toBe(true);
+    release();
 
     const err = await holder;
     expect(err).toBeInstanceOf(Error);
