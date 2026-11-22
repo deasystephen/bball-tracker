@@ -136,38 +136,52 @@ export interface WallClock {
  * the starting point of the practice edit form (#1051). This only reads a
  * clock: one instant has exactly one reading in every zone. The reverse (a
  * reading to an instant, which a daylight-saving gap or repeated hour makes
- * ambiguous) is the server's job, never the app's. `null` for a zone the
- * runtime does not know: reading the device clock instead would show (and
- * send back) another zone's time as the practice's.
+ * ambiguous) is the server's job, never the app's. A runtime whose
+ * `formatToParts` does not split the fields is read from the formatted string
+ * instead. `null` for a zone the runtime does not know, or a reading that is
+ * still not a full 24-hour date and time: the device clock would be another
+ * zone's time shown (and sent back) as the practice's.
  */
 export function wallClockIn(value: Date | string, timeZone: string): WallClock | null {
   const instant = toDate(value);
-  let parts: Intl.DateTimeFormatPart[];
+  const options: Intl.DateTimeFormatOptions = {
+    timeZone,
+    hour12: false,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  };
+  let fields: (string | undefined)[];
   try {
-    parts = new Intl.DateTimeFormat('en-US', {
-      timeZone,
-      hour12: false,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-    }).formatToParts(instant);
+    const parts = new Intl.DateTimeFormat('en-US', options).formatToParts(instant);
+    const part = (type: Intl.DateTimeFormatPartTypes): string | undefined =>
+      parts.find((p) => p.type === type)?.value;
+    fields = [part('year'), part('month'), part('day'), part('hour'), part('minute')];
+    if (parts.some((p) => p.type === 'dayPeriod') || fields.some((f) => f === undefined)) {
+      // A runtime that does not split the fields: read the formatted string,
+      // "03/11/2027, 18:00" in en-US.
+      const text = instant.toLocaleString('en-US', options);
+      const match = /^(\d{1,2})\/(\d{1,2})\/(\d{4}),?\s+(\d{1,2}):(\d{2})$/.exec(text.trim());
+      fields = match ? [match[3], match[1], match[2], match[4], match[5]] : [];
+    }
   } catch {
+    // A zone this runtime does not know.
     return null;
   }
-  // A runtime that ignored the 24-hour clock, or did not split the fields
-  // out, gives no reading rather than a wrong one.
-  if (parts.some((p) => p.type === 'dayPeriod')) return null;
-  const field = (type: Intl.DateTimeFormatPartTypes): number | null => {
-    const raw = parts.find((p) => p.type === type)?.value;
-    return raw !== undefined && /^\d+$/.test(raw) ? Number(raw) : null;
-  };
-  const [year, month, day, rawHour, minute] = (['year', 'month', 'day', 'hour', 'minute'] as const).map(field);
-  if (year === null || month === null || day === null || rawHour === null || minute === null) return null;
+  const [year, month, day, rawHour, minute] = fields.map((f) => (f !== undefined && /^\d+$/.test(f) ? Number(f) : NaN));
   // Some engines write midnight as 24 with a 24-hour clock.
   const hour = rawHour === 24 ? 0 : rawHour;
-  if (month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || minute > 59) return null;
+  if (
+    !(year > 0) ||
+    !(month >= 1 && month <= 12) ||
+    !(day >= 1 && day <= 31) ||
+    !(hour >= 0 && hour <= 23) ||
+    !(minute >= 0 && minute <= 59)
+  ) {
+    return null;
+  }
   const pad = (n: number, width = 2): string => String(n).padStart(width, '0');
   return { date: `${pad(year, 4)}-${pad(month)}-${pad(day)}`, time: `${pad(hour)}:${pad(minute)}` };
 }

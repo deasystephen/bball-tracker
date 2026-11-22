@@ -123,7 +123,10 @@ export default function EditPracticeScreen() {
 
   // The loaded session ("this one") or series ("all future"), with the user's edits on top.
   const [edits, setEdits] = useState<Partial<PracticeDetailsValue>>({});
-  const [startEdit, setStartEdit] = useState<WallClock | null>(null);
+  // The date and the time are edited separately, so a refetch that moves the
+  // other one (another coach's edit) is not put back by this save.
+  const [dateEdit, setDateEdit] = useState<string | null>(null);
+  const [timeEdit, setTimeEdit] = useState<string | null>(null);
   const [durationEdit, setDurationEdit] = useState<number | null>(null);
   const [picker, setPicker] = useState<'date' | 'time' | null>(null);
 
@@ -172,7 +175,9 @@ export default function EditPracticeScreen() {
   // runtime does not know): the date and time are then neither shown nor
   // offered for change, since the device's clock would be another zone's.
   const storedWall = wallClockIn(practice.startsAt, timeZone);
-  const start = startEdit ?? storedWall;
+  const start: WallClock | null = storedWall
+    ? { date: dateEdit ?? storedWall.date, time: timeEdit ?? storedWall.time }
+    : null;
   const startMoved = !!start && !!storedWall && (start.date !== storedWall.date || start.time !== storedWall.time);
   const duration = durationEdit ?? practice.durationMinutes;
   const dateText = start ? formatLongLocalDate(start.date) : '';
@@ -230,10 +235,8 @@ export default function EditPracticeScreen() {
 
   // The picker's Date only carries the field being picked (see pickerDateFor).
   const onPicked = (value: Date) => {
-    if (!start) return;
-    setStartEdit(
-      picker === 'time' ? { date: start.date, time: toLocalTimeKey(value) } : { date: toLocalDateKey(value), time: start.time }
-    );
+    if (picker === 'time') setTimeEdit(toLocalTimeKey(value));
+    else setDateEdit(toLocalDateKey(value));
     setPicker(null);
   };
 

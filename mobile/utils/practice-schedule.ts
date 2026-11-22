@@ -185,7 +185,7 @@ export function pickerDateFor(key: string): Date {
  */
 export function pickerTimeFor(hhmm: string): Date {
   const [hours, minutes] = hhmm.split(':').map((part) => Number(part));
-  const days: [number, number][] =[[0, 15], [6, 15], [0, 16]];
+  const days: [number, number][] = [[0, 15], [6, 15], [0, 16]];
   for (const [month, day] of days) {
     const carrier = new Date(2001, month, day, hours, minutes, 0, 0);
     if (carrier.getHours() === hours && carrier.getMinutes() === minutes) return carrier;

@@ -271,8 +271,8 @@ unchanged.
   clock, which is never ambiguous), shows that date and time (`formatLongLocalDate`,
   `formatWallClock`), and the `DateTimePickerSheet` pickers edit them as plain fields: the picker's
   `Date` only carries the field being picked (`practice-schedule.ts#pickerDateFor`, device-local
-  noon, and `pickerTimeFor`, a fixed mid-January day when no zone changes its clocks, so every
-  HH:MM exists on it). A change goes out as `startDate` + `startTime`; the API turns it into an
+  noon, and `pickerTimeFor`, the first of 2001-01-15, 2001-07-15 and 2001-01-16 on which the device's
+  clock really shows that HH:MM, since the practice's own date may skip it on the device). A change goes out as `startDate` + `startTime`; the API turns it into an
   instant with its daylight-saving rule (above). A zone the device's runtime does not know (newer
   zone data on the server) offers no date or time, with a note saying so, rather than showing the
   device's clock as the practice's; the other fields still save. The client's start-window check

@@ -354,20 +354,28 @@ describe('wall clock in a practice zone (#1051)', () => {
     expect(wallClockIn('2027-01-05T00:00:00Z', 'UTC')).toEqual({ date: '2027-01-05', time: '00:00' });
   });
 
-  it('reads nothing from a runtime that keeps a 12-hour clock or does not split the fields', () => {
+  it('reads the string when a runtime does not split the fields, and nothing from a 12-hour clock', () => {
     const spy = jest.spyOn(Intl.DateTimeFormat.prototype, 'formatToParts');
+    const twelveHour = [
+      { type: 'month', value: '03' },
+      { type: 'day', value: '11' },
+      { type: 'year', value: '2027' },
+      { type: 'hour', value: '06' },
+      { type: 'minute', value: '00' },
+      { type: 'dayPeriod', value: 'PM' },
+    ] as Intl.DateTimeFormatPart[];
     try {
-      spy.mockReturnValueOnce([
-        { type: 'month', value: '03' },
-        { type: 'day', value: '11' },
-        { type: 'year', value: '2027' },
-        { type: 'hour', value: '06' },
-        { type: 'minute', value: '00' },
-        { type: 'dayPeriod', value: 'PM' },
-      ]);
-      expect(wallClockIn('2027-03-11T23:00:00Z', 'America/New_York')).toBeNull();
+      // Fields not split out: the 24-hour string is read instead.
       spy.mockReturnValueOnce([{ type: 'literal', value: '3/11/2027, 18:00' }]);
+      expect(wallClockIn('2027-03-11T23:00:00Z', 'America/New_York')).toEqual({ date: '2027-03-11', time: '18:00' });
+      // A 12-hour reading never becomes 06:00: the string is read, and it is 24-hour here.
+      spy.mockReturnValueOnce(twelveHour);
+      expect(wallClockIn('2027-03-11T23:00:00Z', 'America/New_York')).toEqual({ date: '2027-03-11', time: '18:00' });
+      // A runtime that is 12-hour in the string too gives no reading at all.
+      const text = jest.spyOn(Date.prototype, 'toLocaleString').mockReturnValueOnce('3/11/2027, 6:00 PM');
+      spy.mockReturnValueOnce(twelveHour);
       expect(wallClockIn('2027-03-11T23:00:00Z', 'America/New_York')).toBeNull();
+      text.mockRestore();
     } finally {
       spy.mockRestore();
     }
