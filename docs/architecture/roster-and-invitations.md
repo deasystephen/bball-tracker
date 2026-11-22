@@ -559,8 +559,10 @@ themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by 
 - **Maestro:** `.maestro/join-link.yaml` (a parent asks through the seeded Lakers link, Frank
   approves, then replaces the link; needs `SEED_MAESTRO_INVITE_TOKEN=true npx prisma db seed`,
   which writes the fixed `MAESTRO_JOIN_TOKEN` into a local database only). Every seed deletes the
-  Lakers' join links and requests and writes one fresh link. Written for this change and **not
-  yet run**.
+  Lakers' join links and requests and writes one fresh link. First run and passed on
+  2026-11-22 (iPhone 17 / iOS 26.5 simulator, fresh 1.7.0 Debug build). It scrolls to Gloria in
+  the developer login list and matches `"Frank Vogel, .*"`, because interrupted runs of
+  `test-leftovers.db.test.ts` leave `Frank Vogel <id>` coach rows that the seed keeps by design.
 - Tests: `tests/api/join-links.test.ts` (route → real service → Prisma mock, every gate and
   answer, no token on any body or log line), `tests/schemas/join-link.test.ts`,
   `tests/integration/join-link.db.test.ts` (one live link under concurrent creates, no access

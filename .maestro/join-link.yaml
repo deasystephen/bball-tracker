@@ -58,7 +58,15 @@ appId: com.bballtracker.mobile
 - assertVisible: "Developer login with test users"
 - tapOn: "Developer login with test users"
 - assertVisible: "Select Test User"
-- tapOn: "Gloria James.*"
+# Parents come after every coach in the list; a local database with extra
+# coach rows pushes Gloria below the first screen.
+- scrollUntilVisible:
+    element:
+      text: "Gloria James, .*"
+    direction: DOWN
+    timeout: 20000
+    visibilityPercentage: 60
+- tapOn: "Gloria James, .*"
 # postLoginRoute consumes the stored return path (/join/<token>) instead of
 # going Home: wait for the question only the signed-in join screen draws.
 - extendedWaitUntil:
@@ -87,9 +95,24 @@ appId: com.bballtracker.mobile
     visible: "Your Teams"
     timeout: 10000
 
-# Sign out (logout.yaml's steps).
+# Sign out. A parent's profile is longer than a coach's ("My kids" sits above
+# Account), so logout.yaml's single swipe stops at Settings. Swipe to the end
+# of the screen: the bottom padding there keeps Logout clear of the tab bar,
+# and a swipe at the end is a no-op.
 - tapOn: "Profile tab"
 - assertVisible: "Account"
+- swipe:
+    start: 50%, 60%
+    end: 50%, 20%
+    duration: 500
+- swipe:
+    start: 50%, 60%
+    end: 50%, 20%
+    duration: 500
+- swipe:
+    start: 50%, 60%
+    end: 50%, 20%
+    duration: 500
 - swipe:
     start: 50%, 60%
     end: 50%, 20%
@@ -103,7 +126,9 @@ appId: com.bballtracker.mobile
 # --- 3. The coach reviews and approves ---------------------------------------
 - tapOn: "Developer login with test users"
 - assertVisible: "Select Test User"
-- tapOn: "Frank Vogel.*"
+# The comma ends the name: "Frank Vogel 1a2b3c4d, …" rows that interrupted
+# real-database test runs leave behind do not match.
+- tapOn: "Frank Vogel, .*"
 - assertVisible: "Your Teams"
 - tapOn: "Teams tab"
 - extendedWaitUntil:

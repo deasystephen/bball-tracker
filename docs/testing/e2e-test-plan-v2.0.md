@@ -562,7 +562,7 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
 - **Pre:** Seed fresh with `SEED_MAESTRO_INVITE_TOKEN=true npx prisma db seed` (the Lakers get one live join link with the fixed Maestro token). Signed out.
 - **Steps:** (a) Open `hooplings://join/maestro-fixture-lakers-join-link?src=web` → **Log In to Continue** → sign in as Gloria James. (b) **Who is joining?** → **My child** → name "Maestro Joiner", relationship Guardian → **Ask to join**. (c) Sign out, sign in as Frank Vogel → Lakers → **Join link · 1 request** → approve the request. (d) **New link** → **Create new link**, then open the link from (a) again. (e) On a second phone, scan the QR code from Frank's screen with the camera.
 - **Expected:** (a) Signed out, the screen shows only "Join Lakers" and that a coach approves each request; after sign-in the app is back on the join screen, not Home. (b) "Request sent"; the Lakers roster is unchanged (Gloria already sees the Lakers as the seeded guardian of two players; to check that a request alone gives no access, repeat (a) and (b) as Dana Whitfield, who is on no team, and confirm her Teams tab stays empty). (c) The row reads "Maestro Joiner" with "Added by Gloria James, the player's guardian" and her email; after Approve the list is empty and Maestro Joiner is on the roster as a managed player with Gloria as guardian . A Lakers player who does not manage the roster sees no join link button. (d) The old link reads "Join link not found"; the QR code changed. (e) The camera offers to open hooplings.com/join/…, which opens the app's join screen (or the web page without the app). Decline removes a request without adding anyone; **Turn off** leaves "Create join link". Every label reads in Spanish on a Spanish device.
-- **Maestro:** `.maestro/join-link.yaml` covers (a) to (d). Written with the feature, not yet run. (e) is manual: no test scans the code with a camera.
+- **Maestro:** `.maestro/join-link.yaml` covers (a) to (d). Passed on 2026-11-22 (iPhone 17 / iOS 26.5 simulator, fresh 1.7.0 Debug build, Maestro 2.11.0); the QR code in its screenshots decodes to the link. (e) is manual: no test scans the code with a camera.
 
 ## E. Invitations & accept flow (NEW v2.0) 📧
 
@@ -1475,7 +1475,7 @@ After testing, optionally tear down:
   - `player-no-tracking.yaml` — PLAYER sees RSVP but no lifecycle/tracking controls (G.8, Steph Curry)
   - `guardian-rsvp.yaml` — "My kids" + "Responding for" RSVP as a pure guardian (I.5, Sonya Curry)
   - `practice-schedule.yaml` — D.11/D.12: a weekly series of three on the Lakers, then cancel one occurrence with a reason (#33, Frank Vogel; mutates: the seed removes practices titled "E2E Practice")
-  - `join-link.yaml` — D.14: a parent asks to join the Lakers through the seeded join link, Frank approves and replaces the link (#210; needs `SEED_MAESTRO_INVITE_TOKEN=true` on the seed; mutates: the seed rewrites the Lakers' join link and removes the added player). Not yet run
+  - `join-link.yaml` — D.14: a parent asks to join the Lakers through the seeded join link, Frank approves and replaces the link (#210; needs `SEED_MAESTRO_INVITE_TOKEN=true` on the seed; mutates: the seed rewrites the Lakers' join link and removes the added player). Passed 2026-11-22
   - Not covered: completing an invite accept (E.5; the deep-link flow stops at the confirmation alert), exports (M), push (N), any WorkOS sign-in
 
 ### C. Sandbox SES recipient management
