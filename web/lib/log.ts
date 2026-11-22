@@ -12,7 +12,7 @@
  *
  * Invitation links carry bearer tokens in their path, so every string this
  * logger prints (the message and each context value) goes through
- * `redactText`: the segment after `/invite/`, `/by-token/` or `/calendar/` and
+ * `redactText`: the segment after `/invite/`, `/join/`, `/by-token/` or `/calendar/` and
  * secret-looking query values become `[redacted]`, and a context key that
  * names a secret is masked whole. Context is meant for ids, enums and statuses
  * only; its type admits no objects, so an `Error` (whose message may quote a
@@ -41,10 +41,11 @@ export function deployedCommit(env: Record<string, string | undefined> = process
 }
 
 /**
- * The path segment after one of these is a bearer secret. A segment in
+ * The path segment after one of these is a bearer secret (`join` is the
+ * team join link, #210: the page path and the API route). A segment in
  * brackets is a route pattern (`/invite/[token]`), not a value, and is kept.
  */
-const SECRET_SEGMENT = /(\/(?:invite|by-token|calendar)\/)(?!\[[^\]/]*\](?:[/?#\s'"]|$))[^/?#\s'"<>()]+/gi;
+const SECRET_SEGMENT = /(\/(?:invite|join|by-token|calendar)\/)(?!\[[^\]/]*\](?:[/?#\s'"]|$))[^/?#\s'"<>()]+/gi;
 
 /** Query keys whose value is masked: any key containing one of these words. */
 const SECRET_QUERY = /([?&][^=&#\s'"]*(?:token|secret|password|code|state|jwt|key)[^=&#\s'"]*=)[^&#\s'"<>()]*/gi;

@@ -245,6 +245,7 @@ describe('api-client', () => {
         '/auth/login',
         '/auth/refresh',
         '/invitations/by-token/',
+        '/join/',
       ]);
     });
 

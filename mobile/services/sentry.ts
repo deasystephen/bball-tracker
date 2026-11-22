@@ -50,7 +50,7 @@ const SENSITIVE_QUERY_KEYS = ['code', 'token', 'state', 'password', 'otp', 'jwt'
 /** Substrings that make any query key sensitive. */
 const SENSITIVE_QUERY_SUBSTRINGS = ['token', 'secret', 'password', 'authorization', 'api_key', 'apikey'];
 /** Path segments whose *following* segment is a bearer secret. */
-const SECRET_PATH_PARENTS = ['by-token', 'calendar', 'invite'];
+const SECRET_PATH_PARENTS = ['by-token', 'calendar', 'invite', 'join'];
 const NON_SECRET_SUBRESOURCES = ['subscribe', 'revoke', 'accept'];
 
 function isSensitiveQueryKey(key: string): boolean {

@@ -26,6 +26,8 @@ import {
   SEEDED_LAKERS_MANAGED_IDS,
   MAESTRO_INVITE_TOKEN,
   MAESTRO_INVITE_TOKEN_FLAG,
+  MAESTRO_JOIN_TOKEN,
+  joinLinkFixtureToken,
   invitationFixtureRow,
   invitationFixtureToken,
   inviteStateFixtures,
@@ -216,6 +218,35 @@ describe('the Maestro invitation token (#972, #973)', () => {
     for (const f of fixtures.filter((x) => x !== iris)) {
       expect(invitationFixtureToken(f, optedIn({}), random)).toBe('random-token-for-this-run');
     }
+  });
+
+  describe('the Lakers join link token (#210)', () => {
+    it('is a token the public join route accepts, and not the invitation token', () => {
+      expect(isValidInvitationTokenFormat(MAESTRO_JOIN_TOKEN)).toBe(true);
+      expect(MAESTRO_JOIN_TOKEN).not.toBe(MAESTRO_INVITE_TOKEN);
+    });
+
+    it('is written into a local database only when the run opts in', () => {
+      expect(joinLinkFixtureToken(optedIn({}), random)).toBe(MAESTRO_JOIN_TOKEN);
+      expect(joinLinkFixtureToken({ DATABASE_URL: LOCAL_URL }, random)).toBe('random-token-for-this-run');
+      expect(joinLinkFixtureToken(optedIn({ NODE_ENV: 'production' }), random)).toBe('random-token-for-this-run');
+      expect(joinLinkFixtureToken(optedIn({ SEED_ALLOW_PRODUCTION: 'true' }), random)).toBe(
+        'random-token-for-this-run'
+      );
+      expect(
+        joinLinkFixtureToken(
+          optedIn({ DATABASE_URL: 'postgresql://app:secret@db.abc123.us-east-1.rds.amazonaws.com:5432/bball_tracker' }),
+          random
+        )
+      ).toBe('random-token-for-this-run');
+    });
+
+    it('is what the seed writes and what the flow opens', () => {
+      expect(SEED_SOURCE).toMatch(/token:\s*joinLinkFixtureToken\(\s*process\.env\s*,/);
+      const flow = fs.readFileSync(path.resolve(__dirname, '..', '..', '..', '.maestro', 'join-link.yaml'), 'utf8');
+      expect(flow).toContain(`hooplings://join/${MAESTRO_JOIN_TOKEN}?src=web`);
+      expect(flow).toContain(`${MAESTRO_INVITE_TOKEN_FLAG}=true`);
+    });
   });
 
   it('is what the seed writes and what the flow opens', () => {

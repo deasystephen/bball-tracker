@@ -16,6 +16,8 @@ import { i18n } from '../../i18n';
 
 const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn(), canGoBack: jest.fn(() => true) };
 let mockTeam: Team | undefined;
+let mockJoinRequests: { id: string }[] = [];
+let mockJoinRequestsEnabled: boolean | undefined;
 
 jest.mock('expo-router', () => ({
   useRouter: () => mockRouter,
@@ -24,6 +26,13 @@ jest.mock('expo-router', () => ({
 jest.mock('../../services/sentry', () => ({ captureException: jest.fn() }));
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
+}));
+// The team screen asks for pending join requests (#210); none here.
+jest.mock('../../hooks/useJoinLink', () => ({
+  useJoinRequests: (_teamId: string, enabled: boolean) => {
+    mockJoinRequestsEnabled = enabled;
+    return { data: enabled ? mockJoinRequests : undefined };
+  },
 }));
 jest.mock('../../hooks/useTeams', () => ({
   ...jest.requireActual('../../hooks/useTeams'),
@@ -166,6 +175,46 @@ describe('TeamDetailsScreen — season marker (#767)', () => {
     const screen = render(<TeamDetailsScreen />);
     expect(screen.getByText('Bay')).toBeTruthy();
     expect(screen.queryByText(/\(Active\)/)).toBeNull();
+  });
+});
+
+describe('TeamDetailsScreen — join link entry (#210)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockTeam = baseTeam();
+    mockJoinRequests = [];
+    mockJoinRequestsEnabled = undefined;
+  });
+
+  it('offers the join link to a roster manager and opens its screen', () => {
+    signIn();
+    const screen = render(<TeamDetailsScreen />);
+
+    expect(mockJoinRequestsEnabled).toBe(true);
+    fireEvent.press(screen.getByText('Share join link'));
+    expect(mockRouter.push).toHaveBeenCalledWith(expect.stringMatching(/^\/teams\/[^/]+\/join-link$/));
+  });
+
+  it('says how many requests are waiting', () => {
+    signIn();
+    mockJoinRequests = [{ id: 'r1' }, { id: 'r2' }];
+    const screen = render(<TeamDetailsScreen />);
+
+    expect(screen.getByText('Join link · 2 requests')).toBeTruthy();
+  });
+
+  it('shows nothing to a member, and never asks for the requests', () => {
+    useAuthStore.setState({
+      user: { id: 'p-five', role: 'PLAYER', email: 'x@y.z', name: 'X' } as never,
+      isAuthenticated: true,
+      accessToken: 't',
+      refreshToken: null,
+      isLoading: false,
+    });
+    const screen = render(<TeamDetailsScreen />);
+
+    expect(mockJoinRequestsEnabled).toBe(false);
+    expect(screen.queryByTestId('team-join-link')).toBeNull();
   });
 });
 

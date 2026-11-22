@@ -713,6 +713,19 @@ export const MAESTRO_INVITE_TOKEN = 'maestro-fixture-iris-pending-invite';
 export const MAESTRO_INVITE_TOKEN_FLAG = 'SEED_MAESTRO_INVITE_TOKEN';
 
 /**
+ * Whether this seed run may write the fixed Maestro tokens (the three
+ * conditions on `MAESTRO_INVITE_TOKEN`): opted in on the command line, not
+ * production, and a local database host.
+ */
+function fixedMaestroTokensAllowed(env: NodeJS.ProcessEnv): boolean {
+  const optedIn = env[MAESTRO_INVITE_TOKEN_FLAG] === 'true';
+  const production = env.NODE_ENV === 'production' || env.SEED_ALLOW_PRODUCTION === 'true';
+  const host = env.DATABASE_URL ? databaseHost(env.DATABASE_URL) : null;
+  const isLocal = host !== null && LOCAL_DATABASE_HOSTS.includes(host);
+  return optedIn && !production && isLocal;
+}
+
+/**
  * The token the seed writes for an invite-state fixture: the fixture's fixed
  * `deepLinkToken` when `env` allows it (see `MAESTRO_INVITE_TOKEN`),
  * otherwise `randomToken()`.
@@ -723,11 +736,21 @@ export function invitationFixtureToken(
   randomToken: () => string
 ): string {
   if (!fixture.deepLinkToken) return randomToken();
-  const optedIn = env[MAESTRO_INVITE_TOKEN_FLAG] === 'true';
-  const production = env.NODE_ENV === 'production' || env.SEED_ALLOW_PRODUCTION === 'true';
-  const host = env.DATABASE_URL ? databaseHost(env.DATABASE_URL) : null;
-  const isLocal = host !== null && LOCAL_DATABASE_HOSTS.includes(host);
-  return optedIn && !production && isLocal ? fixture.deepLinkToken : randomToken();
+  return fixedMaestroTokensAllowed(env) ? fixture.deepLinkToken : randomToken();
+}
+
+/**
+ * The token `.maestro/join-link.yaml` opens as `hooplings://join/<token>?src=web`
+ * (#210): the Lakers' seeded team join link. A bearer secret in the repo like
+ * `MAESTRO_INVITE_TOKEN`, so the seed writes it under the same three
+ * conditions and the same opt-in flag; any other seed run gives the Lakers'
+ * link a random token.
+ */
+export const MAESTRO_JOIN_TOKEN = 'maestro-fixture-lakers-join-link';
+
+/** The token the seed writes for the Lakers' join link: fixed only when `env` allows it. */
+export function joinLinkFixtureToken(env: NodeJS.ProcessEnv, randomToken: () => string): string {
+  return fixedMaestroTokensAllowed(env) ? MAESTRO_JOIN_TOKEN : randomToken();
 }
 
 /**

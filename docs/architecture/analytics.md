@@ -105,6 +105,11 @@ on the same path do not repeat it. Stats views (`/(tabs)/stats`, `/teams/[id]/st
 | `staff_removed` | a staff member is removed | `team_id` | `hooks/useTeamStaff.ts` |
 | `staff_invited` | a staff invitation is sent to an address, or re-sent (#460) | `team_id`, `invitation_id`, `role_type`, `resend`, `email_sent` | `hooks/useTeamStaff.ts` |
 | `staff_invitation_cancelled` | a head coach cancels a pending staff invitation (#460) | `team_id`, `invitation_id` | `hooks/useTeamStaff.ts` |
+| `join_link_created` | a roster manager creates the team's join link, which also replaces a live one (#210) | `team_id`, `link_id`, `has_max_uses` | `hooks/useJoinLink.ts` |
+| `join_link_revoked` | a roster manager turns the team's join link off (#210) | `team_id` | `hooks/useJoinLink.ts` |
+| `join_request_sent` | someone asks to join through a join link, on `/join/[token]` (#210) | `kind`: `self` / `child`, `outcome`: `pending` / `already_member`, `created` | `hooks/useJoinLink.ts` |
+| `join_request_approved` | a roster manager approves a join request (#210) | `team_id`, `request_id`, `kind`: `self` / `child` | `hooks/useJoinLink.ts` |
+| `join_request_declined` | a roster manager declines a join request (#210) | `team_id`, `request_id` | `hooks/useJoinLink.ts` |
 | `invitation_sent` | an invitation is created or re-sent | `team_id`, `invitation_id`, `resend`, `email_sent` (null when the player has no email) | `hooks/useInvitations.ts` |
 | `invite_link_viewed` | the `/invite/[token]` screen has a settled outcome to show, once per token per mount (not while loading or refetching, so a remount never reports a stale cached result, nor while Try Again is in flight); after `unavailable`, the outcome a successful Try Again shows is reported too; a signed-out invitee who signs in comes back to a new mount, which reports again with `authenticated: true` (#967) | `state`, `kind` (when the invitation loaded), `authenticated`, `source` | `hooks/useInviteLinkViewed.ts` via `app/invite/[token].tsx` |
 | `invitation_accepted` | an invitation is accepted, in-app or from a link | `kind`: `team` / `guardian` / `staff` (#460), `source`: `in_app` / `link` | `hooks/useInvitations.ts` |
@@ -159,6 +164,9 @@ on the same path do not repeat it. Stats views (`/(tabs)/stats`, `/teams/[id]/st
 | Property | Type | Meaning |
 | --- | --- | --- |
 | `team_id`, `game_id`, `league_id`, `season_id`, `invitation_id`, `announcement_id`, `practice_id`, `series_id` | string (uuid) | the row the action touched |
+| `link_id`, `request_id` | string (uuid) | a team join link and a join request (#210); never the link's URL or token |
+| `has_max_uses` | boolean | the join link was created with a cap on requests |
+| `outcome`, `created` | enum, boolean | on `join_request_sent`: `pending` (a request is waiting for a coach) or `already_member` (nothing was sent), and whether this call created the request (`false` for one that already existed). A child's name is never sent |
 | `practice_type` | enum | `PRACTICE` or `OTHER` (a team event) |
 | `frequency`, `weekday_count`, `ends` | enum, count, enum | a practice series' rule: `WEEKLY`/`BIWEEKLY`, how many weekdays were chosen, and whether it ends on a `date` or after a `count` |
 | `session_count`, `updated_sessions`, `deleted_sessions` | count | sessions the server created, edited or deleted, from its answer |

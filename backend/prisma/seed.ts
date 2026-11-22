@@ -18,6 +18,8 @@ import {
   BRYCE_JAMES_ID,
   LAKERS_MANAGED_IDS,
   MAESTRO_INVITE_TOKEN,
+  MAESTRO_JOIN_TOKEN,
+  joinLinkFixtureToken,
   SEED_IDS,
   invitationFixtureRow,
   invitationFixtureToken,
@@ -695,6 +697,29 @@ async function main() {
   if (clearedStaffInvitations.count > 0) {
     console.log(`    Cleared ${clearedStaffInvitations.count} staff invitation(s) from a previous E2E run`);
   }
+
+  // .maestro/join-link.yaml asks to join the Lakers through their join link,
+  // approves the request as Frank and then replaces the link (#210). Every
+  // seed deletes the team's links (their join requests go with them) and
+  // writes one fresh live link, so each run starts with one link and no
+  // request. Its token is random, except for a run with
+  // SEED_MAESTRO_INVITE_TOKEN=true against a local database, which writes the
+  // fixed MAESTRO_JOIN_TOKEN the flow opens (joinLinkFixtureToken, the same
+  // rule as the invitation token below). The child the flow adds is a managed
+  // player of Frank's, removed above with the other flow-created ones.
+  await prisma.teamJoinLink.deleteMany({ where: { teamId: lakers.id } });
+  const lakersJoinLink = await prisma.teamJoinLink.create({
+    data: {
+      teamId: lakers.id,
+      createdById: coachFrank.id,
+      token: joinLinkFixtureToken(process.env, () => randomBytes(32).toString('base64url')),
+      expiresAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+    },
+    select: { token: true },
+  });
+  console.log(
+    `    Lakers join link reset${lakersJoinLink.token === MAESTRO_JOIN_TOKEN ? ' with the fixed Maestro token (join-link.yaml)' : ''}`
+  );
 
   // Lakers players
   const lakersPlayers = [
