@@ -53,7 +53,7 @@ const ALLOWED: Record<string, string> = {
   'guardian-service.ts#findOrCreateParent':
     'provisions the invited adult for inviteGuardian (plain and Resend), which logs `Guardian invitation sent` with parentId',
   'team-service.ts#cancelSentStaffInvitations':
-    'cancels a removed or demoted head coach\'s pending staff invitations inside removeStaffMember / changeStaffRole, which log `Staff removed` / `Staff role changed`',
+    'cancels the pending staff invitations of a user who lost the right to manage staff, inside removeStaffMember / changeStaffRole / LeagueService.removeLeagueAdmin, which log `Staff removed` / `Staff role changed` / `League admin removed` (with cancelledStaffInvitations)',
   'staff-invitation-service.ts#resolveAcceptingUser':
     'provisions the invitee account inside staff accept, which logs `Staff invitation accepted` with accountCreated',
   'guardian-service.ts#resolveAcceptingParent':

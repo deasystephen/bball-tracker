@@ -361,6 +361,25 @@ export class JoinLinkInactiveError extends DetailedError<JoinLinkInactiveDetails
   }
 }
 
+/**
+ * 409 `player_has_records`: `DELETE /players/:id` hard-deletes an unclaimed
+ * roster record only when nothing references it (#1047), the rule account
+ * deletion uses to erase a row instead of tombstoning it (#529). `relations`
+ * names the `User` relations that still hold rows (`guardiansAsChild`,
+ * `gameRsvps`, …), so a client or operator can say what is in the way.
+ */
+export class PlayerHasRecordsError extends DetailedError<{ relations: string[] }> {
+  constructor(relations: string[]) {
+    super(
+      'player_has_records',
+      { relations },
+      'This player has records that deleting the roster entry would erase (see relations: guardian links, invitations, RSVPs, practice answers or stats), so it is kept. Such a record is removed only through account deletion, which keeps what other people rely on: by a linked guardian for a managed child, otherwise by an operator.',
+      409
+    );
+    Object.setPrototypeOf(this, PlayerHasRecordsError.prototype);
+  }
+}
+
 export class ConflictError extends AppError {
   constructor(message: string = 'Conflict') {
     super(message, 409);

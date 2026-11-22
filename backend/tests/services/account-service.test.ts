@@ -17,6 +17,7 @@ import {
   USER_REFERENCE_COUNT_SELECT,
   USER_REFERENCE_SELECT,
   isUnreferenced,
+  referencingRelations,
 } from '../../src/services/account-service';
 import { WorkOSService } from '../../src/services/workos-service';
 import { deletePreviousAvatar } from '../../src/services/upload-service';
@@ -312,6 +313,15 @@ describe('AccountService.deleteAccount', () => {
       expect(isUnreferenced(references({ announcements: 1 }))).toBe(false);
       expect(isUnreferenced(references({ announcementReplies: 1 }))).toBe(false);
       expect(isUnreferenced(references({}, { id: 'pl-1' }))).toBe(false);
+    });
+
+    it('referencingRelations names every relation still holding rows, personal league last (#1047)', () => {
+      expect(referencingRelations(references())).toEqual([]);
+      expect(referencingRelations(references({ gameRsvps: 2, guardiansAsChild: 1 }, { id: 'pl-1' }))).toEqual([
+        'guardiansAsChild',
+        'gameRsvps',
+        'personalLeague',
+      ]);
     });
   });
 

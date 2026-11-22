@@ -131,7 +131,7 @@ on the same path do not repeat it. Stats views (`/(tabs)/stats`, `/teams/[id]/st
 | `rsvp_submitted` | an RSVP is saved | `game_id`, `status`, `on_behalf_of_child` | `hooks/useGames.ts` |
 | `practice_created` | `POST /practices` succeeds (a one-off practice or team event, #33) | `practice_id`, `team_id`, `practice_type` | `hooks/usePractices.ts` |
 | `practice_series_created` | `POST /practice-series` succeeds | `series_id`, `team_id`, `practice_type`, `frequency`, `weekday_count`, `session_count`, `ends` | `hooks/usePractices.ts` |
-| `practice_updated` | `PATCH /practices/:id` succeeds ("Edit this practice") | `practice_id`, `in_series`, `fields` | `hooks/usePractices.ts` |
+| `practice_updated` | `PATCH /practices/:id` succeeds ("Edit this practice") | `practice_id`, `in_series`, `fields` (a moved start is `startDate`/`startTime` since #1051, `startsAt` before) | `hooks/usePractices.ts` |
 | `practice_series_updated` | `PATCH /practice-series/:id` succeeds ("Edit all future practices") | `series_id`, `fields`, `updated_sessions` | `hooks/usePractices.ts` |
 | `practice_cancelled` | `POST /practices/:id/cancel` succeeds | `practice_id`, `in_series`, `has_reason` | `hooks/usePractices.ts` |
 | `practice_series_cancelled` | `DELETE /practice-series/:id` succeeds (future sessions deleted) | `series_id`, `deleted_sessions` | `hooks/usePractices.ts` |

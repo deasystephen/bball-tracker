@@ -198,7 +198,16 @@ eng-review amendments recorded there).
 with code `staff_target_not_found` since #460 so the app can offer an invitation instead). It refuses
 (400 `staff_target_needs_invitation`) an unclaimed **managed** roster record, named by address or by id:
 its managing coach could rewrite that email (B2.10) and claim the role, so such an address is invited
-instead (the app offers the invitation on either code).
+instead (the app offers the invitation on either code). Since #1038 the write runs in one transaction
+under the `User` row locks of the target and the requester (one sorted `lockUsers` statement) and then
+the team lock (`lockTeamRow`), account deletion's user-then-team order. Behind them it repeats, in this
+order: the requester's `canManageStaff` (403; a head-coach removal or demotion holds the team lock, a
+league admin removal holds the former admin's user lock, so either one that commits meanwhile is
+seen), then the target's tombstone check (404 `staff_target_not_found`), the managed-record refusal
+and the already-staff check. Add Player's case-2 adoption takes the target's user lock before it marks
+a row managed, so the two serialise by construction (before, only the `PATCH /players/:id` email guard
+below kept a managed record that slipped into a staff role from being claimed); the team lock
+serialises it with a staff accept. Proven in `tests/integration/staff-invitation-followups.db.test.ts`.
 `services/staff-invitation-service.ts` invites any address to a staff role through a
 **`StaffInvitation`** row, the third invitation kind next to `TeamInvitation` and
 `GuardianInvitation`. It reuses the same machinery rather than copying it: a random bearer-secret
@@ -296,7 +305,17 @@ for every address match and the address stored trimmed and lower-cased; the shar
     who is removed, demoted or deleted after sending cannot come back through an invitation sent to
     an address they control, and a club that changes head coach re-sends (removing or demoting a head
     coach also cancels the PENDING staff invitations they sent on that team, in the same transaction,
-    when `canManageStaff` no longer holds for them, so a league or system admin keeps theirs); refuses
+    when `canManageStaff` no longer holds for them, so a league or system admin keeps theirs;
+    removing a league admin row (`LeagueService.removeLeagueAdmin`, #1038) does the same on every
+    team of that league, in the removal's transaction and behind the former admin's `User` row lock,
+    which a staff invite takes on its inviter, so an invite in flight is either cancelled or refused,
+    then behind the league row lock (the rollover's User → League → Team order, so no rollover moves
+    rows onto the league's teams meanwhile) and the affected teams' locks, taken in one sorted
+    statement (the lock head-coach removal and demotion hold, so when both of a person's roles go at
+    once the second removal sees the first and cancels); a head coach of one of those
+    teams keeps that team's invitations; an accept already past its
+    inviter re-check when the removal commits can still land, as one that committed just before it
+    would); refuses
     an invitation whose team-season is no longer its lineage's latest (the staff row would land on
     last season's team; a season rollover moves the team's PENDING staff invitations onto the new
     team-season, and cancels the ones whose sender cannot manage the new team-season's staff, so
@@ -306,17 +325,31 @@ for every address match and the address stored trimmed and lower-cased; the shar
     guarded on the status (the loser of a race gets 400); and creates the `TeamStaff` row with the
     invited role **unless the account already holds one**, which is left unchanged
     (`alreadyStaff: true`). Accepting never re-roles, so it can never demote the last head coach.
-    `POST /staff` takes no team lock, so a direct add racing the accept can hit
-    `TeamStaff_teamId_userId_key`; that P2002 rolls the accept back and answers 400 (a retry finds
-    the row and reports `alreadyStaff`).
+    `POST /staff` takes the same team lock since #1038, so a direct add and an accept serialise and
+    the second sees the first's row; the P2002 mapping on `TeamStaff_teamId_userId_key` (rolled back,
+    400) stays as a backstop. Queries trimmed in #1038: the status flip is one guarded `update` that
+    also returns the response row (no re-read), and the latest-season check is one `findFirst` over
+    the lineage that holds the team (`LATEST_TEAM_SEASON_ORDER`, shared with `latestTeamSeasonId`)
+    instead of reading the team's lineage first. The authenticated dispatch hands the row it found to
+    the guardian accept and reject as it already did for staff, so neither reads the invitation and
+    the caller's address twice. A team invitation still costs two primary-key misses (guardian, then
+    staff) before its own accept: the three kinds share one id space and the URL names no kind, so
+    the probes stay; one indexed lookup each is cheaper than a kind parameter old app builds would
+    not send.
 - `GET /invitations/:id` reads team invitations only (guardian and staff ids answer 404 there, as
-  before for guardians); the app never fetches a staff invitation by id.
+  before for guardians). Decided to stay that way (#1038): no client fetches a guardian or staff
+  invitation by id (the invitee reads them from `GET /invitations`, the link from
+  `GET /invitations/by-token/:token`, the head coach from `GET /teams/:teamId/staff-invitations`),
+  and the route's access rules (team roster managers, the invited player) are the team kind's, so
+  serving the other kinds would mean a second set of rules for a reader that does not exist.
 - A lazily expired staff invitation logs `Staff invitation expired`.
 - **Rejection strips the address** (the rejection-only strip of the player flow): the invitee's
   decline sets `invitedEmail` to the per-row sentinel `deleted-<id>@invalid` in the same guarded
   update (the sentinel and the raw-SQL scrub share `utils/stripped-email.ts`); `recipientHash`
   stays, so the cooldown still applies to a re-invite. Cancel and expiry
-  keep the address. With no `User` row created at invite time there is nothing else to strip.
+  keep the address. With no `User` row created at invite time there is nothing else to strip. The
+  decline's response carries the row without `invitedEmail` (`STAFF_INVITATION_DECLINED_SELECT`,
+  #1038): echoing the sentinel would read as an address.
 - **A staff role's email is not the managing coach's to rewrite.** `PATCH /players/:id { email }`
   answers 403 for a non-admin when the row holds any `TeamStaff` row, checked before the write and
   again in the write's `where` (`teamStaff: { none: {} }`): with the email pointed at their own

@@ -97,6 +97,41 @@ describe('updatePracticeSchema', () => {
     ).toBe(true);
   });
 
+  describe('the local-time form (#1051)', () => {
+    it('accepts startDate with startTime, with or without a timezone', () => {
+      expect(updatePracticeSchema.safeParse({ startDate: '2030-03-10', startTime: '02:30' }).data).toEqual({
+        startDate: '2030-03-10',
+        startTime: '02:30',
+      });
+      // Gap and repeated-hour times are valid input; the service resolves them.
+      expect(updatePracticeSchema.safeParse({ startDate: '2030-11-03', startTime: '01:30' }).success).toBe(true);
+      expect(
+        updatePracticeSchema.safeParse({ startDate: '2030-03-12', startTime: '18:00', timezone: 'america/chicago' }).data
+      ).toEqual({ startDate: '2030-03-12', startTime: '18:00', timezone: 'America/Chicago' });
+    });
+
+    it('needs both halves, and refuses mixing them with startsAt', () => {
+      // The issue names the missing half.
+      expect(updatePracticeSchema.safeParse({ startDate: '2030-03-12' }).error?.issues[0].path).toEqual(['startTime']);
+      expect(updatePracticeSchema.safeParse({ startTime: '18:00' }).error?.issues[0].path).toEqual(['startDate']);
+      expect(updatePracticeSchema.safeParse({ timezone: 'Europe/London' }).error?.issues[0].path).toEqual(['timezone']);
+      expect(
+        updatePracticeSchema.safeParse({
+          startDate: '2030-03-12',
+          startTime: '18:00',
+          startsAt: '2030-03-12T22:00:00Z',
+        }).success
+      ).toBe(false);
+    });
+
+    it('refuses a malformed or impossible date and time', () => {
+      expect(updatePracticeSchema.safeParse({ startDate: '2030-02-30', startTime: '18:00' }).success).toBe(false);
+      expect(updatePracticeSchema.safeParse({ startDate: '12/03/2030', startTime: '18:00' }).success).toBe(false);
+      expect(updatePracticeSchema.safeParse({ startDate: '2030-03-12', startTime: '24:00' }).success).toBe(false);
+      expect(updatePracticeSchema.safeParse({ startDate: '2030-03-12', startTime: '6:00 PM' }).success).toBe(false);
+    });
+  });
+
   it('rejects an empty body, an unknown key and a bad value', () => {
     expect(updatePracticeSchema.safeParse({}).success).toBe(false);
     expect(updatePracticeSchema.safeParse({ status: 'CANCELLED' }).success).toBe(false);

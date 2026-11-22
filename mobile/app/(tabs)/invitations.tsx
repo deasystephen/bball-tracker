@@ -169,27 +169,31 @@ export default function InvitationsScreen() {
     );
   };
 
-  const renderGuardianInvitation = (item: GuardianInvitationView) => {
-    const isExpired = isInvitationExpired(item.expiresAt);
-    const canAccept = item.status === 'PENDING' && !isExpired;
-    const relationship = relationshipNoun(item.relationship);
+  /**
+   * The one card for an invitation that is not a roster spot (guardian and
+   * staff): the same header, "invited by" and expiry rows and accept/decline
+   * buttons; only the titles and the handlers differ.
+   */
+  const renderRoleInvitationCard = (card: {
+    testID: string;
+    title: string;
+    subtitle: string;
+    item: GuardianInvitationView | StaffInvitationView;
+    acceptTitle: string;
+    acceptTestID?: string;
+    onAccept: () => void;
+    onReject: () => void;
+  }) => {
+    const { item } = card;
+    const canAccept = item.status === 'PENDING' && !isInvitationExpired(item.expiresAt);
 
     return (
-      <Card
-        key={`guardian-${item.id}`}
-        variant="elevated"
-        style={styles.invitationCard}
-        testID={`guardian-invitation-${item.id}`}
-      >
+      <Card key={card.testID} variant="elevated" style={styles.invitationCard} testID={card.testID}>
         <View style={styles.invitationHeader}>
           <View style={styles.invitationInfo}>
-            <ThemedText variant="h4">
-              {item.teamName
-                ? t('invitations.guardianTitleTeam', { relationship, child: childDisplayName(item), team: item.teamName })
-                : t('invitations.guardianTitle', { relationship, child: childDisplayName(item) })}
-            </ThemedText>
+            <ThemedText variant="h4">{card.title}</ThemedText>
             <ThemedText variant="caption" color="textSecondary">
-              {t('invitations.guardianSubtitle')}
+              {card.subtitle}
             </ThemedText>
           </View>
           <View style={[styles.statusBadge, { backgroundColor: colors.warning + '20' }]}>
@@ -217,11 +221,12 @@ export default function InvitationsScreen() {
         <View style={styles.actionButtons}>
           {canAccept ? (
             <Button
-              title={t('invitations.acceptFor', { name: childDisplayName(item) })}
-              onPress={() => handleAcceptGuardian(item)}
+              title={card.acceptTitle}
+              onPress={card.onAccept}
               loading={acceptInvitation.isPending}
               style={styles.acceptButton}
               fullWidth
+              testID={card.acceptTestID}
             />
           ) : (
             <ThemedText variant="caption" color="error" style={styles.expiredText}>
@@ -231,7 +236,7 @@ export default function InvitationsScreen() {
           <Button
             title={t('invitations.decline')}
             variant="outline"
-            onPress={() => handleRejectGuardian(item)}
+            onPress={card.onReject}
             loading={rejectInvitation.isPending}
             style={styles.rejectButton}
             fullWidth
@@ -240,6 +245,24 @@ export default function InvitationsScreen() {
       </Card>
     );
   };
+
+  const renderGuardianInvitation = (item: GuardianInvitationView) => {
+    const relationship = relationshipNoun(item.relationship);
+    const child = childDisplayName(item);
+
+    return renderRoleInvitationCard({
+      testID: `guardian-invitation-${item.id}`,
+      title: item.teamName
+        ? t('invitations.guardianTitleTeam', { relationship, child, team: item.teamName })
+        : t('invitations.guardianTitle', { relationship, child }),
+      subtitle: t('invitations.guardianSubtitle'),
+      item,
+      acceptTitle: t('invitations.acceptFor', { name: child }),
+      onAccept: () => handleAcceptGuardian(item),
+      onReject: () => handleRejectGuardian(item),
+    });
+  };
+
 
   /** Accept a staff invitation (#460): the caller joins the team's staff with the invited role. */
   const handleAcceptStaff = async (invitation: StaffInvitationView) => {
@@ -277,73 +300,18 @@ export default function InvitationsScreen() {
     );
   };
 
-  const renderStaffInvitation = (item: StaffInvitationView) => {
-    const canAccept = item.status === 'PENDING' && !isInvitationExpired(item.expiresAt);
-    const role = staffRoleLabel(t, item.roleType);
+  const renderStaffInvitation = (item: StaffInvitationView) =>
+    renderRoleInvitationCard({
+      testID: `staff-invitation-${item.id}`,
+      title: item.teamName,
+      subtitle: t('invitations.staffSubtitle', { role: staffRoleLabel(t, item.roleType) }),
+      item,
+      acceptTitle: t('invitations.accept'),
+      acceptTestID: `staff-invitation-accept-${item.id}`,
+      onAccept: () => handleAcceptStaff(item),
+      onReject: () => handleRejectStaff(item),
+    });
 
-    return (
-      <Card
-        key={`staff-${item.id}`}
-        variant="elevated"
-        style={styles.invitationCard}
-        testID={`staff-invitation-${item.id}`}
-      >
-        <View style={styles.invitationHeader}>
-          <View style={styles.invitationInfo}>
-            <ThemedText variant="h4">{item.teamName}</ThemedText>
-            <ThemedText variant="caption" color="textSecondary">
-              {t('invitations.staffSubtitle', { role })}
-            </ThemedText>
-          </View>
-          <View style={[styles.statusBadge, { backgroundColor: colors.warning + '20' }]}>
-            <ThemedText variant="captionBold" style={{ color: colors.warning }}>
-              {t(`invitations.statusLabel.${item.status}`, { defaultValue: item.status })}
-            </ThemedText>
-          </View>
-        </View>
-
-        <View style={styles.invitationDetails}>
-          <View style={styles.detailRow}>
-            <Ionicons name="person-outline" size={16} color={colors.textTertiary} />
-            <ThemedText variant="caption" color="textSecondary">
-              {t('invitations.invitedBy', { name: inviterDisplayName(item) })}
-            </ThemedText>
-          </View>
-          <View style={styles.detailRow}>
-            <Ionicons name="time-outline" size={16} color={colors.textTertiary} />
-            <ThemedText variant="caption" color="textSecondary">
-              {formatInvitationExpiry(item.expiresAt)}
-            </ThemedText>
-          </View>
-        </View>
-
-        <View style={styles.actionButtons}>
-          {canAccept ? (
-            <Button
-              title={t('invitations.accept')}
-              onPress={() => handleAcceptStaff(item)}
-              loading={acceptInvitation.isPending}
-              style={styles.acceptButton}
-              fullWidth
-              testID={`staff-invitation-accept-${item.id}`}
-            />
-          ) : (
-            <ThemedText variant="caption" color="error" style={styles.expiredText}>
-              {t('invitations.expiredNotice')}
-            </ThemedText>
-          )}
-          <Button
-            title={t('invitations.decline')}
-            variant="outline"
-            onPress={() => handleRejectStaff(item)}
-            loading={rejectInvitation.isPending}
-            style={styles.rejectButton}
-            fullWidth
-          />
-        </View>
-      </Card>
-    );
-  };
 
   const getStatusColor = (status: string) => {
     switch (status) {
