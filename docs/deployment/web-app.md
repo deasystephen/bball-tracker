@@ -77,8 +77,10 @@ arrival. Queries: `docs/architecture/web-funnel.md`.
 ### Web error monitor (created by hand)
 
 Datadog is not managed from this repository (no Datadog Terraform provider), so this monitor is
-created in the Datadog UI: **Monitors → New Monitor → Import from JSON**, paste, save, then set
-"Last edited" in the table in `docs/runbooks/on-call.md` (Datadog monitors). It fires when the
+created in the Datadog UI: **Monitors → New Monitor → Import from JSON**, paste, save, then
+record the date in `docs/runbooks/on-call.md` ("Datadog has logs, and one monitor"). It was
+created on 2026-11-22 (monitor id 23967975); after changing the JSON below, edit that monitor to
+match. It fires when the
 site logs any server error in 10 minutes; at launch traffic a single failed render is worth a
 look. Raise the threshold here and in Datadog together if it gets noisy.
 

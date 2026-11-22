@@ -327,8 +327,9 @@ change one, edit it in Sentry (Alerts) and update the table above in the same ch
 
 Datadog receives the API's logs and the web site's JSON lines (`infra/datadog.tf`). Its one
 monitor is `[hooplings.com] Web server errors` ([Web site errors](#web-site-errors)), created by
-hand from the JSON in `docs/deployment/web-app.md` (#966; the site is live since 2026-11-22); until the owner
-creates it, Datadog alerts on nothing. Its seven default
+hand from the JSON in `docs/deployment/web-app.md` on 2026-11-22 (#966; monitor id 23967975,
+checked against that JSON the same day). It fires on the web site's error lines only: Datadog
+alerts on nothing from the API. Its seven default
 monitors were deleted on 2026-09-29 (#448): they queried `system.*` host metrics, which Fargate
 never emits, so all seven sat in "No Data", and each notified the literal placeholder
 `@your-team-handle`. Alerting is CloudWatch and Sentry.
