@@ -4,6 +4,26 @@ What happens after an invitation email is opened (web views, accepts by link or 
 
 As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had grown to 170K characters; `CLAUDE.md` now keeps only the rules and a pointer here. Keep this file current in the same PR as the code it describes.
 
+## Sender: the `From` display name
+
+Every message is sent from `SES_FROM_ADDRESS` (`infra/task-definition.json`, the no-reply address
+on the SES subdomain) with a display name in front, built in
+`backend/src/services/mailer/sender.ts#formatFromAddress`, so an inbox shows a name instead of the
+bare address. `Reply-To` stays `SUPPORT_EMAIL`.
+
+- With no person: `"Hooplings" <noreply@mail.hooplings.com>` (the name is `brand.ts#APP_NAME`).
+- A send may pass `senderName` (`MailSendParams`): the three invitation emails pass the inviter,
+  the announcement email its author, the reply notification the replier. The header then reads
+  `"Dana Whitfield via Hooplings" <…>`. "via Hooplings" is always there: the app sends the
+  message, not the person's own mailbox. The RSVP confirmation names nobody.
+- The name is user-supplied text in a mail header. Control characters and line breaks are
+  removed; a value containing `@`, `<` or `>` is not used at all (several callers fall back to
+  the person's email when there is no name, and a name must never read as another sender's
+  address); it is cut to 40 characters. ASCII is sent as a quoted string, anything else as UTF-8
+  RFC 2047 encoded-words. `tests/services/mailer-sender.test.ts` covers each case.
+- The sending role's IAM policy (`infra/ses.tf`) conditions on `ses:FromAddress` matching
+  `*@mail.<domain>`, which is the address, not the display name.
+
 ## Email bounces & complaints (#449)
 
 The growth loop is email to hand-typed addresses, so typos are the norm. SES publishes what

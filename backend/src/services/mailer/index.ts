@@ -19,6 +19,13 @@ export interface MailSendParams {
   to: string;
   variables: Record<string, string>;
   metadata: MailMetadata;
+  /**
+   * The person the message comes from (the inviting coach, an announcement's
+   * author): shown as "<name> via Hooplings" in the `From` display name.
+   * Omitted, or not usable as a name, the display name is the product name
+   * (`sender.ts#formatFromAddress`).
+   */
+  senderName?: string;
 }
 
 export interface MailSendResult {

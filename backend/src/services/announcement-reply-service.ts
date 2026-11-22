@@ -152,6 +152,7 @@ export class AnnouncementReplyService {
           replierName,
           body: reply.body,
         },
+        senderName: replierName,
         metadata: {
           userId: reply.authorId,
           event_type: 'announcement.replied',

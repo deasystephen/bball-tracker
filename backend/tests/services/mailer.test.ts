@@ -206,7 +206,7 @@ describe('SesMailer', () => {
     expect(sesModule.SendEmailCommand).toHaveBeenCalledWith(
       expect.objectContaining({
         Destination: { ToAddresses: ['player@example.com'] },
-        FromEmailAddress: 'noreply@mail.example.test',
+        FromEmailAddress: '"Hooplings" <noreply@mail.example.test>',
         Content: expect.objectContaining({
           Simple: expect.objectContaining({
             Subject: expect.objectContaining({ Data: expect.stringContaining('Bulls') }),
@@ -215,6 +215,16 @@ describe('SesMailer', () => {
       })
     );
     expect(sesModule.__mockSend).toHaveBeenCalledTimes(1);
+  });
+
+  it('puts the sender\'s name in front of the address when a send names one', async () => {
+    await new SesMailer({ region: 'us-east-1', fromAddress: 'noreply@mail.example.test' }).send({
+      ...makeParams(),
+      senderName: 'Dana Whitfield',
+    });
+    expect(sesModule.SendEmailCommand).toHaveBeenLastCalledWith(
+      expect.objectContaining({ FromEmailAddress: '"Dana Whitfield via Hooplings" <noreply@mail.example.test>' })
+    );
   });
 
   it('sets Reply-To when given an address, and leaves it out otherwise (#450)', async () => {
