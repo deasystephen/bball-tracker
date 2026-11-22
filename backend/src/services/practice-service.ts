@@ -35,7 +35,14 @@ import {
 } from '../utils/permissions';
 import { isForeignKeyViolation } from '../utils/prisma-errors';
 import { USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
-import { parseLocalDate, parseLocalTime, zonedTimeToUtc } from '../utils/zoned-time';
+import {
+  formatLocalDate,
+  localDateOf,
+  localTimeOf,
+  parseLocalDate,
+  parseLocalTime,
+  zonedTimeToUtc,
+} from '../utils/zoned-time';
 import { logger } from '../utils/logger';
 import { toRsvpSummary, toRsvpView, type EmailProjected, type RsvpSummary } from './rsvp-service';
 
@@ -99,13 +106,27 @@ export function changedFields(
  * series' zone, a one-off the zone it was created with), so the device's zone
  * never enters the arithmetic. `zonedTimeToUtc` applies the series rule: a
  * time in a spring-forward gap moves forward by the jump, a repeated time
- * takes the earlier instant. An edit without the local form passes through.
+ * takes the earlier instant. A local time the stored start already reads in
+ * the same zone keeps the stored instant, so a form that sends the start back
+ * unchanged never moves it (not to the earlier copy of a repeated hour, nor
+ * by the seconds the local form cannot carry). An edit without the local form
+ * passes through.
  */
-export function resolveLocalStart(data: UpdatePracticeInput, storedTimeZone: string): UpdatePracticeInput {
+export function resolveLocalStart(
+  data: UpdatePracticeInput,
+  stored: { startsAt: Date; timezone: string }
+): UpdatePracticeInput {
   const { startDate, startTime, ...rest } = data;
   if (startDate === undefined || startTime === undefined) return data;
+  const zone = data.timezone ?? stored.timezone;
+  if (
+    zone === stored.timezone &&
+    formatLocalDate(localDateOf(stored.startsAt, zone)) === startDate &&
+    localTimeOf(stored.startsAt, zone) === startTime
+  ) {
+    return { ...rest, startsAt: stored.startsAt.toISOString() };
+  }
   const { hour, minute } = parseLocalTime(startTime);
-  const zone = data.timezone ?? storedTimeZone;
   return { ...rest, startsAt: zonedTimeToUtc(parseLocalDate(startDate), hour, minute, zone).toISOString() };
 }
 
@@ -132,16 +153,20 @@ const SESSION_WRITE_SELECT = {
 
 const DAY_MS = 86_400_000;
 
-/** 400 unless `startsAt` is within the single-practice window around now (a mistyped year). */
-function assertPracticeStartInRange(startsAt: Date): void {
+/**
+ * 400 unless `startsAt` is within the single-practice window around now (a
+ * mistyped year). `field` names what the client sent: `startDate` for the
+ * local form of an edit.
+ */
+function assertPracticeStartInRange(startsAt: Date, field: 'startsAt' | 'startDate' = 'startsAt'): void {
   const now = Date.now();
   // One day of slack each way: the series bounds count local calendar days at
   // any start time, this check counts milliseconds from now.
   if (startsAt.getTime() < now - (MAX_PRACTICE_PAST_DAYS + 1) * DAY_MS) {
-    throw new BadRequestError(`startsAt must be within the last ${MAX_PRACTICE_PAST_DAYS} days`);
+    throw new BadRequestError(`${field} must be within the last ${MAX_PRACTICE_PAST_DAYS} days`);
   }
   if (startsAt.getTime() > now + (MAX_PRACTICE_FUTURE_DAYS + 1) * DAY_MS) {
-    throw new BadRequestError(`startsAt must be within the next ${MAX_PRACTICE_FUTURE_DAYS} days`);
+    throw new BadRequestError(`${field} must be within the next ${MAX_PRACTICE_FUTURE_DAYS} days`);
   }
 }
 type SessionForWrite = Prisma.PracticeSessionGetPayload<{ select: typeof SESSION_WRITE_SELECT }>;
@@ -371,12 +396,12 @@ export class PracticeService {
       }
 
       // The local form is read in the zone of the row just locked.
-      const edit = resolveLocalStart(data, locked.timezone);
+      const edit = resolveLocalStart(data, locked);
       // Range-check startsAt only when it moves: a full-form save of an old
       // session sends its unchanged start back.
       const changed = changedFields(locked, edit);
       if (changed.includes('startsAt')) {
-        assertPracticeStartInRange(new Date(edit.startsAt as string));
+        assertPracticeStartInRange(new Date(edit.startsAt as string), data.startDate !== undefined ? 'startDate' : 'startsAt');
       }
       // A descriptive field set back to the series' own value follows the
       // series again; anything else edited stays overridden.

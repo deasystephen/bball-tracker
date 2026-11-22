@@ -447,8 +447,21 @@ describe('PracticeService.updatePractice', () => {
       lockReads({ cancelledAt: null }, lockedRow());
       await expect(
         PracticeService.updatePractice(SESSION, { startDate: '2032-01-01', startTime: '18:00' }, USER)
-      ).rejects.toThrow('startsAt must be within the next 732 days');
+      ).rejects.toThrow('startDate must be within the next 732 days');
       expect(mockPrisma.practiceSession.update).not.toHaveBeenCalled();
+    });
+
+    it('keeps a stored start at the later copy of a repeated hour when it is sent back unchanged', async () => {
+      // 06:30Z is the second 01:30 (EST) on 2030-11-03; re-resolving would give 05:30Z.
+      const later = new Date('2030-11-03T06:30:00Z');
+      const data = await moveTo({ startDate: '2030-11-03', startTime: '01:30', notes: 'n' }, { startsAt: later });
+      expect(data).toEqual(expect.objectContaining({ startsAt: later, exceptionFields: ['notes'] }));
+    });
+
+    it('keeps a stored start with seconds, and an old one, when sent back unchanged', async () => {
+      const old = new Date('2029-10-01T22:00:30.123Z'); // 18:00:30 EDT, 80 days before the frozen now
+      const data = await moveTo({ startDate: '2029-10-01', startTime: '18:00', notes: 'n' }, { startsAt: old });
+      expect(data).toEqual(expect.objectContaining({ startsAt: old, exceptionFields: ['notes'] }));
     });
   });
 
