@@ -598,11 +598,87 @@ describe('LeagueService', () => {
 
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(sysAdmin);
       (mockPrisma.leagueAdmin.deleteMany as jest.Mock).mockResolvedValue({ count: 1 });
+      (mockPrisma.staffInvitation.findMany as jest.Mock).mockResolvedValue([]);
 
       const result = await LeagueService.removeLeagueAdmin(league.id, target.id, sysAdmin.id);
       expect(result).toEqual({ success: true });
       expect(mockPrisma.leagueAdmin.deleteMany).toHaveBeenCalledWith({
         where: { leagueId: league.id, userId: target.id },
+      });
+    });
+
+    describe('cancels the staff invitations the former admin sent where they lost the right (#1038)', () => {
+      const sqlOf = (call: unknown[]): string => (call[0] as TemplateStringsArray).join('?');
+
+      function given(): { leagueId: string; sysAdminId: string; targetId: string } {
+        const sysAdmin = createAdmin();
+        const league = createLeague();
+        const target = createCoach();
+        (mockPrisma.user.findUnique as jest.Mock).mockImplementation(({ where }: { where: { id: string } }) =>
+          Promise.resolve(where.id === sysAdmin.id ? sysAdmin : where.id === target.id ? target : null)
+        );
+        (mockPrisma.leagueAdmin.deleteMany as jest.Mock).mockResolvedValue({ count: 1 });
+        (mockPrisma.staffInvitation.findMany as jest.Mock).mockResolvedValue([
+          { teamId: 'team-a' },
+          { teamId: 'team-b' },
+        ]);
+        // canManageStaff after the delete: no admin row left in the league.
+        (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({ season: { leagueId: league.id } });
+        (mockPrisma.leagueAdmin.findUnique as jest.Mock).mockResolvedValue(null);
+        (mockPrisma.staffInvitation.updateMany as jest.Mock).mockResolvedValue({ count: 2 });
+        return { leagueId: league.id, sysAdminId: sysAdmin.id, targetId: target.id };
+      }
+
+      it('locks the former admin, deletes the row, then cancels per team, in one transaction', async () => {
+        const fixture = given();
+        // Head coach of neither team.
+        (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(null);
+        const infoSpy = spyOnInfo();
+
+        await LeagueService.removeLeagueAdmin(fixture.leagueId, fixture.targetId, fixture.sysAdminId);
+
+        expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+        const lock = (mockPrisma.$queryRaw as jest.Mock).mock.calls.map(sqlOf).find((sql) => sql.includes('"User"'));
+        expect(lock).toContain('FOR NO KEY UPDATE');
+        expect((mockPrisma.$queryRaw as jest.Mock).mock.invocationCallOrder[0]).toBeLessThan(
+          (mockPrisma.leagueAdmin.deleteMany as jest.Mock).mock.invocationCallOrder[0]
+        );
+        expect(mockPrisma.staffInvitation.findMany).toHaveBeenCalledWith({
+          where: { invitedById: fixture.targetId, status: 'PENDING', team: { season: { leagueId: fixture.leagueId } } },
+          select: { teamId: true },
+          distinct: ['teamId'],
+        });
+        for (const teamId of ['team-a', 'team-b']) {
+          expect(mockPrisma.staffInvitation.updateMany).toHaveBeenCalledWith({
+            where: { teamId, invitedById: fixture.targetId, status: 'PENDING' },
+            data: { status: 'CANCELLED' },
+          });
+        }
+        expect(domainEvent(infoSpy, 'League admin removed')).toMatchObject({ cancelledStaffInvitations: 4 });
+      });
+
+      it('keeps the invitations on a team where the former admin is still head coach', async () => {
+        const fixture = given();
+        (mockPrisma.teamStaff.findFirst as jest.Mock).mockImplementation(({ where }: { where: { teamId: string } }) =>
+          Promise.resolve(where.teamId === 'team-a' ? { id: 'head-row' } : null)
+        );
+
+        await LeagueService.removeLeagueAdmin(fixture.leagueId, fixture.targetId, fixture.sysAdminId);
+
+        expect(mockPrisma.staffInvitation.updateMany).toHaveBeenCalledTimes(1);
+        expect(mockPrisma.staffInvitation.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({ where: expect.objectContaining({ teamId: 'team-b' }) })
+        );
+      });
+
+      it('cancels nothing when the row did not exist (404)', async () => {
+        const fixture = given();
+        (mockPrisma.leagueAdmin.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
+
+        await expect(
+          LeagueService.removeLeagueAdmin(fixture.leagueId, fixture.targetId, fixture.sysAdminId)
+        ).rejects.toMatchObject({ statusCode: 404 });
+        expect(mockPrisma.staffInvitation.updateMany).not.toHaveBeenCalled();
       });
     });
 

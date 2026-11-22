@@ -71,6 +71,8 @@ function givenHeadCoachAddingAssistant(): void {
   });
   // canManageStaff: the caller holds the team's HEAD_COACH row.
   (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue({ id: 'head-row' });
+  // lockUsers / lockTeamRow (#1038): the target's row is live, the team exists.
+  (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([{ id: ASSISTANT_ID, deletedAt: null }]);
 }
 
 /** The target's existing staff row on the team, or none. */

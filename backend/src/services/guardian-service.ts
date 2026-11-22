@@ -812,23 +812,28 @@ export class GuardianService {
    * Authenticated accept by id: the caller must be the invited adult (their
    * account email matches `invitedEmail`). The caller IS the guardian: the
    * verified id is used as `parentId`, never a second lookup by email (#663).
+   * `found` is the row `findInvitationForUser` already returned for this
+   * caller (the route's dispatch), saving a re-read (#1038).
    */
   static async acceptInvitation(
     invitationId: string,
-    userId: string
+    userId: string,
+    found?: Prisma.GuardianInvitationGetPayload<object>
   ): Promise<AcceptGuardianInvitationResult> {
-    const invitation = await this.requireInvitedUser(invitationId, userId);
+    const invitation = found ?? (await this.requireInvitedUser(invitationId, userId));
     return this.accept(invitation, userId);
   }
 
   /**
-   * Authenticated reject by id (the invited adult declines).
+   * Authenticated reject by id (the invited adult declines). `found` as for
+   * `acceptInvitation`.
    */
   static async rejectInvitation(
     invitationId: string,
-    userId: string
+    userId: string,
+    found?: Prisma.GuardianInvitationGetPayload<object>
   ): Promise<GuardianInvitationSummary> {
-    const invitation = await this.requireInvitedUser(invitationId, userId);
+    const invitation = found ?? (await this.requireInvitedUser(invitationId, userId));
 
     if (invitation.status !== 'PENDING') {
       throw new BadRequestError(`Cannot reject invitation with status: ${invitation.status}`);

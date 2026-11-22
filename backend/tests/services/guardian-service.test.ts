@@ -1343,6 +1343,34 @@ describe('GuardianService', () => {
       expect(mockPrisma.guardianInvitation.updateMany).not.toHaveBeenCalled();
     });
 
+    it('rejectInvitation with the row the route already found reads neither the invitation nor the caller again (#1038)', async () => {
+      (mockPrisma.guardianInvitation.update as jest.Mock).mockResolvedValue(invitationRow({ status: 'REJECTED' }));
+
+      const result = await GuardianService.rejectInvitation(
+        'inv-1',
+        'parent-1',
+        invitationRow() as unknown as Parameters<typeof GuardianService.rejectInvitation>[2]
+      );
+
+      expect(result.status).toBe('REJECTED');
+      expect(mockPrisma.guardianInvitation.findUnique).not.toHaveBeenCalled();
+      expect(mockPrisma.user.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('acceptInvitation with the row the route already found does not read it again (#1038)', async () => {
+      (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(null);
+
+      await expect(
+        GuardianService.acceptInvitation(
+          'inv-1',
+          'parent-1',
+          invitationRow() as unknown as Parameters<typeof GuardianService.acceptInvitation>[2]
+        )
+      ).rejects.toMatchObject({ statusCode: 404 });
+
+      expect(mockPrisma.guardianInvitation.findUnique).not.toHaveBeenCalled();
+    });
+
     it('rejectInvitation answers 400 when a concurrent accept flipped the row after the read (#726)', async () => {
       (mockPrisma.guardianInvitation.findUnique as jest.Mock).mockResolvedValue(invitationRow());
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({ email: 'parent@test.com' });

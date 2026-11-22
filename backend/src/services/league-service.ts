@@ -10,6 +10,8 @@ import { findOrCreateSeason, SEASON_NAME_TAKEN_MESSAGE } from './season-service'
 import { isSystemAdmin, isLeagueAdmin, getReadableLeagueIds, canReadLeague } from '../utils/permissions';
 import { logger } from '../utils/logger';
 import { USER_SUMMARY_SELECT, USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
+import { lockUsers } from '../utils/user-row-lock';
+import { TeamService } from './team-service';
 
 /**
  * `League.personalOwnerId` marks a coach's auto-provisioned personal container
@@ -484,16 +486,36 @@ export class LeagueService {
       throw new ForbiddenError('Only system administrators can remove league admins');
     }
 
-    // Delete admin (404 rather than a Prisma P2025 → 500 when no such row)
-    const { count } = await prisma.leagueAdmin.deleteMany({
-      where: { leagueId, userId: adminUserId },
+    // One transaction (#1038): remove the row, then cancel the PENDING staff
+    // invitations the former admin sent on this league's teams wherever they
+    // can no longer manage staff (a head coach there keeps theirs), as staff
+    // removal and demotion do. Accept re-checks the inviter anyway; this keeps
+    // the pending lists honest. The former admin's `User` row is locked first:
+    // a staff invite locks its inviter's row before its own `canManageStaff`
+    // re-check and insert, so an invite in flight either commits first (its
+    // row is cancelled here) or re-checks after this commit and is refused.
+    const cancelledStaffInvitations = await prisma.$transaction(async (tx) => {
+      await lockUsers(tx, [adminUserId]);
+      // 404 rather than a Prisma P2025 → 500 when no such row
+      const { count } = await tx.leagueAdmin.deleteMany({
+        where: { leagueId, userId: adminUserId },
+      });
+      if (count === 0) {
+        throw new NotFoundError('League admin not found');
+      }
+      const sent = await tx.staffInvitation.findMany({
+        where: { invitedById: adminUserId, status: 'PENDING', team: { season: { leagueId } } },
+        select: { teamId: true },
+        distinct: ['teamId'],
+      });
+      let cancelled = 0;
+      for (const { teamId } of sent) {
+        cancelled += await TeamService.cancelSentStaffInvitations(tx, teamId, adminUserId);
+      }
+      return cancelled;
     });
 
-    if (count === 0) {
-      throw new NotFoundError('League admin not found');
-    }
-
-    logger.info('League admin removed', { leagueId, adminUserId, userId });
+    logger.info('League admin removed', { leagueId, adminUserId, userId, cancelledStaffInvitations });
 
     return { success: true };
   }
