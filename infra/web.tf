@@ -24,7 +24,7 @@
 locals {
   # A local in this file, not a variable: this file is outside the API's deploy
   # filter, so the PR that flips it does not roll the API (or split live games).
-  web_enabled = false
+  web_enabled = true
 
   web_family     = "${local.name_prefix}-web"
   web_port       = 3000
