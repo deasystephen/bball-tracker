@@ -102,8 +102,15 @@ export function createShutdown(deps: ShutdownDeps): (signal: NodeJS.Signals) => 
     logger.info('Shutting down', { signal });
 
     const pending = new Set<ShutdownStep>();
+    // Steps that timed out: their closer may still be running when the grace ends.
+    const abandoned: ShutdownStep[] = [];
+    const failed: ShutdownStep[] = [];
     const hardExit = setTimeout(() => {
-      logger.error('Shutdown grace period elapsed; forcing exit', { signal, pendingSteps: [...pending] });
+      logger.error('Shutdown grace period elapsed; forcing exit', {
+        signal,
+        pendingSteps: [...pending],
+        abandonedSteps: [...abandoned],
+      });
       deps.exit(1);
     }, deps.graceMs ?? SHUTDOWN_GRACE_MS);
 
@@ -138,6 +145,9 @@ export function createShutdown(deps: ShutdownDeps): (signal: NodeJS.Signals) => 
       return outcome;
     };
 
+    // socket.io's close() awaits each namespace adapter's close() before it
+    // calls httpServer.close(); destroying connections helps only the latter,
+    // so a step still stuck after the destroy points at the adapter.
     const closeHttp = async (): Promise<void> => {
       const closing = deps.io.close();
       if (!(await settlesWithin(closing, SHUTDOWN_HTTP_DRAIN_MS)) && deps.destroyConnections) {
@@ -151,8 +161,6 @@ export function createShutdown(deps: ShutdownDeps): (signal: NodeJS.Signals) => 
       await closing;
     };
 
-    const abandoned: ShutdownStep[] = [];
-    const failed: ShutdownStep[] = [];
     const record = (step: ShutdownStep, outcome: StepOutcome, failureExits: boolean): void => {
       if (outcome === 'timed-out') abandoned.push(step);
       if (outcome === 'failed' && failureExits) failed.push(step);

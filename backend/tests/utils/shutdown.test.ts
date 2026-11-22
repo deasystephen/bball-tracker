@@ -249,18 +249,40 @@ describe('createShutdown', () => {
     expect(logger.error).toHaveBeenCalledWith('Shutdown grace period elapsed; forcing exit', {
       signal: 'SIGTERM',
       pendingSteps: ['http'],
+      abandonedSteps: [],
+    });
+  });
+
+  it('names a step abandoned earlier on the forced-exit line too', async () => {
+    jest.useFakeTimers();
+    const graceMs = STEP_TIMEOUT_MS['ses-consumer'] + 1_000;
+    const { deps: d } = deps({
+      consumer: { stop: jest.fn(never) },
+      disconnectPrisma: jest.fn(never),
+      graceMs,
+    });
+    void createShutdown(d)('SIGTERM');
+    await advance(graceMs);
+    expect(logger.error).toHaveBeenCalledWith('Shutdown grace period elapsed; forcing exit', {
+      signal: 'SIGTERM',
+      pendingSteps: ['prisma'],
+      abandonedSteps: ['ses-consumer'],
     });
   });
 
   it('keeps the hard-exit timer ref\'d, so a closer that never settles still ends in exit(1)', async () => {
     jest.useFakeTimers();
+    const spy = jest.spyOn(global, 'setTimeout');
     const { deps: d } = deps({ io: { close: jest.fn(never) } });
     void createShutdown(d)('SIGTERM');
     await flush();
 
-    jest.runOnlyPendingTimers();
-    await flush();
-    expect(d.exit).toHaveBeenCalledWith(1);
+    const graceCall = spy.mock.calls.findIndex(([, ms]) => ms === SHUTDOWN_GRACE_MS);
+    expect(graceCall).toBeGreaterThanOrEqual(0);
+    const handle = spy.mock.results[graceCall].value as NodeJS.Timeout;
+    // Restore under the fake clock that was spied on, before afterEach swaps clocks.
+    spy.mockRestore();
+    expect(handle.hasRef()).toBe(true);
   });
 
   it('clears every timer once the sequence finishes', async () => {

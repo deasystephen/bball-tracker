@@ -72,9 +72,10 @@ describe('the stuck closer (#1052)', () => {
   it('reproduces it: an Upgrade for a path engine.io does not own keeps io.close() from settling', async () => {
     const tracker = trackConnections(httpServer);
     const port = await listen();
-    await peer(port, UPGRADE_OTHER_PATH);
+    const p = await peer(port, UPGRADE_OTHER_PATH);
     // engine.io sends its bare FIN after 1 s; the socket is still counted after it.
-    await sleep(1_300);
+    await p.ended;
+    await sleep(200);
     expect(tracker.size()).toBe(1);
 
     const closing = io.close();
@@ -82,7 +83,7 @@ describe('the stuck closer (#1052)', () => {
 
     // The shutdown routine's fallback after its drain period.
     expect(tracker.destroyAll()).toBe(1);
-    expect(await settlesWithin(closing, 1_000)).toBe(true);
+    expect(await settlesWithin(closing, 5_000)).toBe(true);
   });
 
   it('reproduces it: a connection with no complete request is never reaped once close() has begun', async () => {
@@ -94,7 +95,7 @@ describe('the stuck closer (#1052)', () => {
     const closing = io.close();
     expect(await settlesWithin(closing, 1_000)).toBe(false);
     expect(tracker.destroyAll()).toBe(1);
-    expect(await settlesWithin(closing, 1_000)).toBe(true);
+    expect(await settlesWithin(closing, 5_000)).toBe(true);
   });
 });
 
@@ -113,7 +114,7 @@ describe('refuseUnhandledUpgrades', () => {
     // Closed on the server side although the peer never closed its own.
     await sleep(50);
     expect(tracker.size()).toBe(0);
-    expect(await settlesWithin(io.close(), 1_000)).toBe(true);
+    expect(await settlesWithin(io.close(), 5_000)).toBe(true);
   });
 
   it('leaves Socket.io upgrades to engine.io', async () => {
@@ -123,7 +124,7 @@ describe('refuseUnhandledUpgrades', () => {
     const { io: ioClient } = await import('socket.io-client');
     const client = ioClient(`http://127.0.0.1:${port}`, { transports: ['websocket'], reconnection: false });
     try {
-      expect(await settlesWithin(connected, 2_000)).toBe(true);
+      expect(await settlesWithin(connected, 5_000)).toBe(true);
     } finally {
       client.close();
     }

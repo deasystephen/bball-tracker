@@ -12,7 +12,8 @@
  *    for the life of the process, and `server.close()` waits on it forever.
  *    Reproduced locally; whether the ALB leaves such a connection open is not
  *    known. `refuseUnhandledUpgrades` answers 400 and destroys the socket once
- *    the answer is flushed, whatever the peer does.
+ *    the answer is flushed, or after REFUSED_UPGRADE_DESTROY_MS if the peer
+ *    does not read it.
  *  - a connection that has sent no complete request when `close()` is called:
  *    `close()` stops the timer that enforces `headersTimeout`, so nothing
  *    reaps it until the peer closes;
@@ -50,6 +51,9 @@ export function trackConnections(server: Server): ConnectionTracker {
   };
 }
 
+/** Backstop for a peer that never reads the 400 (so the write never finishes). */
+export const REFUSED_UPGRADE_DESTROY_MS = 2_000;
+
 const BAD_REQUEST = 'HTTP/1.1 400 Bad Request\r\nConnection: close\r\nContent-Length: 0\r\n\r\n';
 
 /**
@@ -66,6 +70,9 @@ export function refuseUnhandledUpgrades(server: Server, enginePath: string): voi
       return;
     }
     socket.on('error', () => socket.destroy());
+    const backstop = setTimeout(() => socket.destroy(), REFUSED_UPGRADE_DESTROY_MS);
+    backstop.unref();
+    socket.once('close', () => clearTimeout(backstop));
     socket.end(BAD_REQUEST, () => socket.destroy());
   });
 }
