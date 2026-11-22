@@ -17,7 +17,6 @@ import {
   useDeclineJoinRequest,
   useJoinLinkPreview,
   useRequestToJoin,
-  isJoinLinkExpired,
   joinLinkKeys,
   type JoinLink,
   type JoinRequestRow,
@@ -198,11 +197,23 @@ describe('useJoinLink runtime', () => {
     });
   });
 
-  it('isJoinLinkExpired compares the expiry with now', () => {
-    const now = new Date('2026-12-06T00:00:00Z');
-    expect(isJoinLinkExpired({ expiresAt: '2026-12-05T23:59:59Z' }, now)).toBe(true);
-    expect(isJoinLinkExpired({ expiresAt: '2026-12-06T00:00:00Z' }, now)).toBe(true);
-    expect(isJoinLinkExpired({ expiresAt: '2026-12-06T00:00:01Z' }, now)).toBe(false);
+  it('useJoinLink and the public preview ask the server on every mount, whatever is cached', async () => {
+    mockedGet.mockImplementation(async (url: string) =>
+      url === '/teams/t1/join-link'
+        ? { data: { success: true, link: null } }
+        : { data: { success: true, link: { teamName: 'Hornets', state: 'expired' } } }
+    );
+    const { wrapper, client } = createQueryWrapper();
+    // Fresh cache entries from a moment ago: a live link and an active preview.
+    client.setQueryData(joinLinkKeys.link('t1'), link);
+    client.setQueryData(joinLinkKeys.preview(TOKEN), { teamName: 'Hornets', state: 'active' });
+
+    const coach = renderHook(() => useJoinLink('t1', true), { wrapper });
+    const family = renderHook(() => useJoinLinkPreview(TOKEN), { wrapper });
+
+    // The server's answer replaces the cached one: the link is gone, the preview expired.
+    await waitFor(() => expect(coach.result.current.data).toBeNull());
+    await waitFor(() => expect(family.result.current.data).toEqual({ teamName: 'Hornets', state: 'expired' }));
   });
 
   it('useJoinRequests re-reads on every mount, even with a fresh cached list', async () => {

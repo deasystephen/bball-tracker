@@ -1161,7 +1161,9 @@
     "declineFailed": "No se pudo rechazar la solicitud",
     "newLinkConfirm": "Crear enlace nuevo",
     "turnOffConfirm": "Desactivar enlace",
-    "expired": "Este enlace venció. Crea uno nuevo para compartir."
+    "created": "Enlace para unirse creado",
+    "replaced": "Enlace nuevo creado. El anterior ya no funciona.",
+    "refreshFailed": "No se pudo actualizar. Se muestra lo que ya estaba cargado."
   },
   "join": {
     "loading": "Cargando enlace para unirse…",

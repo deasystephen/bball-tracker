@@ -32,7 +32,6 @@ import {
   useJoinRequests,
   useApproveJoinRequest,
   useDeclineJoinRequest,
-  isJoinLinkExpired,
   type JoinRequestRow,
 } from '../../../hooks/useJoinLink';
 import { useTheme } from '../../../hooks/useTheme';
@@ -62,18 +61,15 @@ export default function TeamJoinLinkScreen() {
 
   const { data: team, isLoading: teamLoading, error: teamError, refetch: refetchTeam } = useTeam(id);
   const canManageRoster = hasTeamPermission(team, user?.id, 'canManageRoster', user?.role, user?.leagueAdminOf);
+  // Both are polled while the screen is open. The server decides whether the
+  // link is still live (it answers null once it expired or was replaced), and
+  // requests arrive from other phones while the coach shows the code.
   const {
-    data: fetchedLink,
+    data: link,
     isLoading: linkLoading,
     error: linkError,
     refetch: refetchLink,
-  } = useJoinLink(id, canManageRoster);
-  // A link that expired while this screen (or its cache) was open is no link:
-  // the server stopped serving it, and showing its QR code would send families
-  // to "Join link expired".
-  const expiredLink = fetchedLink != null && isJoinLinkExpired(fetchedLink);
-  const link = expiredLink ? null : fetchedLink;
-  // Polled: requests arrive from other phones while the coach shows the code.
+  } = useJoinLink(id, canManageRoster, { poll: true });
   const {
     data: requests,
     error: requestsError,
@@ -84,7 +80,11 @@ export default function TeamJoinLinkScreen() {
   const handleRefresh = async () => {
     setRefreshing(true);
     try {
-      await Promise.all([refetchLink(), refetchRequests()]);
+      const results = await Promise.all([refetchLink(), refetchRequests()]);
+      // What was loaded stays on screen; the coach is only told it may be old.
+      if (results.some((result) => result.isError)) {
+        toast.showToast(t('joinLink.refreshFailed'), 'error');
+      }
     } finally {
       setRefreshing(false);
     }
@@ -95,8 +95,10 @@ export default function TeamJoinLinkScreen() {
   const decline = useDeclineJoinRequest();
 
   const handleCreate = async () => {
+    const replacing = link != null;
     try {
       await createLink.mutateAsync({ teamId: id });
+      toast.showToast(replacing ? t('joinLink.replaced') : t('joinLink.created'), 'success');
     } catch (err) {
       toast.showToast(getApiErrorMessage(err, t('joinLink.createFailed')), 'error');
     }
@@ -196,7 +198,10 @@ export default function TeamJoinLinkScreen() {
     return <ErrorState message={t('joinLink.notAllowed')} onBack={goBack} />;
   }
 
-  if (linkError) {
+  // A full-screen error only when there is nothing to show. A re-read that
+  // fails (the poll, a pull to refresh, poor signal in a gym) keeps the link
+  // and its QR code on screen.
+  if (linkError && link === undefined) {
     return (
       <ErrorState
         message={getApiErrorMessage(linkError, t('joinLink.loadFailed'))}
@@ -287,21 +292,14 @@ export default function TeamJoinLinkScreen() {
               </View>
             </>
           ) : (
-            <>
-              {expiredLink && (
-                <ThemedText variant="caption" color="textSecondary" style={styles.explain}>
-                  {t('joinLink.expired')}
-                </ThemedText>
-              )}
-              <Button
-                title={t('joinLink.create')}
-                onPress={() => void handleCreate()}
-                loading={createLink.isPending}
-                disabled={createLink.isPending}
-                testID="join-link-create"
-                fullWidth
-              />
-            </>
+            <Button
+              title={t('joinLink.create')}
+              onPress={() => void handleCreate()}
+              loading={createLink.isPending}
+              disabled={createLink.isPending}
+              testID="join-link-create"
+              fullWidth
+            />
           )}
         </Card>
 
@@ -314,7 +312,8 @@ export default function TeamJoinLinkScreen() {
           )}
         </View>
 
-        {requestsError != null ? (
+        {/* The error block only when no list was ever loaded: a failed poll keeps the rows. */}
+        {requestsError != null && requests == null ? (
           <View style={styles.requestsError}>
             <ThemedText variant="caption" color="error">
               {t('joinLink.requestsLoadFailed')}

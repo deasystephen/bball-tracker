@@ -63,16 +63,23 @@ export const joinLinkKeys = {
   preview: (token: string | undefined) => [...joinLinkKeys.all, 'preview', token] as const,
 };
 
-/** True once a link's `expiresAt` has passed: the server no longer serves it either. */
-export function isJoinLinkExpired(link: Pick<JoinLink, 'expiresAt'>, now: Date = new Date()): boolean {
-  return new Date(link.expiresAt).getTime() <= now.getTime();
-}
+/** How often the join link screen re-reads the link and the requests while it is open. */
+export const JOIN_LINK_POLL_MS = 15_000;
 
-/** The team's live join link, or `null`. Pass `enabled` from `canManageRoster`. */
-export function useJoinLink(teamId: string, enabled: boolean) {
+/**
+ * The team's live join link, or `null`. Pass `enabled` from `canManageRoster`.
+ *
+ * Whether a link is still live is the server's call, never the device
+ * clock's: `GET …/join-link` answers `null` once the link expired, was turned
+ * off or was replaced (possibly from another coach's phone). So the cache is
+ * not trusted across mounts, and with `poll` the join link screen re-reads it
+ * while it is open (a screen left open past the expiry stops showing the code).
+ */
+export function useJoinLink(teamId: string, enabled: boolean, options: { poll?: boolean } = {}) {
   return useQuery({
-    // A link can be replaced or turned off from another coach's phone.
+    staleTime: 0,
     refetchOnMount: 'always',
+    refetchInterval: options.poll ? JOIN_LINK_POLL_MS : false,
     queryKey: joinLinkKeys.link(teamId),
     queryFn: async () => {
       const response = await apiClient.get<{ success: boolean; link: JoinLink | null }>(
@@ -122,23 +129,20 @@ export function useRevokeJoinLink() {
   });
 }
 
-/** How often the join link screen re-reads the requests while it is open. */
-export const JOIN_REQUESTS_POLL_MS = 15_000;
-
 /**
  * Pending join requests of a team. Pass `enabled` from `canManageRoster`.
  *
  * Requests arrive from other people's phones, so a cached list is never
  * trusted: every mount re-reads it (the team screen's count, and the screen a
  * "New join request" push opens), and with `poll` the join link screen
- * re-reads it every `JOIN_REQUESTS_POLL_MS`, because a coach holding up the
+ * re-reads it every `JOIN_LINK_POLL_MS`, because a coach holding up the
  * QR code is watching for exactly that.
  */
 export function useJoinRequests(teamId: string, enabled: boolean, options: { poll?: boolean } = {}) {
   return useQuery({
     staleTime: 0,
     refetchOnMount: 'always',
-    refetchInterval: options.poll ? JOIN_REQUESTS_POLL_MS : false,
+    refetchInterval: options.poll ? JOIN_LINK_POLL_MS : false,
     queryKey: joinLinkKeys.requests(teamId),
     queryFn: async () => {
       const response = await apiClient.get<{ success: boolean; requests: JoinRequestRow[] }>(
@@ -190,9 +194,15 @@ export function useDeclineJoinRequest() {
   });
 }
 
-/** Public preview of a join link (no session needed): the team's name and the link's state. */
+/**
+ * Public preview of a join link (no session needed): the team's name and the
+ * link's state. Never served from a cached answer: a coach may have replaced
+ * the link a minute ago, and the form must not be offered for a dead one.
+ */
 export function useJoinLinkPreview(token: string | undefined) {
   return useQuery({
+    staleTime: 0,
+    refetchOnMount: 'always',
     queryKey: joinLinkKeys.preview(token),
     queryFn: async () => {
       const response = await apiClient.get<{ success: boolean; link: JoinLinkPreview }>(`/join/${token}`);

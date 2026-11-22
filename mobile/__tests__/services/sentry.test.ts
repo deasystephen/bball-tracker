@@ -325,6 +325,11 @@ describe('services/sentry', () => {
       );
       expect(redactUrl('/join/abcdef0123456789?src=web')).toBe('/join/[scrubbed]?src=web');
       expect(redactUrl('https://hooplings.com/join/abcdef0123456789')).toBe('https://hooplings.com/join/[scrubbed]');
+      // A deep link has no host: `join` / `invite` is the first path segment.
+      expect(redactUrl('hooplings://join/abcdef0123456789?src=web')).toBe('hooplings://join/[scrubbed]?src=web');
+      expect(redactUrl('hooplings://invite/abcdef0123456789')).toBe('hooplings://invite/[scrubbed]');
+      expect(redactUrl('hooplings://auth/callback?code=SECRET')).toBe('hooplings://auth/callback?code=[scrubbed]');
+      expect(redactUrl('hooplings://teams/t1')).toBe('hooplings://teams/t1');
       expect(redactUrl('')).toBe('');
     });
   });

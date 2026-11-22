@@ -26,6 +26,10 @@ let mockRequests: JoinRequestRow[] = [];
 let mockLinkEnabled: boolean | undefined;
 let mockRequestsEnabled: boolean | undefined;
 let mockRequestsPoll: boolean | undefined;
+let mockLinkPoll: boolean | undefined;
+let mockLinkError: Error | null = null;
+let mockRequestsError: Error | null = null;
+let mockRequestsUnloaded = false;
 let mockTeam: Team | undefined;
 
 jest.mock('expo-router', () => ({
@@ -47,14 +51,19 @@ jest.mock('../../hooks/useTeams', () => ({
 }));
 jest.mock('../../hooks/useJoinLink', () => ({
   ...jest.requireActual('../../hooks/useJoinLink'),
-  useJoinLink: (_teamId: string, enabled: boolean) => {
+  useJoinLink: (_teamId: string, enabled: boolean, options?: { poll?: boolean }) => {
     mockLinkEnabled = enabled;
-    return { data: enabled ? mockLink : undefined, isLoading: false, error: null, refetch: jest.fn() };
+    mockLinkPoll = options?.poll;
+    return { data: enabled ? mockLink : undefined, isLoading: false, error: mockLinkError, refetch: jest.fn() };
   },
   useJoinRequests: (_teamId: string, enabled: boolean, options?: { poll?: boolean }) => {
     mockRequestsEnabled = enabled;
     mockRequestsPoll = options?.poll;
-    return { data: enabled ? mockRequests : undefined, error: null, refetch: mockRefetchRequests };
+    return {
+      data: enabled && !mockRequestsUnloaded ? mockRequests : undefined,
+      error: mockRequestsError,
+      refetch: mockRefetchRequests,
+    };
   },
   useCreateJoinLink: () => mockCreate,
   useRevokeJoinLink: () => mockRevoke,
@@ -149,6 +158,9 @@ describe('TeamJoinLinkScreen (#210)', () => {
     mockRequests = [];
     mockLinkEnabled = undefined;
     mockRequestsEnabled = undefined;
+    mockLinkError = null;
+    mockRequestsError = null;
+    mockRequestsUnloaded = false;
   });
 
   afterEach(async () => {
@@ -182,6 +194,7 @@ describe('TeamJoinLinkScreen (#210)', () => {
     fireEvent.press(getByTestId('join-link-create'));
 
     await waitFor(() => expect(mockCreate.mutateAsync).toHaveBeenCalledWith({ teamId: 't1' }));
+    await waitFor(() => expect(mockShowToast).toHaveBeenCalledWith('Join link created', 'success'));
   });
 
   it('with a link: shows the QR code of the URL and shares the URL, which is never printed as text', async () => {
@@ -221,6 +234,9 @@ describe('TeamJoinLinkScreen (#210)', () => {
     expect(mockCreate.mutateAsync).not.toHaveBeenCalled();
     await pressAlertButton(alertSpy, 'Create new link');
     expect(mockCreate.mutateAsync).toHaveBeenCalledWith({ teamId: 't1' });
+    await waitFor(() =>
+      expect(mockShowToast).toHaveBeenCalledWith('New link created. The old one no longer works.', 'success')
+    );
   });
 
   it('Turn off revokes after a confirmation', async () => {
@@ -262,19 +278,52 @@ describe('TeamJoinLinkScreen (#210)', () => {
     expect(getByText('Sam Teen')).toBeTruthy();
     expect(getByText('Player, joining as themself')).toBeTruthy();
     expect(getByText('sam@example.com')).toBeTruthy();
-    // The list polls while the coach is on this screen.
+    // Both the link and the list are re-read while the coach is on this screen:
+    // the server, not the device clock, says when the link stops being live.
     expect(mockRequestsPoll).toBe(true);
+    expect(mockLinkPoll).toBe(true);
   });
 
-  it('a link that expired while cached is shown as no link, with a way to make a new one', () => {
+  it('never judges expiry from the device clock: a link the server still serves keeps its QR code', () => {
     signIn({ id: 'coach-1', role: 'COACH' });
+    // A phone whose clock runs ahead sees a past expiresAt on a link that is still live.
     mockLink = { ...link, expiresAt: new Date(Date.now() - 60_000).toISOString() };
-    const { getByText, getByTestId, queryByTestId } = render(<TeamJoinLinkScreen />);
+    const { getByTestId, queryByTestId } = render(<TeamJoinLinkScreen />);
 
-    expect(getByText('This link has expired. Create a new one to share.')).toBeTruthy();
-    expect(getByTestId('join-link-create')).toBeTruthy();
-    expect(queryByTestId('join-link-qr')).toBeNull();
-    expect(queryByTestId('join-link-share')).toBeNull();
+    expect(getByTestId('join-link-qr')).toBeTruthy();
+    // Creating a link revokes the live one, so it must not be offered here.
+    expect(queryByTestId('join-link-create')).toBeNull();
+  });
+
+  it('a failed re-read keeps the link, its QR code and the requests on screen', () => {
+    signIn({ id: 'coach-1', role: 'COACH' });
+    mockLink = link;
+    mockRequests = [childRequest];
+    mockLinkError = new Error('Network Error');
+    mockRequestsError = new Error('Network Error');
+    const { getByTestId, getByLabelText, queryByText } = render(<TeamJoinLinkScreen />);
+
+    expect(getByTestId('join-link-qr')).toBeTruthy();
+    expect(getByLabelText('Approve Riley Park')).toBeTruthy();
+    expect(queryByText("Couldn't load the requests to join.")).toBeNull();
+    expect(queryByText('Something went wrong')).toBeNull();
+  });
+
+  it('shows the load errors only when nothing was ever loaded', () => {
+    signIn({ id: 'coach-1', role: 'COACH' });
+    mockLink = link;
+    mockRequestsUnloaded = true;
+    mockRequestsError = new Error('Network Error');
+    const requestsFailed = render(<TeamJoinLinkScreen />);
+    expect(requestsFailed.getByText("Couldn't load the requests to join.")).toBeTruthy();
+    expect(requestsFailed.getByTestId('join-link-qr')).toBeTruthy();
+    requestsFailed.unmount();
+
+    mockLink = undefined as never;
+    mockLinkError = new Error('Network Error');
+    const linkFailed = render(<TeamJoinLinkScreen />);
+    expect(linkFailed.getByText('Something went wrong')).toBeTruthy();
+    expect(linkFailed.queryByTestId('join-link-qr')).toBeNull();
   });
 
   it('approving adds the player and says who was added', async () => {

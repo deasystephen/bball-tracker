@@ -107,8 +107,16 @@ export function redactUrl(url: string): string {
   const qs = qIdx === -1 ? '' : noHash.slice(qIdx + 1);
 
   const schemeMatch = base.match(/^([a-z][a-z0-9+.-]*:\/\/[^/]*)(\/.*)?$/i);
-  const prefix = schemeMatch ? schemeMatch[1] : '';
-  const path = schemeMatch ? schemeMatch[2] ?? '' : base;
+  let prefix = schemeMatch ? schemeMatch[1] : '';
+  let path = schemeMatch ? schemeMatch[2] ?? '' : base;
+  // A deep link (`hooplings://join/<token>`, `hooplings://invite/<token>`) has
+  // no host: what sits where a web URL's host would is the first path segment,
+  // the very parent that marks the next one as a secret.
+  const deepLink = base.match(/^([a-z][a-z0-9+.-]*):\/\/(.*)$/i);
+  if (deepLink && !/^(https?|wss?)$/i.test(deepLink[1])) {
+    prefix = `${deepLink[1]}:/`;
+    path = `/${deepLink[2]}`;
+  }
 
   const redactedPath = prefix + redactPath(path);
   const redactedQs = redactQueryString(qs);

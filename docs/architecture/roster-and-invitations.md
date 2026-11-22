@@ -485,9 +485,13 @@ themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by 
   link** and **Turn off** (each behind a confirm whose button reads differently from the screen's,
   "Create new link" / "Turn off link"), and the pending requests with Approve and Decline icons
   (Decline confirms); each request shows who would be added, who asked, and the asker's email on
-  a line of its own. Requests come from other phones, so `useJoinRequests` never trusts its cache
-  (`refetchOnMount: 'always'`) and this screen polls it every 15 s and has pull-to-refresh. A link
-  whose `expiresAt` passed while cached is shown as no link (`isJoinLinkExpired`). The URL is never printed as text. A link is created with the server
+  a line of its own. Requests come from other phones and a link can be replaced from another coach's, so
+  `useJoinRequests`, `useJoinLink` and the public `useJoinLinkPreview` never trust their cache
+  (`staleTime: 0`, `refetchOnMount: 'always'`), and this screen polls the link and the requests
+  every 15 s (`JOIN_LINK_POLL_MS`) and has pull-to-refresh. **Whether a link is live is the
+  server's answer, never the device clock's** (a phone whose clock runs ahead must not be offered
+  "Create join link", which revokes the live one). A re-read that fails keeps what is on screen
+  (the QR code, the rows); the full-screen and inline errors show only when nothing was loaded. The URL is never printed as text. A link is created with the server
   defaults (14 days, no cap); the app has no control for either yet. A caller without
   `canManageRoster` gets an `ErrorState` and neither query runs.
   **The QR code** is `utils/qr-path.ts`: `qrcode-generator` (plain JavaScript, no native code, so
@@ -503,7 +507,9 @@ themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by 
   `RelationshipChips`. A new request shows "Request sent" (and "Add another child" for a parent);
   an account already on the team is sent to it. Expired, full and unknown links each have their
   own screen; a network failure, 429 or 5xx is a retry, never the dead-link screen. Sentry's
-  redaction masks the segment after `/join/` (`services/sentry.ts`). Events: `join_link_created`,
+  redaction masks the segment after `/join/` (`services/sentry.ts`), in the custom-scheme deep
+  link too (`hooplings://join/<token>`, where `join` sits in the host position; the same fix covers
+  `hooplings://invite/<token>`). Events: `join_link_created`,
   `join_link_revoked`, `join_request_sent`, `join_request_approved`, `join_request_declined` (ids
   and enums; never the link, its token or a name). Android App Links for `/join/` need
   `android.intentFilters`, which is native config: they wait for the next binary; the custom

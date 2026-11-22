@@ -156,10 +156,12 @@ appId: com.bballtracker.mobile
 - assertVisible: "Create a new link?"
 # The dialog's button is "Create new link"; the screen's is "New link".
 - tapOn: "Create new link"
+# Only a completed rotation shows this toast (the QR code was on screen before).
 - extendedWaitUntil:
-    visible:
-      id: "join-link-qr"
+    visible: "New link created. The old one no longer works."
     timeout: 10000
+- assertVisible:
+    id: "join-link-qr"
 
 # The player the approval added is on the roster.
 - tapOn: "Go back"

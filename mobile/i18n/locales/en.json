@@ -1161,7 +1161,9 @@
     "declineFailed": "Couldn't decline the request",
     "newLinkConfirm": "Create new link",
     "turnOffConfirm": "Turn off link",
-    "expired": "This link has expired. Create a new one to share."
+    "created": "Join link created",
+    "replaced": "New link created. The old one no longer works.",
+    "refreshFailed": "Couldn't refresh. Showing what was loaded before."
   },
   "join": {
     "loading": "Loading join link…",
