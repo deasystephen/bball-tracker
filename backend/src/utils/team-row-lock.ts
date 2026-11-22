@@ -18,9 +18,15 @@ import { Prisma } from '@prisma/client';
  * `lockTeamRow`) and `AccountService.deleteAccount` (every team where the user
  * holds HEAD_COACH, `lockTeamRows`).
  *
- * Lock order: User before Team wherever both are taken (account deletion
- * locks its User rows, then its teams in id order), and the staff writers
- * take only Team, so the two never wait on each other in a cycle.
+ * Lock order: User before League before Team wherever several are taken, and
+ * several Team rows only in one id-ordered statement (`lockTeamRows`). Account
+ * deletion locks its User rows, then its teams; `addStaffMember` the target's
+ * and requester's User rows, then the team (#1038); the staff invite and
+ * accept the inviter's or account's User row, then the team;
+ * `LeagueService.removeLeagueAdmin` the former admin's User row, the League,
+ * then its affected teams (#1038); the season rollover Users, League, Team.
+ * `removeStaffMember` and `changeStaffRole` take only Team. So no two of
+ * them wait on each other in a cycle.
  *
  * `FOR NO KEY UPDATE`, not `FOR UPDATE`: it conflicts with itself, which is
  * all the serialisation needs, but not with the `FOR KEY SHARE` that every

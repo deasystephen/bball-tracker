@@ -48,7 +48,12 @@ import { withTimeout } from '../utils/promise-timeout';
 import { publicAppUrl } from '../utils/urls';
 import { mailer } from './mailer';
 import { staffInvitationTemplate } from './mailer/templates';
-import { TEAM_STAFF_INCLUDE, TeamService, latestTeamSeasonId, type TeamStaffWithRelations } from './team-service';
+import {
+  LATEST_TEAM_SEASON_ORDER,
+  TEAM_STAFF_INCLUDE,
+  TeamService,
+  type TeamStaffWithRelations,
+} from './team-service';
 import type { InviteStaffInput, StaffRoleType } from '../api/teams/schemas';
 
 const STAFF_INVITE_EXPIRES_DAYS = 7;
@@ -80,10 +85,19 @@ class DeadStaffInvitationError extends BadRequestError {
   }
 }
 
-/** Whether the team-season is its lineage's latest (#461): the row a team continues on. */
+/**
+ * Whether the team-season is its lineage's latest (#461): the row a team
+ * continues on. One query (#1038): the newest team-season of the lineage that
+ * holds `teamId`, in `latestTeamSeasonId`'s order, instead of reading the
+ * team's lineage first.
+ */
 async function isLatestTeamSeason(tx: Prisma.TransactionClient, teamId: string): Promise<boolean> {
-  const team = await tx.team.findUnique({ where: { id: teamId }, select: { lineageId: true } });
-  return !!team && (await latestTeamSeasonId(tx, team.lineageId)) === teamId;
+  const latest = await tx.team.findFirst({
+    where: { lineage: { teams: { some: { id: teamId } } } },
+    orderBy: LATEST_TEAM_SEASON_ORDER,
+    select: { id: true },
+  });
+  return latest?.id === teamId;
 }
 
 /** Same bound as the other invitation sends: well under the mobile client's 10s timeout. */
@@ -102,6 +116,16 @@ export const STAFF_INVITATION_SELECT = {
   updatedAt: true,
   acceptedAt: true,
   rejectedAt: true,
+} satisfies Prisma.StaffInvitationSelect;
+
+/**
+ * What the decline answers (#1038): the row without `invitedEmail`, which the
+ * decline has just replaced with the per-row sentinel. Echoing that sentinel
+ * would read as an address.
+ */
+export const STAFF_INVITATION_DECLINED_SELECT = {
+  ...STAFF_INVITATION_SELECT,
+  invitedEmail: false,
 } satisfies Prisma.StaffInvitationSelect;
 
 /** A pending row as the team's staff screen lists it (head coaches only). */
@@ -124,6 +148,9 @@ const PUBLIC_STAFF_INVITATION_SELECT = {
 
 export type StaffInvitationSummary = Prisma.StaffInvitationGetPayload<{
   select: typeof STAFF_INVITATION_SELECT;
+}>;
+export type DeclinedStaffInvitation = Prisma.StaffInvitationGetPayload<{
+  select: typeof STAFF_INVITATION_DECLINED_SELECT;
 }>;
 export type StaffInvitationListItem = Prisma.StaffInvitationGetPayload<{
   select: typeof STAFF_INVITATION_LIST_SELECT;
@@ -508,7 +535,9 @@ export class StaffInvitationService {
     userId: string,
     found?: StaffInvitationSummary
   ): Promise<AcceptStaffInvitationResult> {
-    const invitation = found ?? (await this.requireInvitedUser(invitationId, userId));
+    // `found` is trusted only as the dispatch's row for this id (#1038).
+    const invitation =
+      found && found.id === invitationId ? found : await this.requireInvitedUser(invitationId, userId);
     return this.accept(invitation, userId);
   }
 
@@ -522,8 +551,10 @@ export class StaffInvitationService {
     invitationId: string,
     userId: string,
     found?: StaffInvitationSummary
-  ): Promise<StaffInvitationSummary> {
-    const invitation = found ?? (await this.requireInvitedUser(invitationId, userId));
+  ): Promise<DeclinedStaffInvitation> {
+    // `found` is trusted only as the dispatch's row for this id (#1038).
+    const invitation =
+      found && found.id === invitationId ? found : await this.requireInvitedUser(invitationId, userId);
     if (invitation.status !== 'PENDING') {
       throw new BadRequestError(`Cannot reject invitation with status: ${invitation.status}`);
     }
@@ -537,7 +568,7 @@ export class StaffInvitationService {
             rejectedAt: new Date(),
             invitedEmail: strippedEmailFor(invitation.id),
           },
-          select: STAFF_INVITATION_SELECT,
+          select: STAFF_INVITATION_DECLINED_SELECT,
         }),
       new BadRequestError('Cannot reject invitation: it is no longer pending')
     );
@@ -726,13 +757,17 @@ export class StaffInvitationService {
             throw new DeadStaffInvitationError(PAST_SEASON, 'past_season', teamId);
           }
 
-          const { count } = await tx.staffInvitation.updateMany({
-            where: { id: invitation.id, status: 'PENDING' },
-            data: { status: 'ACCEPTED', acceptedAt: new Date() },
-          });
-          if (count === 0) {
-            throw new BadRequestError('Cannot accept invitation: it is no longer pending');
-          }
+          // Guarded on the status, and the row the response carries in the
+          // same statement (#1038: no re-read at the end).
+          const updated = await orNotFound(
+            () =>
+              tx.staffInvitation.update({
+                where: { id: invitation.id, status: 'PENDING' },
+                data: { status: 'ACCEPTED', acceptedAt: new Date() },
+                select: STAFF_INVITATION_SELECT,
+              }),
+            new BadRequestError('Cannot accept invitation: it is no longer pending')
+          );
 
           const existing = await tx.teamStaff.findUnique({
             where: { teamId_userId: { teamId, userId: account.id } },
@@ -765,11 +800,6 @@ export class StaffInvitationService {
               data: { role: 'COACH' },
             });
           }
-
-          const updated = await tx.staffInvitation.findUniqueOrThrow({
-            where: { id: invitation.id },
-            select: STAFF_INVITATION_SELECT,
-          });
 
           return {
             account,

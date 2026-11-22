@@ -304,6 +304,10 @@ describe('Invitations API', () => {
       expect(response.body.invitation).not.toHaveProperty('token');
       expect(response.body).not.toHaveProperty('teamMember');
       expect(mockInvitationService.acceptInvitation).not.toHaveBeenCalled();
+      // The dispatch hands the row it found to the accept, which does not read it again (#1038).
+      expect(mockGuardianService.acceptInvitation).toHaveBeenCalledWith(guardianInvitationId, TEST_USER_ID, {
+        id: guardianInvitationId,
+      });
     });
 
     it('returns 403 when the guardian invitation was addressed to someone else', async () => {
