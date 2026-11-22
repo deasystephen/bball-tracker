@@ -165,6 +165,10 @@ describe('InvitationService', () => {
           }),
         })
       );
+      // The From display name is the inviting coach, the same person the body names.
+      const sendArgs = mockedMailerSend.mock.calls[mockedMailerSend.mock.calls.length - 1][0];
+      expect(sendArgs.senderName).toBeTruthy();
+      expect(sendArgs.senderName).toBe(sendArgs.variables.inviterName);
     });
 
     it('formats expiresAt in DEFAULT_TIMEZONE (audit #57)', async () => {

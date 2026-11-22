@@ -8,29 +8,45 @@ import { APP_NAME } from './templates/brand';
  * `senderName` is the person the message comes from (the coach who invited, the
  * author of an announcement). It is user-supplied text going into a mail
  * header, so it is used only when it is safe and reads as a name:
- *  - control characters and line breaks are removed (no header injection);
+ *  - it is NFKC-normalised first, so a look-alike such as the full-width
+ *    commercial at is judged as the character it imitates;
+ *  - control characters (line breaks included) and format characters
+ *    (zero-width characters, the right-to-left override) are removed: no
+ *    header injection, and nothing invisible that reorders the display;
  *  - anything containing `@`, `<` or `>` is refused, so a name can never look
  *    like another sender's address (several callers fall back to the person's
  *    email when they have no name);
- *  - it is cut to `MAX_SENDER_NAME_LENGTH` characters.
+ *  - anything containing `=?` is refused: mail clients decode an RFC 2047
+ *    encoded-word even inside a quoted string, which would smuggle any of the
+ *    above back in;
+ *  - it is cut to `MAX_SENDER_NAME_LENGTH` visible characters (grapheme
+ *    clusters, so a letter is never parted from its accent).
  * Otherwise the display name is the product name alone. "via Hooplings" stays
  * on every personal form: the message is sent by the app, not from the
- * person's own mailbox.
+ * person's own mailbox (the shared footer says where a reply goes).
  */
 export const MAX_SENDER_NAME_LENGTH = 40;
 
 /** Longest base64 payload that fits one RFC 2047 encoded-word (75 chars with `=?UTF-8?B?…?=`). */
 const ENCODED_WORD_MAX_BYTES = 45;
 
+const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+
 function cleanSenderName(senderName: string | undefined): string | null {
   if (!senderName) return null;
-  // Control characters include CR and LF: none may reach a header.
   const collapsed = senderName
+    .normalize('NFKC')
+    // Control characters include CR and LF: none may reach a header.
     .replace(/\p{Cc}+/gu, ' ')
+    .replace(/\p{Cf}+/gu, '')
     .replace(/\s+/g, ' ')
     .trim();
-  if (!collapsed || /[@<>]/.test(collapsed)) return null;
-  return Array.from(collapsed).slice(0, MAX_SENDER_NAME_LENGTH).join('').trim() || null;
+  if (!collapsed || /[@<>]/.test(collapsed) || collapsed.includes('=?')) return null;
+  const cut = Array.from(graphemes.segment(collapsed), (part) => part.segment)
+    .slice(0, MAX_SENDER_NAME_LENGTH)
+    .join('')
+    .trim();
+  return cut || null;
 }
 
 /** The display name alone, before any header encoding. */

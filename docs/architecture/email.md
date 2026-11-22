@@ -16,11 +16,16 @@ bare address. `Reply-To` stays `SUPPORT_EMAIL`.
   the announcement email its author, the reply notification the replier. The header then reads
   `"Dana Whitfield via Hooplings" <…>`. "via Hooplings" is always there: the app sends the
   message, not the person's own mailbox. The RSVP confirmation names nobody.
-- The name is user-supplied text in a mail header. Control characters and line breaks are
-  removed; a value containing `@`, `<` or `>` is not used at all (several callers fall back to
-  the person's email when there is no name, and a name must never read as another sender's
-  address); it is cut to 40 characters. ASCII is sent as a quoted string, anything else as UTF-8
-  RFC 2047 encoded-words. `tests/services/mailer-sender.test.ts` covers each case.
+- The name is user-supplied text in a mail header. It is NFKC-normalised; control characters
+  (line breaks included) and invisible format characters (zero-width, the right-to-left
+  override) are removed; a value containing `@`, `<`, `>` (or a look-alike of one, after
+  normalisation) or `=?` is not used at all (several callers fall back to the person's email
+  when there is no name, a name must never read as another sender's address, and mail clients
+  decode an encoded-word even inside quotes); it is cut to 40 visible characters. ASCII is sent
+  as a quoted string, anything else as UTF-8 RFC 2047 encoded-words.
+  `tests/services/mailer-sender.test.ts` covers each case.
+- A reply still goes to support (`Reply-To`), although the message now names a person; the
+  shared footer says so ("Replies go to Hooplings support, not to your coach.").
 - The sending role's IAM policy (`infra/ses.tf`) conditions on `ses:FromAddress` matching
   `*@mail.<domain>`, which is the address, not the display name.
 

@@ -271,7 +271,7 @@ with in-process rate limits only.
 
 ## Email — SES, DKIM, MAIL FROM, and DMARC
 
-Transactional email is sent from `noreply@mail.<primary_domain>` via AWS SES v2. `ses.tf`
+Transactional email is sent from `noreply@mail.<primary_domain>` (with a display name the API adds, `docs/architecture/email.md`) via AWS SES v2. `ses.tf`
 provisions the same set for every served domain:
 
 1. **SES domain identity** `mail.<domain>` with Easy DKIM (RSA-2048). SES generates three

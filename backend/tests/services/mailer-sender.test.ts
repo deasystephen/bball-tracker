@@ -44,15 +44,37 @@ describe('formatFromAddress', () => {
     }
   });
 
+  it('refuses look-alikes of those characters, judged after normalisation', () => {
+    // Full-width and small-form commercial at, full-width angle brackets.
+    for (const name of ['support\uFF20hooplings.com', 'support\uFE6Bhooplings.com', '\uFF1Cb\uFF1E']) {
+      expect(senderDisplayName(name)).toBe('Hooplings');
+    }
+  });
+
+  it('refuses an RFC 2047 encoded-word typed as a name (clients decode it inside quotes)', () => {
+    for (const name of ['=?UTF-8?Q?support=40hooplings.com?=', 'Dana =?UTF-8?B?QGV2aWw=?=']) {
+      expect(formatFromAddress(ADDRESS, name)).toBe('"Hooplings" <noreply@mail.example.test>');
+    }
+  });
+
+  it('removes invisible format characters: no right-to-left override, no zero-width padding', () => {
+    expect(senderDisplayName('Dana\u202E Whit\u200Bfield\u2066')).toBe('Dana Whitfield via Hooplings');
+  });
+
   it('escapes quotes and backslashes inside the quoted name', () => {
     expect(formatFromAddress(ADDRESS, 'Dana "Coach" W\\')).toBe(
       '"Dana \\"Coach\\" W\\\\ via Hooplings" <noreply@mail.example.test>'
     );
   });
 
-  it('cuts a very long name on a whole character', () => {
+  it('cuts a very long name on a whole visible character', () => {
     const long = 'é'.repeat(MAX_SENDER_NAME_LENGTH + 20);
     expect(senderDisplayName(long)).toBe(`${'é'.repeat(MAX_SENDER_NAME_LENGTH)} via Hooplings`);
+
+    // A base letter and a combining mark that has no precomposed form stay together.
+    const cluster = 'q\u0303';
+    const cut = senderDisplayName(cluster.repeat(MAX_SENDER_NAME_LENGTH + 5));
+    expect(cut).toBe(`${cluster.repeat(MAX_SENDER_NAME_LENGTH)} via Hooplings`);
   });
 
   it('encodes a non-ASCII name as UTF-8 encoded-words that each fit a header line and decode back', () => {
