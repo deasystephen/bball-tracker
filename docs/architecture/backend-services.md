@@ -158,12 +158,15 @@ All limiters are `express-rate-limit`, each with its own `SharedRateLimitStore` 
 
 | Limiter | Routes | Key | Budget |
 | --- | --- | --- | --- |
-| `apiRateLimit` | everything under `/api/v1` (mounted in `index.ts`) except `GET /invitations/by-token/:token` (`skipGlobalApiLimit`, #718: the SSR invite page calls it from one egress IP; it has its own IP and token limiters below) | IP | 100 / min |
+| `apiRateLimit` | everything under `/api/v1` (mounted in `index.ts`) except `GET /invitations/by-token/:token` and `GET /join/:token` (`skipGlobalApiLimit`, #718 and #210: the SSR invite and join pages call them from one egress IP; each has its own IP and token limiters below) | IP | 100 / min |
 | `authRateLimit` | `/auth/login`, `/callback`, `/debug`, `/dev-users`, `/dev-login` | IP | 20 / 15 min (100 in development) |
 | `refreshRateLimit` | `POST /auth/refresh` | sha256 of the refresh token, IP fallback | 60 / 15 min |
 | `inviteAcceptRateLimit` | `POST /invitations/by-token/:token/accept` only (renamed from `writeRateLimit` in #893; not a general write limiter, #823) | IP | 30 / min |
 | `invitationLookupIpRateLimit` | `GET /invitations/by-token/:token` (#718; looser than `apiRateLimit` because the SSR invite page shares one egress IP, but still bounds a random-token loop) | IP | 600 / 15 min (`INVITATION_LOOKUP_IP_MAX_PER_15_MIN`) |
 | `invitationTokenRateLimit` | `GET /invitations/by-token/:token` | sha256 of the token (`invitationTokenKey`; never the bearer token in Redis, #452) | 30 / 15 min |
+| `joinLinkLookupIpRateLimit` | `GET /join/:token` (#210, the team join link preview; its own counter, so a busy join link never spends the invitation pages' budget) | IP | 600 / 15 min |
+| `joinLinkTokenRateLimit` | `GET /join/:token` | sha256 of the token (`invitationTokenKey`) | 300 / 15 min (`JOIN_LINK_TOKEN_MAX_PER_15_MIN`): a whole team opens one link |
+| `joinRequestRateLimit` | `POST /join/:token` (ask to join) | `req.user.id` (`joinRequestUserKey`), IP fallback | 20 / hour |
 | `calendarFeedRateLimit` | `GET /teams/:id/calendar.ics` | IP | 60 / hour |
 | `exportRateLimit` | `GET /games/:id/export.csv`, `GET /games/:id/boxscore.pdf`, `GET /teams/:id/season-stats.csv` | `req.user.id` (`exportUserKey`), IP fallback | 20 / min, shared by the three routes |
 | `inviteRateLimit` | `POST /teams/:teamId/invitations` (create and Resend), `POST /teams/:teamId/players` (Add Player), `POST /teams/:teamId/members/:playerId/guardians` (guardian invite) | `req.user.id` (`inviteUserKey`), IP fallback | 60 / hour, shared by the three routes |

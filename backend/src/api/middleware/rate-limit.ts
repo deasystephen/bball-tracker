@@ -64,10 +64,14 @@ export const refreshRateLimit = rateLimit({
 
 /** `GET /invitations/by-token/:token`, relative to the `/api/v1` mount. */
 const INVITATION_LOOKUP_RE = /^\/invitations\/by-token\/[^/]+\/?$/;
+/** `GET /join/:token` (#210), the team join link preview, relative to the same mount. */
+const JOIN_LINK_LOOKUP_RE = /^\/join\/[^/]+\/?$/;
 
 /**
- * Requests the global IP-keyed limiter does not count (#718): only the public
- * invitation lookup. `hooplings.com/invite/<token>` renders server-side, so
+ * Requests the global IP-keyed limiter does not count (#718): the public
+ * invitation lookup and, for the same reason, the public join link preview
+ * (#210, `hooplings.com/join/<token>`, with `joinLinkLookupIpRateLimit` and
+ * `joinLinkTokenRateLimit` instead). `hooplings.com/invite/<token>` renders server-side, so
  * every lookup arrives from the web server's egress IP, and 100/min would
  * turn a busy minute into "Invitation Not Found" for every visitor. The
  * lookup has its own looser IP ceiling (`invitationLookupIpRateLimit`) and
@@ -76,7 +80,7 @@ const INVITATION_LOOKUP_RE = /^\/invitations\/by-token\/[^/]+\/?$/;
  * relative to the `/api/v1` mount point.
  */
 export function skipGlobalApiLimit(req: Request): boolean {
-  return req.method === 'GET' && INVITATION_LOOKUP_RE.test(req.path);
+  return req.method === 'GET' && (INVITATION_LOOKUP_RE.test(req.path) || JOIN_LINK_LOOKUP_RE.test(req.path));
 }
 
 /**
@@ -169,6 +173,38 @@ export const invitationTokenRateLimit = rateLimit({
 });
 
 /**
+ * Per-IP ceiling for the public join link preview, `GET /join/:token` (#210).
+ * Same reasoning and figure as `invitationLookupIpRateLimit`, with a counter
+ * of its own so a busy join link never spends the invitation pages' budget.
+ */
+export const joinLinkLookupIpRateLimit = rateLimit({
+  ...sharedStore('join-link-lookup-ip'),
+  windowMs: 15 * 60 * 1000,
+  max: INVITATION_LOOKUP_IP_MAX_PER_15_MIN,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many join link lookups, please try again later' },
+});
+
+/**
+ * Per-token budget for the join link preview. An invitation link has one
+ * reader; a join link is opened by a whole team within minutes of the coach
+ * posting it (and link-preview fetchers in the group chat read it too), so
+ * the budget is 300 per 15 minutes per token, not the invitation's 30.
+ */
+export const JOIN_LINK_TOKEN_MAX_PER_15_MIN = 300;
+
+export const joinLinkTokenRateLimit = rateLimit({
+  ...sharedStore('join-link-token'),
+  windowMs: 15 * 60 * 1000,
+  max: JOIN_LINK_TOKEN_MAX_PER_15_MIN,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: invitationTokenKey,
+  message: { error: 'Too many requests for this join link, please try again later' },
+});
+
+/**
  * Rate limit for the public iCalendar feed endpoint.
  *
  * The feed is token-authenticated via query param (calendar clients can't
@@ -246,4 +282,23 @@ export const inviteRateLimit = rateLimit({
   legacyHeaders: false,
   keyGenerator: inviteUserKey,
   message: { error: 'Too many invitations sent, please try again later' },
+});
+
+/** Key for `POST /join/:token`. */
+export const joinRequestUserKey = userKey('join-request-user');
+
+/**
+ * Rate limit for `POST /join/:token` (#210): 20 join requests per hour per
+ * account. A parent adding three children uses three; a looping account is
+ * stopped long before a coach's request list fills (the service also caps
+ * pending requests per account and team). Mounted after `authenticate`.
+ */
+export const joinRequestRateLimit = rateLimit({
+  ...sharedStore('join-request'),
+  windowMs: 60 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: joinRequestUserKey,
+  message: { error: 'Too many join requests, please try again later' },
 });

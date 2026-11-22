@@ -361,6 +361,100 @@ for every address match and the address stored trimmed and lower-cased; the shar
   account creation, the managed-record refusal, two concurrent accepts, the strip, deletion),
   `web/__tests__/invite-page.test.tsx`.
 
+### Team join links (#210, self-serve roster onboarding)
+
+A coach shares ONE link per team (group chat, or a QR code at practice) and families add
+themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by token) and
+`api/teams/routes.ts` (team-scoped), schemas in `api/join/schemas.ts`.
+
+- **Decision: a link lets a signed-in adult ASK; a roster manager approves.** The link names
+  nobody and is posted where it can be forwarded, so holding it grants nothing: `POST /join/:token`
+  creates a PENDING `TeamJoinRequest` and writes no roster row, and the requester cannot read the
+  team (`canAccessTeam` is false) until a caller with `canManageRoster` approves. The issue's
+  original "auto-join" was dropped because a member reads the roster, which is mostly children's
+  names. The alternative (auto-join, relying on expiry and revoke alone) is a change to
+  `requestToJoin` only; the tables would not change.
+- **Who can ask** (accounts are adults, `children-and-age.md`): `{ kind: 'self' }`, the account
+  holder joins as a player; or `{ kind: 'child', childName, relationship }`, a parent adds their
+  child. Nothing else about a child is accepted (the schema strips an email, an age, a date of
+  birth).
+- **Tables** (migration `20261122120000_team_join_link`, additive): `TeamJoinLink { teamId, token,
+  createdById?, expiresAt, maxUses?, useCount, revokedAt? }` and `TeamJoinRequest { teamId, linkId,
+  requesterId, kind SELF|CHILD, childName?, relationship?, status, decidedAt? }`. `status` reuses
+  `InvitationStatus` (PENDING, ACCEPTED = approved, REJECTED = declined). A new kind in its own
+  tables, like staff invitations, so no existing invitation reader sees it.
+- **The token is a bearer secret**, `randomBytes(32).toString('base64url')` like the invitation
+  tokens. It is read only through `JOIN_LINK_MANAGER_SELECT` and leaves the API only inside
+  `link.url` (`${PUBLIC_APP_URL}/join/<token>`) on the two roster-manager routes below; there is no
+  `token` field on any response, the team payload never carries the link, and no log line carries
+  the token (`utils/redact.ts` masks the segment after `/join/`, for the API route and the web
+  page). **A revoked link answers 404 like an unknown one**, on the preview and on the request, so
+  a rotated link tells its holder nothing.
+- **`POST /teams/:teamId/join-link { expiresInDays?, maxUses? }`** (`canManageRoster`): creates
+  the link and revokes the live one in the same transaction, behind the creator's `User` row lock
+  and then the team row lock (account deletion's order), so create **is** rotate and a team never
+  has two live links (proven with three concurrent creates). **Every link expires**: 14 days by
+  default (`JOIN_LINK_DEFAULT_EXPIRES_DAYS`), 1 to 30 on request; `maxUses` is 1 to 500 or `null`
+  (no cap, the default). 201 `{ link: { id, teamId, url, expiresAt, maxUses, useCount, createdAt } }`.
+- **`GET /teams/:teamId/join-link`** (`canManageRoster`): the live link (not revoked, not expired)
+  or `link: null`. A link at its cap is still returned so the coach sees why nobody can use it.
+  **`POST /teams/:teamId/join-link/revoke`**: revokes every live link, `{ revoked }`. Pending
+  requests stay for the coach to decide.
+- **`GET /join/:token`** (public): `{ link: { teamName, state } }`, `state` one of `active`,
+  `expired`, `full`. No roster, no coach, no counts, no team id. Logs `Join link viewed` (`linkId`,
+  `state`, `client`). Like the invitation lookup it is exempt from the global IP limit
+  (`skipGlobalApiLimit`) and has `joinLinkLookupIpRateLimit` (600 / 15 min per IP) plus
+  `joinLinkTokenRateLimit` (300 / 15 min per token: a whole team opens one link, where an
+  invitation has one reader).
+- **`POST /join/:token`** (`authenticate`, so the age gate applies; `joinRequestRateLimit`, 20 /
+  hour per account). 404 unknown or revoked; **410 `join_link_inactive`** (`JoinLinkInactiveError`,
+  `reason: 'expired' | 'full'`). Then one transaction behind the requester's `User` row lock:
+  - **Idempotent.** An account already on the roster, or a child of that name the account already
+    guards on the team, answers 200 `{ status: 'already_member', teamId, teamName }` and writes
+    nothing. A request already waiting (the SELF one, or a CHILD one of the same name) is returned
+    as it is, 200 `created: false`. Names are compared in code, trimmed, whitespace-collapsed and
+    case-folded (no SQL pattern match).
+  - **Cap:** at most `MAX_PENDING_JOIN_REQUESTS_PER_ACCOUNT` (6) pending requests per account and
+    team, 400 beyond.
+  - **One use of the link**, taken by a single conditional `UPDATE … SET "useCount" = "useCount" + 1
+    WHERE not revoked AND not expired AND ("maxUses" IS NULL OR "useCount" < "maxUses")`, so
+    `maxUses` holds under concurrency (zero rows → 404 or 410 from a re-read). **`maxUses` counts
+    requests, approved or not.**
+  - The PENDING row. 201 `{ status: 'pending', created: true, teamName, request: { id, kind,
+    status, createdAt } }` (no team id: a requester is not a member yet).
+  After commit: `Join request created` (ids and `kind`) and a best-effort push to the team's staff
+  whose role has `canManageRoster` ("Someone asked to join <team>", no person's name; data
+  `{ type: 'join_request', teamId }`). A failed push is a warn, never a failed request.
+- **`GET /teams/:teamId/join-requests`** (`canManageRoster`, 403 otherwise): the pending requests,
+  oldest first, each with `childName`, `relationship` and `requester` (`USER_SUMMARY_WITH_EMAIL_SELECT`:
+  the address is how a coach recognises who is asking; roster managers already see roster emails).
+- **`POST /teams/:teamId/join-requests/:requestId/approve`** writes the roster in one transaction:
+  locks the requester and the approver (`lockUsers`, one id-ordered statement), flips PENDING →
+  ACCEPTED guarded on the status (the loser of two approvals, or of approve against decline, gets
+  400) and clears `childName`. **SELF:** `teamMember.upsert` with `update: {}` for the requester.
+  **CHILD:** what Add Player's case 1 plus an accepted guardian invitation produce: a managed
+  `User` (`isManaged`, no email, no login, `managedById` = the approving coach), its `TeamMember`
+  and the `Guardian` link to the requester (`isPrimary`, the record's first), and a bare PLAYER
+  requester becomes PARENT (`GuardianService.promoteBareAccountToParent`, the guardian accept's
+  rule, now shared). Logs `Join request approved`; best-effort push to the requester.
+  **`…/decline`**: one status-guarded update, `childName` cleared, nothing written to the roster,
+  no notification. Order of refusals on both: team 404, 403, request 404 (another team's id), 400.
+- **Not built (deliberate):** approving a CHILD request always creates a new roster record. When
+  the coach already added that child, decline the request and use "Invite a parent" on the existing
+  row (`guardians.md`); linking a request to an existing record is a follow-up. A requester cannot
+  list or withdraw their own requests. A link is not moved by a season rollover: it stays on the
+  team-season it was created for.
+- **Account deletion and the under-age un-claim** delete every `TeamJoinRequest` the account sent
+  (`purgeLoginBindings`), so a sign-up that only asked to join is erased outright; `deleteAccount`
+  also sets `createdById` to null on the links the account created (the link stays live: every
+  request through it is approved by a current roster manager). Both relations are in
+  `USER_REFERENCE_COUNT_SELECT`. The data-subject export carries `joinRequests`.
+- Tests: `tests/api/join-links.test.ts` (route → real service → Prisma mock, every gate and
+  answer, no token on any body or log line), `tests/schemas/join-link.test.ts`,
+  `tests/integration/join-link.db.test.ts` (one live link under concurrent creates, no access
+  while pending or after a decline, `maxUses` under concurrency, expired and revoked, both approval
+  kinds, two concurrent approvals, deletion).
+
 ### Mobile roster & invite-status chips (roster/invite unification)
 
 - `app/teams/[id]/players.tsx` has ONE **Add Player** form (`useAddRosterPlayer` →

@@ -8,6 +8,7 @@ import seasonRoutes from './seasons/routes';
 import playerRoutes from './players/routes';
 import invitationPublicRoutes from './invitations/public-routes';
 import invitationRoutes from './invitations/routes';
+import joinRoutes from './join/routes';
 import statsRoutes from './stats/routes';
 import uploadRoutes from './uploads/routes';
 import adminRoutes from './admin/routes';
@@ -31,6 +32,9 @@ router.use('/players', playerRoutes);
 // router so token-based lookups bypass the authenticate middleware.
 router.use('/invitations', invitationPublicRoutes);
 router.use('/invitations', invitationRoutes);
+// Team join links by token (#210): a public preview and an authenticated
+// request; the router applies `authenticate` per route.
+router.use('/join', joinRoutes);
 router.use('/stats', statsRoutes);
 router.use('/uploads', uploadRoutes);
 router.use('/admin', adminRoutes);

@@ -66,7 +66,10 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
        announcement replies the child wrote and the `comment` on the child's practice availability
        answers (#33; the answers stay, like RSVPs) — the only free text a player authors; the schema
        holds no chat or messages; `purgeLoginBindings` (push and calendar-feed tokens, pending
-       team invitations `CANCELLED`, `recipientHash` cleared); the photo unless it is an upload
+       team invitations `CANCELLED`, `recipientHash` cleared, and every join request the account
+       sent through a team join link deleted, #210, a pending one carrying a child's name it
+       typed; `deleteAccount` additionally un-owns the join links the account created,
+       `createdById` → null, and the links stay live); the photo unless it is an upload
        under the `avatars/<id>/` prefix of the coach or another live staff member of the player's
        active-season teams (external URLs are cleared too, since the identity provider's photo is
        copied at claim time; a cleared photo in our bucket is deleted from S3 whoever uploaded it,

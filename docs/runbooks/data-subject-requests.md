@@ -218,7 +218,8 @@ on `deletedAt IS NULL`, so a request that raced the deletion cannot re-identify 
    The export contains: `user`, `personalLeague`, `teamMembers`, `teamStaff`, `leagueAdmins`,
    `guardiansAsParent`, `guardiansAsChild`, `receivedInvitations`, `sentInvitations`,
    `guardianInvitations`, `sentGuardianInvitations`, `staffInvitations`, `sentStaffInvitations`,
-   `gameRsvps`, `practiceAvailability`, `gameEvents`, `playerStats`,
+   `joinRequests` (requests sent through a team join link, #210; a pending one carries the child's
+   name the account typed), `gameRsvps`, `practiceAvailability`, `gameEvents`, `playerStats`,
    `pushTokens`, `calendarFeedTokens`, `announcements`, `announcementReplies`
    (`AccountService.exportUserData`; the integration test asserts this list).
 4. **Delete:**

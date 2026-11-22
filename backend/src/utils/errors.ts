@@ -336,6 +336,31 @@ export class ClaimedAccountError extends DetailedError<Record<string, never>> {
   }
 }
 
+export interface JoinLinkInactiveDetails extends Record<string, unknown> {
+  /** Why the link takes no more requests: past `expiresAt`, or at `maxUses`. */
+  reason: 'expired' | 'full';
+}
+
+/**
+ * 410 `join_link_inactive` — a team join link (#210) that exists and was not
+ * revoked, but takes no more requests. The app and the web page branch on
+ * `reason` to tell the family to ask the coach for a new link. A revoked or
+ * unknown link is a plain 404 instead: a rotated link tells its holder nothing.
+ */
+export class JoinLinkInactiveError extends DetailedError<JoinLinkInactiveDetails> {
+  constructor(reason: JoinLinkInactiveDetails['reason']) {
+    super(
+      'join_link_inactive',
+      { reason },
+      reason === 'expired'
+        ? 'This join link has expired. Ask the coach for a new one.'
+        : 'This join link has reached its limit. Ask the coach for a new one.',
+      410
+    );
+    Object.setPrototypeOf(this, JoinLinkInactiveError.prototype);
+  }
+}
+
 export class ConflictError extends AppError {
   constructor(message: string = 'Conflict') {
     super(message, 409);

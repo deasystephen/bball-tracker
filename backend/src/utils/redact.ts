@@ -6,7 +6,8 @@
  *   - query params: `?code=` / `?state=` on the OAuth callback, `?token=` on
  *     the public calendar feed;
  *   - path segments: `/invitations/by-token/<token>`, `/calendar/<token>`,
- *     `/invite/<token>` (web accept page).
+ *     `/invite/<token>` (web accept page), `/join/<token>` (team join
+ *     link, #210: the API route and the web page).
  *
  * Everything here is pure string/object manipulation so it can be unit-tested
  * and reused without touching Express or Sentry.
@@ -23,7 +24,7 @@ const SENSITIVE_QUERY_SUBSTRINGS = ['token', 'secret', 'password', 'authorizatio
 /**
  * Path segments whose *following* segment is a bearer secret and must be masked.
  */
-const SECRET_PATH_PARENTS = new Set(['by-token', 'calendar', 'invite']);
+const SECRET_PATH_PARENTS = new Set(['by-token', 'calendar', 'invite', 'join']);
 
 export function isSensitiveQueryKey(key: string): boolean {
   const lower = key.toLowerCase();
@@ -80,8 +81,8 @@ export function redactQueryString(qs: string | undefined | null): string {
 }
 
 /**
- * Mask secret path segments: the segment after `by-token`, `calendar` or
- * `invite` is replaced with `[redacted]`. Segments that are themselves a known
+ * Mask secret path segments: the segment after `by-token`, `calendar`,
+ * `invite` or `join` is replaced with `[redacted]`. Segments that are themselves a known
  * sub-resource (e.g. `/calendar/subscribe`) are left alone because they are
  * not secrets — only opaque tokens (no dots, length > 8) are masked.
  */
