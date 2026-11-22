@@ -46,7 +46,15 @@ import { Prisma } from '@prisma/client';
 import { PlayerService } from '../../src/services/player-service';
 import { teamAccessWhere } from '../../src/utils/permissions';
 import { emailEquals } from '../../src/utils/email-match';
-import { BadRequestError, ClaimedAccountError, ConflictError, NotFoundError, UploadExpiredError } from '../../src/utils/errors';
+import {
+  BadRequestError,
+  ClaimedAccountError,
+  ConflictError,
+  NotFoundError,
+  PlayerHasRecordsError,
+  UploadExpiredError,
+} from '../../src/utils/errors';
+import { USER_REFERENCE_COUNT_SELECT } from '../../src/services/account-service';
 import { mockPrisma } from '../setup';
 import {
   createPlayer,
@@ -1199,7 +1207,29 @@ describe('PlayerService', () => {
       ...createPlayer(opts),
       workosUserId: null,
     });
-
+    /** The reference counts of a row nothing points at (#1047). */
+    const bareRefs = (
+      counts: Record<string, number> = {},
+      personalLeague: { id: string } | null = null
+    ): { _count: Record<string, number>; personalLeague: { id: string } | null } => ({
+      _count: { ...Object.fromEntries(Object.keys(USER_REFERENCE_COUNT_SELECT).map((key) => [key, 0])), ...counts },
+      personalLeague,
+    });
+    /**
+     * Queue what the delete transaction reads after the unlocked reads: the
+     * FOR UPDATE row, then the reference counts (#1047).
+     */
+    function mockLockedRow(
+      row: { workosUserId: string | null; deletedAt: Date | null } | null = { workosUserId: null, deletedAt: null },
+      refs: ReturnType<typeof bareRefs> = bareRefs()
+    ): void {
+      (mockPrisma.$queryRaw as jest.Mock).mockResolvedValueOnce(row ? [row] : []);
+      // Only a live, unclaimed row reaches the reference read; queueing it
+      // otherwise would leak into the next test's first findUnique.
+      if (row && row.deletedAt === null && row.workosUserId === null) {
+        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValueOnce(refs);
+      }
+    }
 
     it('should delete player successfully', async () => {
       const player = unclaimedPlayer();
@@ -1213,14 +1243,17 @@ describe('PlayerService', () => {
           teamMembers: [],
           gameEvents: [],
         });
+      mockLockedRow();
       (mockPrisma.user.delete as jest.Mock).mockResolvedValue(player);
 
       const result = await PlayerService.deletePlayer(player.id, 'admin-id');
 
       expect(result).toEqual({ success: true });
-      // Guarded like every User write (#643); also refuses a row claimed since the read (#1034).
+      // The row is locked FOR UPDATE before the reference count (#1047).
+      expect(String((mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0].join('?'))).toContain('FOR UPDATE');
+      // Guarded like every User write (#643).
       expect(mockPrisma.user.delete).toHaveBeenCalledWith({
-        where: { id: player.id, deletedAt: null, AND: [{ workosUserId: null }] },
+        where: { id: player.id, deletedAt: null },
         select: { profilePictureUrl: true },
       });
       // One domain event, ids only.
@@ -1242,6 +1275,7 @@ describe('PlayerService', () => {
         (mockPrisma.user.findUnique as jest.Mock)
           .mockResolvedValueOnce(adminUser)
           .mockResolvedValueOnce({ ...player, teamMembers: [], gameEvents: [] });
+        mockLockedRow();
         return player;
       }
 
@@ -1270,7 +1304,6 @@ describe('PlayerService', () => {
       it('does not call deletePreviousAvatar when the delete throws', async () => {
         const player = mockDeletablePlayer(bucketUrl);
         (mockPrisma.user.delete as jest.Mock).mockRejectedValueOnce(p2025());
-        (mockPrisma.user.findUnique as jest.Mock).mockResolvedValueOnce(null); // re-read: gone
 
         await expect(PlayerService.deletePlayer(player.id, 'admin-id')).rejects.toMatchObject({ statusCode: 404 });
 
@@ -1308,6 +1341,7 @@ describe('PlayerService', () => {
       (mockPrisma.user.findUnique as jest.Mock)
         .mockResolvedValueOnce(adminUser)
         .mockResolvedValueOnce({ ...player, teamMembers: [], gameEvents: [] });
+      mockLockedRow();
       (mockPrisma.user.delete as jest.Mock).mockResolvedValue(player);
       const infoSpy = spyOnInfo();
 
@@ -1331,21 +1365,55 @@ describe('PlayerService', () => {
       expect(mockPrisma.user.delete).not.toHaveBeenCalled();
     });
 
-    it('answers 404 when the row is tombstoned between the read and the delete (#643)', async () => {
+    it.each([
+      ['tombstoned', { workosUserId: null, deletedAt: new Date() }],
+      ['erased', null],
+    ])('answers 404 when the row is %s between the read and the lock (#643)', async (_label, lockedRow) => {
       const player = unclaimedPlayer();
       (mockPrisma.user.findUnique as jest.Mock)
         .mockResolvedValueOnce(adminUser)
         .mockResolvedValueOnce({ ...player, teamMembers: [], gameEvents: [] });
-      (mockPrisma.user.delete as jest.Mock).mockRejectedValueOnce(p2025());
-      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValueOnce({
-        deletedAt: new Date(),
-        workosUserId: null,
-      }); // re-read: tombstoned
+      mockLockedRow(lockedRow);
 
       await expect(PlayerService.deletePlayer(player.id, 'admin-id')).rejects.toMatchObject({
         statusCode: 404,
         message: 'Player not found',
       });
+      expect(mockPrisma.user.delete).not.toHaveBeenCalled();
+    });
+
+    it('answers 404 when the reference read finds no row (#1047)', async () => {
+      const player = unclaimedPlayer();
+      (mockPrisma.user.findUnique as jest.Mock)
+        .mockResolvedValueOnce(adminUser)
+        .mockResolvedValueOnce({ ...player, teamMembers: [], gameEvents: [] });
+      (mockPrisma.$queryRaw as jest.Mock).mockResolvedValueOnce([{ workosUserId: null, deletedAt: null }]);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValueOnce(null);
+
+      await expect(PlayerService.deletePlayer(player.id, 'admin-id')).rejects.toMatchObject({ statusCode: 404 });
+      expect(mockPrisma.user.delete).not.toHaveBeenCalled();
+    });
+
+    it('refuses 409 player_has_records while anything references the row, and deletes nothing (#1047)', async () => {
+      const player = { ...unclaimedPlayer(), profilePictureUrl: 'https://example.test/a.jpg' };
+      const revokeSpy = jest.spyOn(ioRegistry, 'revokeUserSockets');
+      (mockPrisma.user.findUnique as jest.Mock)
+        .mockResolvedValueOnce(adminUser)
+        .mockResolvedValueOnce({ ...player, teamMembers: [], gameEvents: [] });
+      mockLockedRow(undefined, bareRefs({ guardiansAsChild: 1, gameRsvps: 2 }, { id: 'league-1' }));
+
+      const error = await PlayerService.deletePlayer(player.id, 'admin-id').catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(PlayerHasRecordsError);
+      expect((error as PlayerHasRecordsError).statusCode).toBe(409);
+      expect((error as PlayerHasRecordsError).body()).toMatchObject({
+        code: 'player_has_records',
+        relations: ['guardiansAsChild', 'gameRsvps', 'personalLeague'],
+      });
+      expect(mockPrisma.user.delete).not.toHaveBeenCalled();
+      expect(revokeSpy).not.toHaveBeenCalled();
+      expect(mockDeletePreviousAvatar).not.toHaveBeenCalled();
+      revokeSpy.mockRestore();
     });
 
     it('refuses a claimed account for an admin: 403 claimed_account, nothing deleted (#1034)', async () => {
@@ -1375,22 +1443,23 @@ describe('PlayerService', () => {
       (mockPrisma.user.findUnique as jest.Mock)
         .mockResolvedValueOnce(adminUser)
         .mockResolvedValueOnce({ ...row, teamMembers: [], gameEvents: [] });
+      mockLockedRow();
       (mockPrisma.user.delete as jest.Mock).mockResolvedValue(row);
 
       await expect(PlayerService.deletePlayer(row.id, 'admin-id')).resolves.toEqual({ success: true });
     });
 
-    it('answers 403 claimed_account when the row is claimed between the read and the delete (#1034)', async () => {
+    it('answers 403 claimed_account when the row is claimed between the read and the lock (#1034)', async () => {
       const player = unclaimedPlayer();
       (mockPrisma.user.findUnique as jest.Mock)
         .mockResolvedValueOnce(adminUser)
-        .mockResolvedValueOnce({ ...player, teamMembers: [], gameEvents: [] })
-        .mockResolvedValueOnce({ deletedAt: null, workosUserId: 'user_workos_2' }); // re-read after P2025
-      // The guarded write matches nothing once `workosUserId` is set.
-      (mockPrisma.user.delete as jest.Mock).mockRejectedValueOnce(p2025());
+        .mockResolvedValueOnce({ ...player, teamMembers: [], gameEvents: [] });
+      // The locked row has a login by now.
+      mockLockedRow({ deletedAt: null, workosUserId: 'user_workos_2' });
       const revokeSpy = jest.spyOn(ioRegistry, 'revokeUserSockets');
 
       await expect(PlayerService.deletePlayer(player.id, 'admin-id')).rejects.toBeInstanceOf(ClaimedAccountError);
+      expect(mockPrisma.user.delete).not.toHaveBeenCalled();
       expect(revokeSpy).not.toHaveBeenCalled();
       revokeSpy.mockRestore();
     });
@@ -1518,6 +1587,7 @@ describe('PlayerService', () => {
       (mockPrisma.user.findUnique as jest.Mock)
         .mockResolvedValueOnce(coach)
         .mockResolvedValueOnce(managed);
+      mockLockedRow();
       (mockPrisma.teamMember.findMany as jest.Mock).mockResolvedValue([]);
       (mockPrisma.user.delete as jest.Mock).mockResolvedValue(managed);
 
