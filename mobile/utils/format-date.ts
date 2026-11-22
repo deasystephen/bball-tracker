@@ -142,27 +142,34 @@ export interface WallClock {
  */
 export function wallClockIn(value: Date | string, timeZone: string): WallClock | null {
   const instant = toDate(value);
-  const options: Intl.DateTimeFormatOptions = {
-    hourCycle: 'h23',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  };
   let parts: Intl.DateTimeFormatPart[];
   try {
-    parts = new Intl.DateTimeFormat('en-US', { ...options, timeZone }).formatToParts(instant);
+    parts = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      hour12: false,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).formatToParts(instant);
   } catch {
     return null;
   }
-  const field = (type: Intl.DateTimeFormatPartTypes): string => parts.find((p) => p.type === type)?.value ?? '00';
-  // Some engines write midnight as "24" even with h23.
-  const hour = field('hour') === '24' ? '00' : field('hour');
-  return {
-    date: `${field('year').padStart(4, '0')}-${field('month')}-${field('day')}`,
-    time: `${hour}:${field('minute')}`,
+  // A runtime that ignored the 24-hour clock, or did not split the fields
+  // out, gives no reading rather than a wrong one.
+  if (parts.some((p) => p.type === 'dayPeriod')) return null;
+  const field = (type: Intl.DateTimeFormatPartTypes): number | null => {
+    const raw = parts.find((p) => p.type === type)?.value;
+    return raw !== undefined && /^\d+$/.test(raw) ? Number(raw) : null;
   };
+  const [year, month, day, rawHour, minute] = (['year', 'month', 'day', 'hour', 'minute'] as const).map(field);
+  if (year === null || month === null || day === null || rawHour === null || minute === null) return null;
+  // Some engines write midnight as 24 with a 24-hour clock.
+  const hour = rawHour === 24 ? 0 : rawHour;
+  if (month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || minute > 59) return null;
+  const pad = (n: number, width = 2): string => String(n).padStart(width, '0');
+  return { date: `${pad(year, 4)}-${pad(month)}-${pad(day)}`, time: `${pad(hour)}:${pad(minute)}` };
 }
 
 /**

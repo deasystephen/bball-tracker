@@ -178,12 +178,18 @@ export function pickerDateFor(key: string): Date {
 
 /**
  * A device-local Date that only carries a wall time "HH:MM" to and from a
- * time picker (read back with `toLocalTimeKey`). It sits on a fixed mid-January
- * day, when no zone changes its clocks, so every HH:MM exists on it (on the
+ * time picker (read back with `toLocalTimeKey`). It sits on a mid-January or
+ * mid-July day, away from today's daylight-saving changes, and the first one
+ * on which the device's clock really shows that HH:MM is used (on the
  * practice's own date the device might skip that hour). Never sent to the API.
  */
 export function pickerTimeFor(hhmm: string): Date {
   const [hours, minutes] = hhmm.split(':').map((part) => Number(part));
+  const days: [number, number][] =[[0, 15], [6, 15], [0, 16]];
+  for (const [month, day] of days) {
+    const carrier = new Date(2001, month, day, hours, minutes, 0, 0);
+    if (carrier.getHours() === hours && carrier.getMinutes() === minutes) return carrier;
+  }
   return new Date(2001, 0, 15, hours, minutes, 0, 0);
 }
 

@@ -168,8 +168,9 @@ export default function EditPracticeScreen() {
   const initial = detailsOf(source);
   const details: PracticeDetailsValue = { ...initial, ...edits };
   // The practice's own wall time at its start, and the coach's edit of it.
-  // Null when this device does not know the practice's zone: the date and
-  // time are then shown in it where possible but not offered for change.
+  // Null when this device cannot read the practice's clock (a zone its
+  // runtime does not know): the date and time are then neither shown nor
+  // offered for change, since the device's clock would be another zone's.
   const storedWall = wallClockIn(practice.startsAt, timeZone);
   const start = startEdit ?? storedWall;
   const startMoved = !!start && !!storedWall && (start.date !== storedWall.date || start.time !== storedWall.time);

@@ -354,6 +354,25 @@ describe('wall clock in a practice zone (#1051)', () => {
     expect(wallClockIn('2027-01-05T00:00:00Z', 'UTC')).toEqual({ date: '2027-01-05', time: '00:00' });
   });
 
+  it('reads nothing from a runtime that keeps a 12-hour clock or does not split the fields', () => {
+    const spy = jest.spyOn(Intl.DateTimeFormat.prototype, 'formatToParts');
+    try {
+      spy.mockReturnValueOnce([
+        { type: 'month', value: '03' },
+        { type: 'day', value: '11' },
+        { type: 'year', value: '2027' },
+        { type: 'hour', value: '06' },
+        { type: 'minute', value: '00' },
+        { type: 'dayPeriod', value: 'PM' },
+      ]);
+      expect(wallClockIn('2027-03-11T23:00:00Z', 'America/New_York')).toBeNull();
+      spy.mockReturnValueOnce([{ type: 'literal', value: '3/11/2027, 18:00' }]);
+      expect(wallClockIn('2027-03-11T23:00:00Z', 'America/New_York')).toBeNull();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it('reads nothing for a zone the runtime does not know (never the device clock)', () => {
     expect(wallClockIn(new Date(2027, 0, 5, 18, 7), 'Not/AZone')).toBeNull();
   });
