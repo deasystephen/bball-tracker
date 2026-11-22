@@ -8,6 +8,7 @@ import {
   getRosterStatus,
   rosterStatusLabel,
   rosterStatusColor,
+  type GuardianInvitationStatusRow,
   type TeamInvitationStatusRow,
 } from '../../utils/roster-status';
 
@@ -113,5 +114,67 @@ describe('labels and colors', () => {
   ] as const)('%s → "%s" in %s', (status, label, color) => {
     expect(rosterStatusLabel(status)).toBe(label);
     expect(rosterStatusColor(status, palette)).toBe(color);
+  });
+});
+
+describe('getRosterStatus: the guardian path (#1082)', () => {
+  const parentRow = (playerId: string, expiresAt: string, id = `ginv-${playerId}`): GuardianInvitationStatusRow => ({
+    id,
+    playerId,
+    status: 'PENDING',
+    expiresAt,
+    createdAt: '2026-08-27T12:00:00Z',
+  });
+  const palette = { success: 's', primary: 'p', warning: 'w', textSecondary: 'n' };
+
+  it('a managed child whose parent has a live invitation is Parent invited, not Not invited', () => {
+    const result = getRosterStatus(member('c1', true), [], NOW, { invitations: [parentRow('c1', FUTURE)] });
+    expect(result).toEqual({ status: 'parent_invited' });
+    expect(rosterStatusLabel('parent_invited')).toBe('Parent invited');
+    expect(rosterStatusColor('parent_invited', palette)).toBe('p');
+  });
+
+  it('a lapsed parent invitation is Parent invite expired', () => {
+    const result = getRosterStatus(member('c1', true), [], NOW, { invitations: [parentRow('c1', PAST)] });
+    expect(result.status).toBe('parent_invite_expired');
+    expect(rosterStatusLabel('parent_invite_expired')).toBe('Parent invite expired');
+    expect(rosterStatusColor('parent_invite_expired', palette)).toBe('w');
+  });
+
+  it('one live parent invitation outweighs another parent\'s lapsed one', () => {
+    const result = getRosterStatus(member('c1', true), [], NOW, {
+      invitations: [parentRow('c1', PAST, 'old'), parentRow('c1', FUTURE, 'live')],
+    });
+    expect(result.status).toBe('parent_invited');
+  });
+
+  it('a linked parent is Parent connected, even with another invitation still pending', () => {
+    const result = getRosterStatus(member('c1', true), [], NOW, {
+      linked: true,
+      invitations: [parentRow('c1', FUTURE)],
+    });
+    expect(result.status).toBe('parent_connected');
+    expect(rosterStatusLabel('parent_connected')).toBe('Parent connected');
+    expect(rosterStatusColor('parent_connected', palette)).toBe('s');
+  });
+
+  it('ignores another player\'s parent invitation', () => {
+    const result = getRosterStatus(member('c1', true), [], NOW, { invitations: [parentRow('c2', FUTURE)] });
+    expect(result.status).toBe('not_invited');
+  });
+
+  it('the player\'s own invitation wins over the parent state', () => {
+    const own = row('c1', 'PENDING', FUTURE);
+    const result = getRosterStatus(member('c1', true), [own], NOW, { linked: true });
+    expect(result).toEqual({ status: 'invited', pendingInvitation: own });
+  });
+
+  it('a claimed account stays Active whatever the parent state', () => {
+    expect(getRosterStatus(member('p1', false), [], NOW, { invitations: [parentRow('p1', FUTURE)] }).status).toBe('active');
+  });
+
+  it('no guardian state at all (an older API) still reads Not invited', () => {
+    expect(getRosterStatus(member('c1', true), [], NOW).status).toBe('not_invited');
+    expect(getRosterStatus(member('c1', true), [], NOW, { invitations: null }).status).toBe('not_invited');
   });
 });

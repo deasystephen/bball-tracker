@@ -417,6 +417,39 @@ describe('Teams API', () => {
       expect(response.body.team.members[0].player).toEqual({ id: 'p-1', name: 'Player One' });
       expect(response.body.team.members[0].player.email).toBeUndefined();
     });
+
+    it('returns the parent invitation state the service resolved for a roster manager (#1082)', async () => {
+      mockTeamService.getTeamById.mockResolvedValue({
+        ...mockTeam,
+        members: [{ playerId: 'p-1', jerseyNumber: 7, player: { id: 'p-1', name: 'Player One', email: null } }],
+        invitations: [],
+        guardianInvitations: [
+          {
+            id: 'ginv-1',
+            playerId: 'p-1',
+            status: 'PENDING',
+            expiresAt: new Date('2026-12-01T00:00:00.000Z'),
+            createdAt: new Date('2026-11-22T22:00:34.000Z'),
+          },
+        ],
+        guardianLinkedPlayerIds: ['p-2'],
+      } as unknown as Awaited<ReturnType<typeof mockTeamService.getTeamById>>);
+
+      const response = await request(app).get(`/api/v1/teams/${TEST_TEAM_ID}`);
+
+      expect(response.status).toBe(200);
+      // Dates go out as ISO strings, which is what the app's expiry check parses.
+      expect(response.body.team.guardianInvitations).toEqual([
+        {
+          id: 'ginv-1',
+          playerId: 'p-1',
+          status: 'PENDING',
+          expiresAt: '2026-12-01T00:00:00.000Z',
+          createdAt: '2026-11-22T22:00:34.000Z',
+        },
+      ]);
+      expect(response.body.team.guardianLinkedPlayerIds).toEqual(['p-2']);
+    });
   });
 
   describe('PATCH /api/v1/teams/:id', () => {

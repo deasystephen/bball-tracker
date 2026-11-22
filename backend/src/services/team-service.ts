@@ -223,6 +223,25 @@ export type TeamWithRelations = Prisma.TeamGetPayload<{ include: typeof TEAM_INC
 export type TeamDetail = Prisma.TeamGetPayload<{ include: typeof TEAM_DETAIL_INCLUDE }>;
 type TeamDetailMember = TeamDetail['members'][number];
 type RosterManagerOnlyField = 'email' | 'emailSuppressedAt' | 'emailSuppressedReason';
+/**
+ * A pending parent/guardian invitation as the roster chip needs it (#1082):
+ * never the `token` (a bearer secret) and never `invitedEmail`.
+ */
+const ROSTER_GUARDIAN_INVITATION_SELECT = {
+  id: true,
+  childId: true,
+  expiresAt: true,
+  createdAt: true,
+} satisfies Prisma.GuardianInvitationSelect;
+
+/** One pending parent/guardian invitation for a rostered player (#1082). No token, no address. */
+export interface RosterGuardianInvitation {
+  id: string;
+  playerId: string;
+  status: 'PENDING';
+  expiresAt: Date;
+  createdAt: Date;
+}
 const ROSTER_MANAGER_ONLY_FIELDS: readonly RosterManagerOnlyField[] = ['email', 'emailSuppressedAt', 'emailSuppressedReason'];
 
 /**
@@ -247,6 +266,14 @@ export function omitRosterManagerFields<T extends { email: string | null }>(
  * the player without them (`omitRosterManagerFields`).
  */
 export type TeamDetailView = Omit<TeamDetail, 'members'> & {
+  /**
+   * Pending parent/guardian invitations for rostered players, sent from this
+   * team's lineage (the scope Resend works in), latest expiry first (#1082).
+   * Roster managers only; empty for everyone else.
+   */
+  guardianInvitations: RosterGuardianInvitation[];
+  /** Rostered players with at least one linked parent/guardian. Roster managers only. */
+  guardianLinkedPlayerIds: string[];
   /**
    * Whether this row is its lineage's latest team-season (#461,
    * `latestTeamSeasonId`): only that row may start the next season, so the
@@ -619,10 +646,39 @@ export class TeamService {
       // ROSTERED players only; case-3 (existing-account, not-yet-member)
       // invites come from GET /invitations?teamId= client-side (red-team RT7).
       const memberIds = new Set(team.members.map((m) => m.playerId));
+      // The guardian path's invite state (#1082): a child under 13 has no
+      // invitation of their own, the parent has one. Read only for roster
+      // managers. Invitations are scoped to this team's lineage, as Resend is
+      // (`GuardianService.listGuardians`): another club's invitation is not
+      // this coach's to see or act on. A linked guardian is a fact about the
+      // child, whichever team the link came through.
+      const playerIds = [...memberIds];
+      const [pendingGuardianInvitations, guardianLinks] = await Promise.all([
+        prisma.guardianInvitation.findMany({
+          where: { childId: { in: playerIds }, status: 'PENDING', team: { lineageId: team.lineageId } },
+          select: ROSTER_GUARDIAN_INVITATION_SELECT,
+          orderBy: { expiresAt: 'desc' },
+        }),
+        prisma.guardian.findMany({
+          where: { childId: { in: playerIds } },
+          select: { childId: true },
+          distinct: ['childId'],
+        }),
+      ]);
+      const guardianInvitations: RosterGuardianInvitation[] = pendingGuardianInvitations.map((row) => ({
+        id: row.id,
+        playerId: row.childId,
+        status: 'PENDING',
+        expiresAt: row.expiresAt,
+        createdAt: row.createdAt,
+      }));
+      const guardianLinkedPlayerIds = guardianLinks.map((link) => link.childId);
       return {
         ...team,
         ...latest,
         invitations: team.invitations.filter((inv) => memberIds.has(inv.playerId)),
+        guardianInvitations,
+        guardianLinkedPlayerIds,
       };
     }
 
@@ -630,6 +686,8 @@ export class TeamService {
       ...team,
       ...latest,
       invitations: [],
+      guardianInvitations: [],
+      guardianLinkedPlayerIds: [],
       members: team.members.map(({ player, ...member }) => ({
         ...member,
         player: omitRosterManagerFields(player),

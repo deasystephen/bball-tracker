@@ -16,7 +16,7 @@ import {
   invitationKeys,
   type TeamFilters,
 } from './query-keys';
-import type { TeamInvitationStatusRow } from '../utils/roster-status';
+import type { GuardianInvitationStatusRow, TeamInvitationStatusRow } from '../utils/roster-status';
 import type { GuardianRelationship } from '../../shared/types';
 
 // Types
@@ -115,6 +115,13 @@ export interface Team {
    * roster) come from `GET /invitations?teamId=` instead — dedupe by playerId.
    */
   invitations?: TeamInvitationStatusRow[];
+  /**
+   * Pending parent/guardian invitations for rostered players (#1082). Roster
+   * managers only (others get `[]`); never the invited address or the token.
+   */
+  guardianInvitations?: GuardianInvitationStatusRow[];
+  /** Rostered players with at least one linked parent/guardian. Roster managers only. */
+  guardianLinkedPlayerIds?: string[];
   _count?: {
     members: number;
     staff: number;

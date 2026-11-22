@@ -50,7 +50,24 @@ eng-review amendments recorded there).
   callers without `canManageRoster` (same rule as member emails). Chip derivation: Active =
   `player.isManaged === false` (claimed via login) **or** latest invitation ACCEPTED (web-link
   accepters never clear `isManaged`); Invited = PENDING unexpired; Invite expired = PENDING past
-  `expiresAt` (client-computed); Not invited = everything else. Existing-account pending invites
+  `expiresAt` (client-computed); Not invited = everything else. **The guardian path has its own
+  three states (#1082):** a child under 13 has no invitation of their own, so without them every
+  child added with a parent email read "Not invited" although the parent's email had gone out.
+  The same payload carries, for roster managers only, `guardianInvitations` (PENDING
+  `GuardianInvitation` rows of rostered players **sent from this team's lineage**, the scope
+  Resend works in, so another club's invitation for the same child never shows here: `id`,
+  `playerId`, `status`, `expiresAt`, `createdAt`; never the invited address or the token) and
+  `guardianLinkedPlayerIds` (players with at least one `Guardian` row, whichever team the link
+  came through). `getTeamById` reads both only inside the `canManageRoster` branch; other
+  callers get empty lists and no query runs for them. With no invitation of the player's own: a
+  linked parent = Parent connected; a live PENDING guardian invitation = Parent invited; only
+  lapsed ones = Parent invite expired. The player's own invitation wins when there is one. For
+  Parent connected and Parent invited the row menu's "Invite a parent" reads "Parents &
+  guardians" (the same screen, which lists the live invitation with its Resend). Parent invite
+  expired keeps "Invite a parent", because that screen lists unexpired invitations only. The
+  parent states say nothing about the player's own address, so "Send invitation" and the
+  fix-email sheet's "Save and send" are still offered when the player has one.
+  Existing-account pending invites
   (case 3, no member row) render client-side from `GET /invitations?teamId=`, deduped against
   `members[]` by `playerId`.
 - **Resend = supersede:** `POST /teams/:id/invitations { playerId, supersede: true }` expires the

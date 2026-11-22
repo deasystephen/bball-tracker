@@ -160,7 +160,32 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 type AgeAnswer = 'yes' | 'no';
 
 /** Roster statuses where the player is still waiting on an invitation email. */
-const AWAITING_INVITE: ReadonlySet<RosterStatus> = new Set(['invited', 'invite_expired', 'not_invited']);
+const AWAITING_INVITE: ReadonlySet<RosterStatus> = new Set([
+  'invited',
+  'invite_expired',
+  'not_invited',
+  // The parent states say nothing about the player's own email: with an
+  // address on file an invitation to it is still owed (#1082).
+  'parent_connected',
+  'parent_invited',
+  'parent_invite_expired',
+]);
+
+/** Statuses where the player has no invitation of their own, so one can be sent to their address. */
+const NO_OWN_INVITE: ReadonlySet<RosterStatus> = new Set([
+  'not_invited',
+  'parent_connected',
+  'parent_invited',
+  'parent_invite_expired',
+]);
+
+/**
+ * Statuses where a parent is linked or holds a live invitation: the menu opens
+ * the parents list (which shows the pending row and its Resend), it does not
+ * offer a first invite. A lapsed invitation is not listed there, so that
+ * state keeps "Invite a parent".
+ */
+const HAS_PARENT_STATE: ReadonlySet<RosterStatus> = new Set(['parent_connected', 'parent_invited']);
 
 export default function ManagePlayersScreen() {
   const router = useRouter();
@@ -538,6 +563,14 @@ export default function ManagePlayersScreen() {
   const statusNow = new Date();
   // Case-3 rows: pending invites for accounts not yet rostered, deduped
   // against members (rostered players get their chip from the team payload).
+  const guardianLinked = new Set(team.guardianLinkedPlayerIds ?? []);
+  /** The one place a roster row's status is derived, so the chip, the menu and the sheets agree. */
+  const statusOf = (member: (typeof members)[number]): RosterStatusResult =>
+    getRosterStatus(member, invitationsByPlayer.get(member.playerId), statusNow, {
+      invitations: team.guardianInvitations,
+      linked: guardianLinked.has(member.playerId),
+    });
+
   const pendingNonMemberInvites = (teamInvitationsData?.invitations || []).filter(
     (inv) =>
       // status re-check is deliberate defense against a stale cached page from
@@ -592,7 +625,7 @@ export default function ManagePlayersScreen() {
         label: t('roster.menu.resend'),
         onPress: () => handleResendInvite(member.playerId, playerName),
       });
-    } else if (status === 'not_invited' && member.player.email) {
+    } else if (NO_OWN_INVITE.has(status) && member.player.email) {
       // A never/no-longer-invited player needs an address on file
       items.push({
         label: t('roster.menu.send'),
@@ -607,7 +640,10 @@ export default function ManagePlayersScreen() {
     }
     if (member.player.isManaged) {
       items.push({
-        label: t('guardians.inviteParent'),
+        // Once a parent is linked or holds a live invitation, "Invite a parent"
+        // would read as if nothing had been sent (#1082); the same screen
+        // lists the pending invitation with its Resend.
+        label: HAS_PARENT_STATE.has(status) ? t('guardians.title') : t('guardians.inviteParent'),
         onPress: () => router.push(`/teams/${id}/players/${member.playerId}/guardians`),
       });
     }
@@ -624,11 +660,7 @@ export default function ManagePlayersScreen() {
   };
 
   const renderMemberRow = (member: (typeof members)[number]) => {
-    const rosterStatus = getRosterStatus(
-      member,
-      invitationsByPlayer.get(member.playerId),
-      statusNow
-    );
+    const rosterStatus = statusOf(member);
     const details = [
       member.jerseyNumber != null && `#${member.jerseyNumber}`,
       member.position,
@@ -1087,7 +1119,7 @@ export default function ManagePlayersScreen() {
             title={displayName(menuMember.player)}
             items={menuItemsFor(
               menuMember,
-              getRosterStatus(menuMember, invitationsByPlayer.get(menuMember.playerId), statusNow)
+              statusOf(menuMember)
             )}
             onClose={() => setMenuForPlayerId(null)}
           />
@@ -1167,7 +1199,7 @@ export default function ManagePlayersScreen() {
         const awaitingInvite =
           !!liveMember &&
           AWAITING_INVITE.has(
-            getRosterStatus(liveMember, invitationsByPlayer.get(liveMember.playerId), statusNow).status
+            statusOf(liveMember).status
           );
         const saving = updatePlayer.isPending || createInvitation.isPending;
         return (

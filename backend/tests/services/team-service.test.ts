@@ -446,6 +446,12 @@ describe('TeamService', () => {
   });
 
   describe('getTeamById', () => {
+    beforeEach(() => {
+      // Roster managers also read the parent invitation state (#1082).
+      (mockPrisma.guardianInvitation.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.guardian.findMany as jest.Mock).mockResolvedValue([]);
+    });
+
     it("says whether the row is its lineage's newest team-season, to a staff manager only (isLatestInLineage, #461)", async () => {
       const { team, coach, season, league, headCoachRole, coachStaff } = createFullTeam();
       (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({
@@ -634,6 +640,63 @@ describe('TeamService', () => {
       }
       // jersey etc. preserved
       expect(result.members[0]).toHaveProperty('jerseyNumber', members[0].member.jerseyNumber);
+      // The parent invitation state is roster-management information too, and
+      // is not even read for this caller (#1082).
+      expect(result.guardianInvitations).toEqual([]);
+      expect(result.guardianLinkedPlayerIds).toEqual([]);
+      expect(mockPrisma.guardianInvitation.findMany).not.toHaveBeenCalled();
+      expect(mockPrisma.guardian.findMany).not.toHaveBeenCalled();
+    });
+
+    it('gives roster managers the parent invitation state per player, scoped to the team lineage (#1082)', async () => {
+      const { team, coach, season, league, members, headCoachRole, coachStaff } = createFullTeam({ memberCount: 3 });
+      const [invited, linked, bare] = members.map((m) => m.player);
+      const expiresAt = new Date('2026-12-01T00:00:00Z');
+      const createdAt = new Date('2026-11-22T22:00:34Z');
+      const rosterPlayer = (p: { id: string; name: string; email: string | null }): { id: string; name: string; email: string | null } => ({
+        id: p.id,
+        name: p.name,
+        email: p.email,
+      });
+
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({
+        ...team,
+        season: { ...season, league },
+        staff: [{ ...coachStaff, user: { id: coach.id, name: coach.name, email: coach.email }, role: headCoachRole }],
+        members: [invited, linked, bare].map((p) => ({ playerId: p.id, player: rosterPlayer(p) })),
+        games: [],
+        invitations: [],
+      });
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
+      (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
+      (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue({ ...coachStaff, role: headCoachRole });
+      (mockPrisma.guardianInvitation.findMany as jest.Mock).mockResolvedValueOnce([
+        { id: 'ginv-1', childId: invited.id, expiresAt, createdAt },
+      ]);
+      (mockPrisma.guardian.findMany as jest.Mock).mockResolvedValueOnce([{ childId: linked.id }]);
+
+      const result = await TeamService.getTeamById(team.id, coach.id);
+
+      expect(result.guardianInvitations).toEqual([
+        { id: 'ginv-1', playerId: invited.id, status: 'PENDING', expiresAt, createdAt },
+      ]);
+      expect(result.guardianLinkedPlayerIds).toEqual([linked.id]);
+      // Nothing rides on the player object, and the manager keeps the email.
+      expect(result.members.map((m) => m.player)).toEqual([invited, linked, bare].map(rosterPlayer));
+
+      // PENDING rows of rostered players, sent from this team's lineage only,
+      // and never the token or the invited address.
+      const playerIds = [invited.id, linked.id, bare.id];
+      expect(mockPrisma.guardianInvitation.findMany).toHaveBeenCalledWith({
+        where: { childId: { in: playerIds }, status: 'PENDING', team: { lineageId: team.lineageId } },
+        select: { id: true, childId: true, expiresAt: true, createdAt: true },
+        orderBy: { expiresAt: 'desc' },
+      });
+      expect(mockPrisma.guardian.findMany).toHaveBeenCalledWith({
+        where: { childId: { in: playerIds } },
+        select: { childId: true },
+        distinct: ['childId'],
+      });
     });
 
     it('omitRosterManagerFields removes only email and its delivery state (#642)', () => {

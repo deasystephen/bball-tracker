@@ -16,8 +16,17 @@
  *            │                                            link, never signed in)
  *            ├─ PENDING row, expiresAt future ──► INVITED
  *            ├─ PENDING row, expiresAt past ────► INVITE EXPIRED
+ *            ├─ a linked parent/guardian ───────► PARENT CONNECTED
+ *            ├─ PENDING guardian row, live ─────► PARENT INVITED
+ *            ├─ PENDING guardian row, lapsed ───► PARENT INVITE EXPIRED
  *            └─ otherwise ──────────────────────► NOT INVITED
  * ```
+ *
+ * The three parent states (#1082) are the guardian path: a child under 13 has
+ * no invitation of their own, the parent has one. They come from
+ * `team.guardianInvitations` (PENDING only, never the address or the token) and
+ * `team.guardianLinkedPlayerIds`, both roster-manager only. The player's own
+ * invitation wins when there is one.
  *
  * The rows come from `GET /teams/:id` (`team.invitations`, roster managers
  * only, PENDING+ACCEPTED for ROSTERED players, never the token). Resend
@@ -29,7 +38,15 @@ import { i18n } from '../i18n';
 
 import { isInvitationExpired } from './invitation-expiry';
 
-export type RosterStatus = 'deleted' | 'active' | 'invited' | 'invite_expired' | 'not_invited';
+export type RosterStatus =
+  | 'deleted'
+  | 'active'
+  | 'invited'
+  | 'invite_expired'
+  | 'parent_connected'
+  | 'parent_invited'
+  | 'parent_invite_expired'
+  | 'not_invited';
 
 /** One row of `team.invitations` on `GET /teams/:id` (roster managers only). */
 export interface TeamInvitationStatusRow {
@@ -38,6 +55,22 @@ export interface TeamInvitationStatusRow {
   status: 'PENDING' | 'ACCEPTED';
   expiresAt: string;
   createdAt: string;
+}
+
+/** One row of `team.guardianInvitations` on `GET /teams/:id` (roster managers only, #1082). */
+export interface GuardianInvitationStatusRow {
+  id: string;
+  playerId: string;
+  status: 'PENDING';
+  expiresAt: string;
+  createdAt: string;
+}
+
+/** The parent/guardian side of one roster row, from the team payload. */
+export interface RosterGuardianState {
+  invitations?: GuardianInvitationStatusRow[] | null;
+  /** At least one parent or guardian is linked to the player. */
+  linked?: boolean;
 }
 
 export interface RosterStatusResult {
@@ -49,7 +82,8 @@ export interface RosterStatusResult {
 export function getRosterStatus(
   member: { playerId: string; player: { isManaged?: boolean; deletedAt?: string | null } },
   invitations: TeamInvitationStatusRow[] | undefined | null,
-  now: Date = new Date()
+  now: Date = new Date(),
+  guardian: RosterGuardianState = {}
 ): RosterStatusResult {
   // A deleted account stays on the roster as a tombstone (#444 D10); no
   // invite action applies to it, only Remove from team.
@@ -78,6 +112,20 @@ export function getRosterStatus(
     return { status: expired ? 'invite_expired' : 'invited', pendingInvitation: pending };
   }
 
+  // The guardian path (#1082): no invitation of the player's own.
+  if (guardian.linked) {
+    return { status: 'parent_connected' };
+  }
+  const parentRows = (guardian.invitations ?? []).filter(
+    (row) => row.playerId === member.playerId && row.status === 'PENDING'
+  );
+  if (parentRows.length > 0) {
+    // One live invitation is enough: a second parent's lapsed one does not
+    // make the player read as expired.
+    const live = parentRows.some((row) => !isInvitationExpired(row.expiresAt, now));
+    return { status: live ? 'parent_invited' : 'parent_invite_expired' };
+  }
+
   return { status: 'not_invited' };
 }
 
@@ -91,6 +139,12 @@ export function rosterStatusLabel(status: RosterStatus): string {
       return i18n.t('roster.status.invited');
     case 'invite_expired':
       return i18n.t('roster.status.inviteExpired');
+    case 'parent_connected':
+      return i18n.t('roster.status.parentConnected');
+    case 'parent_invited':
+      return i18n.t('roster.status.parentInvited');
+    case 'parent_invite_expired':
+      return i18n.t('roster.status.parentInviteExpired');
     case 'not_invited':
       return i18n.t('roster.status.notInvited');
   }
@@ -99,7 +153,8 @@ export function rosterStatusLabel(status: RosterStatus): string {
 /**
  * Chip color per status, from the theme palette. `active` = success,
  * `invited` = primary, `invite_expired` = warning, `not_invited` and
- * `deleted` = neutral.
+ * `deleted` = neutral. The parent states take the colour of their own-invite
+ * counterpart.
  */
 export function rosterStatusColor(
   status: RosterStatus,
@@ -109,10 +164,13 @@ export function rosterStatusColor(
     case 'deleted':
       return colors.textSecondary;
     case 'active':
+    case 'parent_connected':
       return colors.success;
     case 'invited':
+    case 'parent_invited':
       return colors.primary;
     case 'invite_expired':
+    case 'parent_invite_expired':
       return colors.warning;
     case 'not_invited':
       return colors.textSecondary;
