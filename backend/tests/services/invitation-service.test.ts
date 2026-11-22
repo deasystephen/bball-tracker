@@ -25,7 +25,7 @@ jest.mock('../../src/utils/team-row-lock', () => ({
   lockTeamRow: jest.fn().mockResolvedValue(true),
   lockTeamOrNotFound: jest.fn().mockResolvedValue(undefined),
 }));
-// The accepts lock the player's User row (#1087); the accept tests' mocked
+// The accepts key-share the player's User row (#1087); the accept tests' mocked
 // transactions carry no raw query, so there the lock is a no-op. Every other
 // caller (case 2's adoption) keeps the real helper over its mocked $queryRaw.
 jest.mock('../../src/utils/user-row-lock', () => {
@@ -34,6 +34,9 @@ jest.mock('../../src/utils/user-row-lock', () => {
     ...actual,
     lockUsers: jest.fn((tx: { $queryRaw?: unknown }, ids: string[]) =>
       typeof tx.$queryRaw === 'function' ? actual.lockUsers(tx, ids) : Promise.resolve([])
+    ),
+    keyShareUsers: jest.fn((tx: { $queryRaw?: unknown }, ids: string[]) =>
+      typeof tx.$queryRaw === 'function' ? actual.keyShareUsers(tx, ids) : Promise.resolve([])
     ),
   };
 });

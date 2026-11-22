@@ -38,7 +38,7 @@ import { EMAIL_SUPPRESSION_CLEARED } from '../utils/email-suppression';
 import { emailEquals } from '../utils/email-match';
 import { USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
 import { createOrConflict, isUniqueViolation } from '../utils/prisma-errors';
-import { lockUsers } from '../utils/user-row-lock';
+import { keyShareUsers, lockUsers } from '../utils/user-row-lock';
 import { lockTeamOrNotFound, lockTeamRow } from '../utils/team-row-lock';
 import { assertJerseyNumberFree, findJerseyHolder } from '../utils/jersey-number';
 import {
@@ -864,11 +864,11 @@ export class InvitationService {
 
     // Use transaction to ensure atomicity
     const result = await prisma.$transaction(async (tx) => {
-      // The player's User row, then the team, then the invitation row: the
-      // order Add Player and account deletion take them in (the member insert
-      // below needs a key-share on the User row, which deletion's FOR UPDATE
-      // blocks), so the jersey check cannot race a roster add (#1087).
-      await lockUsers(tx, [invitation.playerId]);
+      // The player's User row (key-share, what the member insert below takes
+      // anyway), then the team, then the invitation row: User before Team as
+      // account deletion takes them, so the two never deadlock, and the jersey
+      // check behind the team lock cannot race a roster add (#1087).
+      await keyShareUsers(tx, [invitation.playerId]);
       await lockTeamRow(tx, invitation.teamId);
       // Flip PENDING -> ACCEPTED only if it is still PENDING. Two concurrent
       // accepts (double-tap, web + app) race here; the loser sees 0 rows and
@@ -1437,7 +1437,11 @@ export class InvitationService {
       }
 
       // User before Team (utils/team-row-lock.ts), and the team before any
-      // invitation row, the order accept takes them in (#1087).
+      // invitation row, the order accept takes them in (#1087). The acting
+      // coach is key-shared first: the invitation insert below names them,
+      // and their own account deletion holds that row FOR UPDATE while it
+      // waits for their teams.
+      await keyShareUsers(tx, [userId]);
       await lockTeamOrNotFound(tx, teamId);
       const existingMember = await tx.teamMember.findUnique({
         where: { teamId_playerId: { teamId, playerId } },
@@ -1649,8 +1653,8 @@ export class InvitationService {
     }
 
     const result = await prisma.$transaction(async (tx) => {
-      // User, then Team, as in acceptInvitation (#1087).
-      await lockUsers(tx, [invitation.playerId]);
+      // User (key-share), then Team, as in acceptInvitation (#1087).
+      await keyShareUsers(tx, [invitation.playerId]);
       await lockTeamRow(tx, invitation.teamId);
       const updatedInvitation = await this.transitionPending(
         tx,

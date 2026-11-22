@@ -57,7 +57,7 @@ import { USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
 import { createOrConflict, orNotFound } from '../utils/prisma-errors';
 import { lockTeamOrNotFound, lockTeamRow } from '../utils/team-row-lock';
 import { assertJerseyNumberFree } from '../utils/jersey-number';
-import { lockUsers } from '../utils/user-row-lock';
+import { keyShareUsers, lockUsers } from '../utils/user-row-lock';
 import { findOrCreateSeason, findSeasonByName, type SeasonByName } from './season-service';
 
 const TEAM_SUMMARY_SELECT = {
@@ -1339,8 +1339,12 @@ export class TeamService {
       () =>
         prisma.$transaction(async (tx) => {
           // User before Team (utils/team-row-lock.ts): the insert key-shares
-          // the player's User row, which account deletion holds FOR UPDATE.
-          await lockUsers(tx, [data.playerId]);
+          // the player's User row, which account deletion holds FOR UPDATE, so
+          // take that key-share first. A player deleted meanwhile is a 404.
+          const [locked] = await keyShareUsers(tx, [data.playerId]);
+          if (!locked || locked.deletedAt) {
+            throw new NotFoundError('Player not found');
+          }
           await lockTeamOrNotFound(tx, teamId);
           await assertJerseyNumberFree(tx, teamId, data.jerseyNumber);
           return tx.teamMember.create({

@@ -616,11 +616,17 @@ themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by 
   behind the team row lock (`lockTeamOrNotFound`, the `FOR NO KEY UPDATE` lock staff changes take;
   a team deleted meanwhile is a 404), so two concurrent adds of one number serialise and the second
   is refused. Lock order stays User → Team → invitation rows (`utils/team-row-lock.ts`): case 2
-  takes the reused user's lock, then the team, then expires invitation rows; `addPlayer` and both
-  accepts lock the player's `User` row, then the team, and the accepts do so **before** flipping
-  the invitation. The User lock comes first because the member insert key-shares the player's
-  `User` row, which account deletion holds `FOR UPDATE` while it waits for the teams it heads: with
-  Team first, an accept and a deletion could deadlock. Case 3 and `POST /teams/:teamId/invitations`
+  takes the reused user's lock, then key-shares the acting coach, then the team, then expires
+  invitation rows; `addPlayer` and both accepts key-share the player's `User` row, then lock the
+  team, and the accepts do so **before** flipping the invitation. Every `User` row a later insert
+  names is key-shared before the team lock (`utils/user-row-lock.ts#keyShareUsers`), because
+  account deletion holds the deleted user `FOR UPDATE` while it waits for the teams they head:
+  with Team first, an accept or an add and a deletion could deadlock. `FOR KEY SHARE`, not
+  `lockUsers`, so a coach's deletion rewriting `managedById` on the player meanwhile is not
+  blocked. Known residual: case 2's `FOR NO KEY UPDATE` on a reused row (it writes that row) can
+  still deadlock with the deletion of the coach who manages that row, if that coach heads the
+  team; PostgreSQL aborts one side (40P01) and a retry succeeds. `addPlayer` refuses a player
+  deleted before its lock with a 404. Case 3 and `POST /teams/:teamId/invitations`
   write no member row, so their check is unlocked and runs after the existing refusals (already on
   the team, pending invitation). An edit that sends a number takes the lock and decides "unchanged"
   from the member row read again under it (the earlier read is unlocked and may be stale); an edit
@@ -666,7 +672,9 @@ themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by 
   invite and edit; 0, blank and the own-number no-op; a pre-rule pair editing its position; a
   re-added member; a deleted holder; two concurrent adds held behind the team lock leave one
   holder, and fail without it; an accept waits on the player's `User` lock holding nothing on the
-  team side; accepts by id and by token joining with no number), `tests/services/{invitation,team}-service.test.ts`, `tests/api/teams.test.ts`
+  team side and does not wait on a plain update of that row; Add Player case 2 waits on the acting
+  coach's row before the team lock; a deleted player on `addPlayer`; accepts by id and by token
+  joining with no number), `tests/services/{invitation,team}-service.test.ts`, `tests/api/teams.test.ts`
   (the 409 body on all three routes); mobile `__tests__/app/players-roster-status.test.tsx` and
   `__tests__/utils/jersey-conflict.test.ts`.
 

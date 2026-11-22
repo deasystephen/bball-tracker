@@ -30,13 +30,17 @@ import { NotFoundError } from './errors';
  * them wait on each other in a cycle.
  *
  * The jersey-number rule (#1087, `utils/jersey-number.ts`) takes it too: Add
- * Player (case 2: the reused User, then Team, then the invitation rows it
- * expires), `addPlayer` (the player's User, then Team), a number change on
- * `updateTeamMember` (Team only; it writes no foreign key), and both
- * invitation accepts (the player's User, then Team, BEFORE flipping the
- * invitation row). The User lock comes first wherever the transaction then
- * inserts a member row, because that insert key-shares the User row that
- * account deletion holds FOR UPDATE while it waits for its teams.
+ * Player (case 2: the reused User, then a key-share on the acting coach, then
+ * Team, then the invitation rows it expires), `addPlayer` (a key-share on the
+ * player, then Team), a number change on `updateTeamMember` (Team only; it
+ * writes no foreign key), and both invitation accepts (a key-share on the
+ * player, then Team, BEFORE flipping the invitation row). Every User row a
+ * later insert names is key-shared before Team (`user-row-lock.ts#keyShareUsers`),
+ * because account deletion holds the deleted user FOR UPDATE while it waits
+ * for the teams they head. Known residual: case 2's `FOR NO KEY UPDATE` on a
+ * reused row (it updates that row) can still deadlock with the deletion of the
+ * coach who manages it, which rewrites `managedById` after locking their
+ * teams; PostgreSQL then aborts one side (40P01).
  *
  * `FOR NO KEY UPDATE`, not `FOR UPDATE`: it conflicts with itself, which is
  * all the serialisation needs, but not with the `FOR KEY SHARE` that every

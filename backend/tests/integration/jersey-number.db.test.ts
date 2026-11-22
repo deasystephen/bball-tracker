@@ -234,6 +234,54 @@ describe('Add Player (POST /teams/:teamId/players)', () => {
   });
 });
 
+describe('lock order against account deletion', () => {
+  it('Add Player case 2 waits on the acting coach\'s row before it takes the team lock', async () => {
+    const org = await team('order-case2');
+    const actorId = await fx.user('order-actor', 'COACH');
+    await fx.staff(actorId, org);
+    // An unclaimed, already-managed row: the reuse path, whose writes never
+    // touch the actor's row before the invitation insert.
+    const reusedId = await fx.user('order-reused', 'PLAYER');
+    await prisma.user.update({ where: { id: reusedId }, data: { isManaged: true, managedById: coachId } });
+    const email = `order-reused.${fx.run}@example.test`;
+    let add: Tracked<unknown> | undefined;
+
+    await prisma.$transaction(
+      async (holder) => {
+        // What the actor's own account deletion holds while it waits for their teams.
+        await holder.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${actorId} FOR UPDATE`;
+        add = track(
+          InvitationService.addRosterPlayer(org.teamId, { name: `order-${fx.run}`, playerEmail: email, jerseyNumber: 40 }, actorId)
+        );
+        add.promise.catch(() => undefined);
+
+        const blocked = await waitForBlockedBy(holder, await backendPid(holder), {
+          tables: ['Team', 'TeamInvitation', 'TeamMember'],
+          settled: add,
+        });
+        expect(blocked).toHaveLength(1);
+        expect(blocked[0].relations).toEqual([]);
+      },
+      { timeout: 10_000 }
+    );
+
+    await expect(add?.promise).resolves.toMatchObject({ rostered: true, invited: true });
+  });
+
+  it('adding a deleted player is a 404 (decided on the row read under the lock)', async () => {
+    const org = await team('order-deleted');
+    const playerId = await fx.user('order-deleted-player', 'PLAYER');
+    // The unlocked read before the transaction does not look at deletedAt;
+    // the key-shared row does.
+    await prisma.user.update({ where: { id: playerId }, data: { deletedAt: new Date() } });
+
+    await expect(
+      TeamService.addPlayer(org.teamId, { playerId, jerseyNumber: 41 }, coachId)
+    ).rejects.toMatchObject({ statusCode: 404, message: 'Player not found' });
+    expect(await numberOf(org, playerId)).toBeUndefined();
+  });
+});
+
 describe('sending an invitation with a number (POST /teams/:teamId/invitations)', () => {
   it('refuses an explicit number another member wears', async () => {
     const org = await team('invite-taken');
@@ -359,6 +407,22 @@ describe('accepting an invitation whose number was taken meanwhile', () => {
     );
 
     await expect(accept?.promise).resolves.toBeDefined();
+  });
+
+  it('does not wait on a plain update of the player row (deleting their managing coach rewrites managedById)', async () => {
+    const org = await team('accept-keyshare');
+    const sent = await invitation(org, 'accept-keyshare-invitee', 19);
+
+    await prisma.$transaction(
+      async (holder) => {
+        // What deleting the managing coach does to their players after it has
+        // locked the coach's teams: a non-key column update on the player row.
+        await holder.user.update({ where: { id: sent.playerId }, data: { managedById: null } });
+        const result = await InvitationService.acceptInvitation(sent.id, sent.playerId);
+        expect(result.teamMember.jerseyNumber).toBe(19);
+      },
+      { timeout: 10_000 }
+    );
   });
 
   it('keeps the invitation\'s number when it is still free', async () => {
