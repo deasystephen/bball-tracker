@@ -265,7 +265,15 @@ describe('the age gate and POST /api/v1/auth/age-confirmation', () => {
         logSpy.mockRestore();
         errSpy.mockRestore();
       }
-      const joined = lines.join('\n');
+      // Every line carries a random request id and a timestamp, and either can
+      // contain the digits of a year by chance (#1076). They are not where an
+      // answer could be written, so they are removed before the search.
+      const joined = lines
+        .join('\n')
+        .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '<uuid>')
+        .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z/g, '<timestamp>');
+      // The scrub must not hide the lines themselves: the requests did log.
+      expect(joined).toContain('<uuid>');
       expect(joined).not.toContain('1987');
       expect(joined).not.toContain(String(THIS_YEAR - 9));
       expect(joined).not.toContain('birthMonth');
