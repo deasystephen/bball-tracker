@@ -648,6 +648,16 @@ describe('LeagueService', () => {
           sqlOf(call).includes('FROM "Team"')
         );
         expect(teamLockIndex).toBeGreaterThan(0);
+        // The league row first (the rollover's User → League → Team order), so the set cannot move,
+        // then every team in ONE sorted statement.
+        const leagueLockIndex = (mockPrisma.$queryRaw as jest.Mock).mock.calls.findIndex((call) =>
+          sqlOf(call).includes('FROM "League"')
+        );
+        expect(leagueLockIndex).toBeGreaterThan(0);
+        expect(leagueLockIndex).toBeLessThan(teamLockIndex);
+        expect(
+          (mockPrisma.$queryRaw as jest.Mock).mock.calls.filter((call) => sqlOf(call).includes('FROM "Team"'))
+        ).toHaveLength(1);
         expect((mockPrisma.$queryRaw as jest.Mock).mock.invocationCallOrder[teamLockIndex]).toBeLessThan(
           (mockPrisma.staffInvitation.updateMany as jest.Mock).mock.invocationCallOrder[0]
         );

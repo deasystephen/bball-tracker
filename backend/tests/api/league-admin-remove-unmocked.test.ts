@@ -48,9 +48,7 @@ describe('DELETE /api/v1/leagues/:id/admins/:userId through the real LeagueServi
   });
 
   it('answers 200 and cancels the former admin\'s pending staff invitations on the league\'s teams', async () => {
-    (mockPrisma.staffInvitation.findMany as jest.Mock)
-      .mockResolvedValueOnce([{ teamId: TEAM_ID }])
-      .mockResolvedValueOnce([{ teamId: TEAM_ID }]); // stable once the team is locked
+    (mockPrisma.staffInvitation.findMany as jest.Mock).mockResolvedValueOnce([{ teamId: TEAM_ID }]);
     (mockPrisma.staffInvitation.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
 
     const response = await request(app).delete(`/api/v1/leagues/${LEAGUE_ID}/admins/${FORMER_ADMIN_ID}`);

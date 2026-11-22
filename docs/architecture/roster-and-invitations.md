@@ -309,9 +309,10 @@ for every address match and the address stored trimmed and lower-cased; the shar
     removing a league admin row (`LeagueService.removeLeagueAdmin`, #1038) does the same on every
     team of that league, in the removal's transaction and behind the former admin's `User` row lock,
     which a staff invite takes on its inviter, so an invite in flight is either cancelled or refused,
-    and then behind each affected team's lock (the lock head-coach removal and demotion hold, so when
-    both of a person's roles go at once the second removal sees the first and cancels; the set is
-    re-read after locking, for a rollover that moved rows meanwhile); a head coach of one of those
+    then behind the league row lock (the rollover's User → League → Team order, so no rollover moves
+    rows onto the league's teams meanwhile) and the affected teams' locks, taken in one sorted
+    statement (the lock head-coach removal and demotion hold, so when both of a person's roles go at
+    once the second removal sees the first and cancels); a head coach of one of those
     teams keeps that team's invitations; an accept already past its
     inviter re-check when the removal commits can still land, as one that committed just before it
     would); refuses

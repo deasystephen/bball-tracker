@@ -12,6 +12,7 @@ import { logger } from '../utils/logger';
 import { USER_SUMMARY_SELECT, USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
 import { lockUsers } from '../utils/user-row-lock';
 import { lockTeamRows } from '../utils/team-row-lock';
+import { lockLeagueRow } from '../utils/league-row-lock';
 import { TeamService } from './team-service';
 
 /**
@@ -497,13 +498,14 @@ export class LeagueService {
     // `User` row is locked first: a staff invite locks its inviter's row
     // before its own `canManageStaff` re-check and insert, so an invite in
     // flight either commits first (its row is cancelled here) or re-checks
-    // after this commit and is refused. Then each affected team row is locked
-    // (user before team, account deletion's order) before its
-    // `canManageStaff` read: staff removal and demotion hold that lock, so a
-    // concurrent removal of the same person's head-coach row is seen by
-    // whichever of the two runs second, and that one cancels. A season
-    // rollover moves PENDING rows under the source team's lock, so the set is
-    // read again once its teams are locked, until no new team appears.
+    // after this commit and is refused. Then the league row (`lockLeagueRow`,
+    // the season rollover's User → League → Team order): a rollover onto one
+    // of this league's teams holds it, so the set of teams read next cannot
+    // move. Those teams are locked in ONE sorted statement (`lockTeamRows`,
+    // the global id order account deletion relies on) before each
+    // `canManageStaff` read: staff removal and demotion hold the team lock,
+    // so a concurrent removal of the same person's head-coach row is seen by
+    // whichever of the two runs second, and that one cancels.
     const cancelledStaffInvitations = await prisma.$transaction(async (tx) => {
       await lockUsers(tx, [adminUserId]);
       // 404 rather than a Prisma P2025 → 500 when no such row
@@ -513,20 +515,14 @@ export class LeagueService {
       if (count === 0) {
         throw new NotFoundError('League admin not found');
       }
-      const teamIds = new Set<string>();
-      for (;;) {
-        const sent = await tx.staffInvitation.findMany({
-          where: { invitedById: adminUserId, status: 'PENDING', team: { season: { leagueId } } },
-          select: { teamId: true },
-          distinct: ['teamId'],
-        });
-        const added = sent.map((row) => row.teamId).filter((teamId) => !teamIds.has(teamId));
-        if (added.length === 0) {
-          break;
-        }
-        await lockTeamRows(tx, added);
-        added.forEach((teamId) => teamIds.add(teamId));
-      }
+      await lockLeagueRow(tx, leagueId);
+      const sent = await tx.staffInvitation.findMany({
+        where: { invitedById: adminUserId, status: 'PENDING', team: { season: { leagueId } } },
+        select: { teamId: true },
+        distinct: ['teamId'],
+      });
+      const teamIds = sent.map((row) => row.teamId);
+      await lockTeamRows(tx, teamIds);
       let cancelled = 0;
       for (const teamId of teamIds) {
         cancelled += await TeamService.cancelSentStaffInvitations(tx, teamId, adminUserId);
