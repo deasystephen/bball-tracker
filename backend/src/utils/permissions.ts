@@ -68,8 +68,8 @@ export async function isGuardianOf(userId: string, childId: string): Promise<boo
 /**
  * Is `userId` a guardian of any current member of `teamId`?
  */
-export async function isGuardianOfTeamMember(userId: string, teamId: string): Promise<boolean> {
-  const link = await prisma.guardian.findFirst({
+export async function isGuardianOfTeamMember(userId: string, teamId: string, db: Db = prisma): Promise<boolean> {
+  const link = await db.guardian.findFirst({
     where: {
       parentId: userId,
       child: { teamMembers: { some: { teamId } } },
@@ -93,9 +93,9 @@ export interface TeamAccess {
  * row's role). `GET /teams/:id` uses it to decide whether to compute
  * `isLatestInLineage` (#461) without another round trip.
  */
-export async function getTeamAccess(userId: string, teamId: string): Promise<TeamAccess> {
+export async function getTeamAccess(userId: string, teamId: string, db: Db = prisma): Promise<TeamAccess> {
   // First check if user is a system admin
-  const user = await prisma.user.findUnique({
+  const user = await db.user.findUnique({
     where: { id: userId },
     select: { role: true },
   });
@@ -105,7 +105,7 @@ export async function getTeamAccess(userId: string, teamId: string): Promise<Tea
   }
 
   // Check if user is a league admin for this team's league
-  const team = await prisma.team.findUnique({
+  const team = await db.team.findUnique({
     where: { id: teamId },
     include: {
       season: {
@@ -128,14 +128,14 @@ export async function getTeamAccess(userId: string, teamId: string): Promise<Tea
 
   // Team staff: one row per user per team (`@@unique([teamId, userId])`, #463),
   // so the user's permissions are exactly that row's role flags.
-  const staff = await prisma.teamStaff.findUnique({
+  const staff = await db.teamStaff.findUnique({
     where: { teamId_userId: { teamId, userId } },
     select: { role: { select: { ...STAFF_ROLE_FLAGS_SELECT, type: true } } },
   });
 
   if (!staff) {
     // Check if user is a team member (player) - they get view permissions
-    const isMember = await prisma.teamMember.findUnique({
+    const isMember = await db.teamMember.findUnique({
       where: {
         teamId_playerId: {
           teamId,
@@ -149,7 +149,7 @@ export async function getTeamAccess(userId: string, teamId: string): Promise<Tea
     }
 
     // Guardian of a current member (PARENT role) — read-only, like a member.
-    if (await isGuardianOfTeamMember(userId, teamId)) {
+    if (await isGuardianOfTeamMember(userId, teamId, db)) {
       return { permissions: VIEW_ONLY_PERMISSIONS, canManageStaff: false };
     }
 
@@ -163,19 +163,22 @@ export async function getTeamAccess(userId: string, teamId: string): Promise<Tea
 /**
  * Get a user's permissions for a specific team (the flags of `getTeamAccess`).
  */
-export async function getTeamPermissions(userId: string, teamId: string): Promise<TeamPermissions> {
-  return (await getTeamAccess(userId, teamId)).permissions;
+export async function getTeamPermissions(userId: string, teamId: string, db: Db = prisma): Promise<TeamPermissions> {
+  return (await getTeamAccess(userId, teamId, db)).permissions;
 }
 
 /**
- * Check if user has a specific permission on a team
+ * Check if user has a specific permission on a team. Pass the transaction
+ * client (`db`) to re-check behind a row lock without taking a second pool
+ * connection, as `canManageStaff` allows.
  */
 export async function hasTeamPermission(
   userId: string,
   teamId: string,
-  permission: keyof TeamPermissions
+  permission: keyof TeamPermissions,
+  db: Db = prisma
 ): Promise<boolean> {
-  const permissions = await getTeamPermissions(userId, teamId);
+  const permissions = await getTeamPermissions(userId, teamId, db);
   return permissions[permission];
 }
 

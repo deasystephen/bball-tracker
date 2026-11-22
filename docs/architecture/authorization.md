@@ -86,7 +86,7 @@ Authorization helpers live in `backend/src/utils/permissions.ts` (`isSystemAdmin
 
 - **Team join links (#210).** The link (with its bearer token, inside `link.url`), the pending
   join requests and both decisions are for callers with `canManageRoster` only: a member, a
-  guardian or a requester gets 403 on all five team-scoped routes, and a request id from another
+  guardian or a requester gets 403 on all six team-scoped routes, and a request id from another
   team is a 404 after the 403. Holding the link is not access: it lets a signed-in account create
   a PENDING request, and only an approval adds a `TeamMember` or a `Guardian` link, which is what
   `canAccessTeam` reads. Detail: `roster-and-invitations.md`, Team join links.

@@ -224,6 +224,22 @@ export class JoinLinkService {
   }
 
   /**
+   * The roster-manager gate again, inside a transaction that holds the team
+   * row lock every staff removal and re-role takes: a coach removed while the
+   * call was in flight has either committed (seen here, 403) or waits for
+   * this transaction. Read through `tx`, so no second pool connection.
+   */
+  private static async assertStillRosterManager(
+    tx: Prisma.TransactionClient,
+    teamId: string,
+    userId: string
+  ): Promise<void> {
+    if (!(await hasTeamPermission(userId, teamId, 'canManageRoster', tx))) {
+      throw new ForbiddenError(NO_ROSTER_PERMISSION);
+    }
+  }
+
+  /**
    * Create the team's join link, revoking any live one in the same
    * transaction (create = rotate: the old link dies the moment the new one
    * exists). Gate: `canManageRoster`. Behind the creator's `User` row lock,
@@ -245,6 +261,7 @@ export class JoinLinkService {
       if (!(await lockTeamRow(tx, teamId))) {
         throw new NotFoundError('Team not found');
       }
+      await this.assertStillRosterManager(tx, teamId, userId);
       const revoked = await tx.teamJoinLink.updateMany({
         where: { teamId, revokedAt: null },
         data: { revokedAt: new Date() },
@@ -297,6 +314,7 @@ export class JoinLinkService {
       if (!(await lockTeamRow(tx, teamId))) {
         throw new NotFoundError('Team not found');
       }
+      await this.assertStillRosterManager(tx, teamId, userId);
       const revoked = await tx.teamJoinLink.updateMany({
         where: { teamId, revokedAt: null },
         data: { revokedAt: new Date() },
@@ -440,7 +458,7 @@ export class JoinLinkService {
         throw new JoinLinkInactiveError(state);
       }
       const recentlyDeclined = await tx.teamJoinRequest.count({
-        where: { teamId, requesterId: userId, status: 'REJECTED', createdAt: { gte: staleBefore() } },
+        where: { teamId, requesterId: userId, status: 'REJECTED', decidedAt: { gte: staleBefore() } },
       });
       if (pending.length + recentlyDeclined >= MAX_PENDING_JOIN_REQUESTS_PER_ACCOUNT) {
         throw new BadRequestError(
@@ -628,9 +646,7 @@ export class JoinLinkService {
       if (!(await lockTeamRow(tx, teamId))) {
         throw new NotFoundError('Team not found');
       }
-      if (!(await hasTeamPermission(userId, teamId, 'canManageRoster'))) {
-        throw new ForbiddenError(NO_ROSTER_PERMISSION);
-      }
+      await this.assertStillRosterManager(tx, teamId, userId);
       // Read after the lock, like the request: a requester deleted or
       // un-claimed into a managed record meanwhile is no longer a login, and
       // gets no membership and no guardian link.

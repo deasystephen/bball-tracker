@@ -605,7 +605,7 @@ describe('Team join links API (#210)', () => {
 
       expect(res.status).toBe(400);
       expect(mockPrisma.teamJoinRequest.count).toHaveBeenCalledWith({
-        where: { teamId: TEAM_ID, requesterId: PARENT_ID, status: 'REJECTED', createdAt: { gte: expect.any(Date) } },
+        where: { teamId: TEAM_ID, requesterId: PARENT_ID, status: 'REJECTED', decidedAt: { gte: expect.any(Date) } },
       });
       expect(mockPrisma.teamJoinRequest.create).not.toHaveBeenCalled();
       expect(mockPrisma.$executeRaw).not.toHaveBeenCalled();

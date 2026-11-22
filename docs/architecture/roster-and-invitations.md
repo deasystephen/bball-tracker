@@ -393,7 +393,10 @@ themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by 
 - **`POST /teams/:teamId/join-link { expiresInDays?, maxUses? }`** (`canManageRoster`): creates
   the link and revokes the live one in the same transaction, behind the creator's `User` row lock
   and then the team row lock (account deletion's order), so create **is** rotate and a team never
-  has two live links (proven with three concurrent creates). **Every link expires**: 14 days by
+  has two live links (proven with three concurrent creates). `canManageRoster` is checked again
+  behind that lock, here, on revoke and on approve (`hasTeamPermission(…, tx)`, which now takes a
+  transaction client like `canManageStaff`), so a coach removed while the call was in flight gets
+  403. **Every link expires**: 14 days by
   default (`JOIN_LINK_DEFAULT_EXPIRES_DAYS`), 1 to 30 on request; `maxUses` is 1 to 500 or `null`
   (no cap, the default). 201 `{ link: { id, teamId, url, expiresAt, maxUses, useCount, createdAt } }`.
 - **`GET /teams/:teamId/join-link`** (`canManageRoster`): the live link (not revoked, not expired)
@@ -423,7 +426,7 @@ themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by 
   - **Only a new request needs a live link:** 404 when revoked (like an unknown one), **410
     `join_link_inactive`** (`JoinLinkInactiveError`, `reason: 'expired' | 'full'`) otherwise.
   - **Cap:** at most `MAX_PENDING_JOIN_REQUESTS_PER_ACCOUNT` (6) requests per account and team
-    that are pending or were declined in the last 30 days, 400 beyond. Declined ones count so that
+    that are pending or were declined (`decidedAt`) in the last 30 days, 400 beyond. Declined ones count so that
     an account told "no" cannot keep asking (each ask is a push to the coaches and a use of the
     link); approved ones never count.
   - **One use of the link**, taken by a single conditional `UPDATE … SET "useCount" = "useCount" + 1

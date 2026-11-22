@@ -90,7 +90,9 @@ export function redactPath(path: string | undefined | null): string {
   if (!path) return '';
   const segments = path.split('/');
   for (let i = 0; i < segments.length - 1; i++) {
-    if (SECRET_PATH_PARENTS.has(segments[i])) {
+    // Lower-cased: Express matches routes case-insensitively, so
+    // `/api/v1/JOIN/<token>` reaches the handler like `/join/<token>` does.
+    if (SECRET_PATH_PARENTS.has(segments[i].toLowerCase())) {
       const next = segments[i + 1];
       if (looksLikeToken(next)) segments[i + 1] = REDACTED;
     }
