@@ -379,7 +379,10 @@ export default function ManagePlayersScreen() {
       setUploadingAvatar(false);
       const taken = jerseyTakenMessage(err);
       if (taken) {
+        // Inline on the field, and a toast too: the submit button sits below
+        // the fold, so the field itself may be scrolled out of view.
         setJerseyError(taken);
+        toast.showToast(taken, 'error');
         return;
       }
       toast.showToast(uploadAwareErrorMessage(err, t, 'roster.addFailed'), 'error');
@@ -415,6 +418,7 @@ export default function ManagePlayersScreen() {
       const taken = jerseyTakenMessage(err);
       if (taken) {
         setJerseyError(taken);
+        toast.showToast(taken, 'error');
         return;
       }
       toast.showToast(err instanceof Error ? err.message : t('guardians.inviteFailed'), 'error');

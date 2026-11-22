@@ -108,7 +108,7 @@ eng-review amendments recorded there).
 - **Accept tolerates existing membership:** both accept paths use `teamMember.upsert`
   (create-if-missing, `update: {}` — coach-set jersey/position never overwritten). The old
   "You are already on this team" 400 on accept is gone. Race rules (`transitionPending`,
-  audit #58) unchanged. Since #1087 both accepts take the team row lock first, and a new member
+  audit #58) unchanged. Since #1087 both accepts lock the player's `User` row and then the team row first, and a new member
   row whose number another member took meanwhile is created with no number (Jersey numbers,
   below).
 - **Rejection strips the unclaimed email (consent, spec T1 as narrowed by ship review):** only
@@ -601,21 +601,28 @@ themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by 
   `{ error, code, jerseyNumber, playerId, playerName, playerDeletedAt }`, naming the holder; the
   `error` message never names them, because route catches log it). Blank (`null` / absent) is always
   allowed; `0` is a number like any other (`!= null`, never truthiness); setting a member to the
-  number they already hold is a no-op, not an error. Another team's numbers never count.
-- **Where it is refused:** Add Player (`POST /teams/:teamId/players`, every case: case 3 sends no
+  number they already hold is a no-op, not an error, and is not even looked up, so a pair that
+  predates the rule can still save a position-only edit (the mobile sheet always sends the number).
+  Another team's numbers never count.
+- **Where it is refused:** Add Player (`POST /teams/:teamId/players`, every case: cases 1 and 2
+  inside their transaction after the "already on this team" check, so re-adding a current member
+  still answers that 400; case 3 after `assertInvitable`, excluding the player, so it sends no
   number another member wears), sending an invitation with an **explicit** number
   (`POST /teams/:teamId/invitations { playerId, jerseyNumber }`), "Edit jersey & position"
   (`PATCH /teams/:id/players/:playerId`), and `TeamService.addPlayer` (add an existing user by id;
   no route mounts it today). The one helper is `utils/jersey-number.ts`
   (`findJerseyHolder`, `assertJerseyNumberFree`).
 - **Concurrency.** Every write that sets a member's number runs the check inside its transaction
-  behind `lockTeamRow` on the team (the `FOR NO KEY UPDATE` lock staff changes take), so two
-  concurrent adds of one number serialise and the second is refused. Lock order stays User → Team
-  → invitation rows: case 2 takes the reused user's lock, then the team, then expires invitation
-  rows; both accepts take the team lock **before** flipping the invitation, so an accept and an Add
-  Player cannot deadlock. Add Player also checks once before its transaction (unlocked), which is
-  the only check case 3 needs, since case 3 writes no member row. A clear (`null`) on edit takes no
-  lock. No P2002 retry anywhere: the lock is the guard.
+  behind the team row lock (`lockTeamOrNotFound`, the `FOR NO KEY UPDATE` lock staff changes take;
+  a team deleted meanwhile is a 404), so two concurrent adds of one number serialise and the second
+  is refused. Lock order stays User → Team → invitation rows (`utils/team-row-lock.ts`): case 2
+  takes the reused user's lock, then the team, then expires invitation rows; `addPlayer` and both
+  accepts lock the player's `User` row, then the team, and the accepts do so **before** flipping
+  the invitation. The User lock comes first because the member insert key-shares the player's
+  `User` row, which account deletion holds `FOR UPDATE` while it waits for the teams it heads: with
+  Team first, an accept and a deletion could deadlock. Case 3 writes no member row, so its check
+  is unlocked. An edit that keeps or clears the number takes no lock. No P2002 retry anywhere: the
+  lock is the guard.
 - **Invitations reserve nothing.** A PENDING invitation's number is not held: only current members
   hold numbers. A Resend that inherits a number (supersede, see above) is not re-checked.
 - **Accept never fails over a number** (owner decision 2026-11-22: no friction in the accept or
@@ -646,13 +653,17 @@ themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by 
 - **Mobile.** `utils/jersey-conflict.ts#getJerseyConflict` reads the 409; the Add Player form, the
   existing-player invite form and the Edit jersey & position sheet in
   `app/teams/[id]/players.tsx` show `roster.jerseyTaken` ("Number 8 is already worn by Ada. Pick
-  another number or leave it blank.") against the jersey field instead of a toast, the holder named
-  through `displayName` (a deleted account reads as the localized label); typing in the field clears
-  it. An API without the rule never sends the code, so the app is safe in either deploy order.
+  another number or leave it blank.") against the jersey field, the holder named through
+  `displayName` (a deleted account reads as the localized label); typing in the field clears it.
+  The two add forms also toast it, because their submit button sits below the fold and the field may
+  be out of view; the edit sheet shows it inline only. An API without the rule never sends the
+  code, so the app is safe in either deploy order. A refused add leaves the photo it uploaded
+  first unreferenced in S3 (as any failed add does); the pending-upload expiry removes it.
 - **Tests:** `backend/tests/integration/jersey-number.db.test.ts` (real Postgres: refusals on add,
-  invite and edit; 0, blank and the own-number no-op; a deleted holder; two concurrent adds held
-  behind the team lock leave one holder, and fail without it; accepts by id and by token joining
-  with no number), `tests/services/{invitation,team}-service.test.ts`, `tests/api/teams.test.ts`
+  invite and edit; 0, blank and the own-number no-op; a pre-rule pair editing its position; a
+  re-added member; a deleted holder; two concurrent adds held behind the team lock leave one
+  holder, and fail without it; an accept waits on the player's `User` lock holding nothing on the
+  team side; accepts by id and by token joining with no number), `tests/services/{invitation,team}-service.test.ts`, `tests/api/teams.test.ts`
   (the 409 body on all three routes); mobile `__tests__/app/players-roster-status.test.tsx` and
   `__tests__/utils/jersey-conflict.test.ts`.
 

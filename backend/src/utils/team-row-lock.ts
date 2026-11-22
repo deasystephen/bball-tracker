@@ -3,6 +3,7 @@
  */
 
 import { Prisma } from '@prisma/client';
+import { NotFoundError } from './errors';
 
 /**
  * `SELECT … FOR NO KEY UPDATE` on the team's row inside an interactive
@@ -30,9 +31,12 @@ import { Prisma } from '@prisma/client';
  *
  * The jersey-number rule (#1087, `utils/jersey-number.ts`) takes it too: Add
  * Player (case 2: the reused User, then Team, then the invitation rows it
- * expires), `addPlayer`, a number change on `updateTeamMember`, and both
- * invitation accepts, which take Team BEFORE flipping the invitation row, so
- * an accept and an Add Player never hold those two in opposite orders.
+ * expires), `addPlayer` (the player's User, then Team), a number change on
+ * `updateTeamMember` (Team only; it writes no foreign key), and both
+ * invitation accepts (the player's User, then Team, BEFORE flipping the
+ * invitation row). The User lock comes first wherever the transaction then
+ * inserts a member row, because that insert key-shares the User row that
+ * account deletion holds FOR UPDATE while it waits for its teams.
  *
  * `FOR NO KEY UPDATE`, not `FOR UPDATE`: it conflicts with itself, which is
  * all the serialisation needs, but not with the `FOR KEY SHARE` that every
@@ -46,6 +50,13 @@ export async function lockTeamRow(tx: Prisma.TransactionClient, teamId: string):
   const rows = await tx.$queryRaw<{ id: string }[]>`
     SELECT "id" FROM "Team" WHERE "id" = ${teamId} FOR NO KEY UPDATE`;
   return rows.length > 0;
+}
+
+/** `lockTeamRow`, answering 404 when the team was deleted after the caller's unlocked read. */
+export async function lockTeamOrNotFound(tx: Prisma.TransactionClient, teamId: string): Promise<void> {
+  if (!(await lockTeamRow(tx, teamId))) {
+    throw new NotFoundError('Team not found');
+  }
 }
 
 /**

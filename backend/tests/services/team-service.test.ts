@@ -1714,6 +1714,16 @@ describe('TeamService', () => {
         );
       });
 
+      it('re-sending the number the member already wears is never checked (position-only edit)', async () => {
+        const { teamId, coachId, playerId } = setup();
+
+        // The member wears 10: even a pair sharing it from before the rule saves (no holder lookup).
+        await TeamService.updateTeamMember(teamId, playerId, { jerseyNumber: 10, position: 'Guard' }, coachId);
+
+        expect(mockPrisma.teamMember.findFirst).not.toHaveBeenCalled();
+        expect(mockPrisma.teamMember.update).toHaveBeenCalled();
+      });
+
       it('clearing the number takes no lock and checks nothing', async () => {
         const { teamId, coachId, playerId } = setup();
 

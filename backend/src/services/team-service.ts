@@ -55,7 +55,7 @@ import { emailEquals } from '../utils/email-match';
 import { lockLeagueRow } from '../utils/league-row-lock';
 import { USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
 import { createOrConflict, orNotFound } from '../utils/prisma-errors';
-import { lockTeamRow } from '../utils/team-row-lock';
+import { lockTeamOrNotFound, lockTeamRow } from '../utils/team-row-lock';
 import { assertJerseyNumberFree } from '../utils/jersey-number';
 import { lockUsers } from '../utils/user-row-lock';
 import { findOrCreateSeason, findSeasonByName, type SeasonByName } from './season-service';
@@ -1338,7 +1338,10 @@ export class TeamService {
     const teamMember = await createOrConflict(
       () =>
         prisma.$transaction(async (tx) => {
-          await lockTeamRow(tx, teamId);
+          // User before Team (utils/team-row-lock.ts): the insert key-shares
+          // the player's User row, which account deletion holds FOR UPDATE.
+          await lockUsers(tx, [data.playerId]);
+          await lockTeamOrNotFound(tx, teamId);
           await assertJerseyNumberFree(tx, teamId, data.jerseyNumber);
           return tx.teamMember.create({
             data: {
@@ -1475,11 +1478,14 @@ export class TeamService {
       updateData.position = data.position;
     }
 
-    // Update team member. A new number is checked behind the team row lock
-    // (#1087); keeping one's own number, or clearing it, is never refused.
+    // Update team member. A CHANGED number is checked behind the team row
+    // lock (#1087); keeping one's own number (even one another member shares
+    // from before the rule, so a position-only edit always saves) or clearing
+    // it is never refused.
+    const numberChanges = data.jerseyNumber != null && data.jerseyNumber !== teamMember.jerseyNumber;
     const updatedMember = await prisma.$transaction(async (tx) => {
-      if (data.jerseyNumber != null) {
-        await lockTeamRow(tx, teamId);
+      if (numberChanges) {
+        await lockTeamOrNotFound(tx, teamId);
         await assertJerseyNumberFree(tx, teamId, data.jerseyNumber, playerId);
       }
       return tx.teamMember.update({

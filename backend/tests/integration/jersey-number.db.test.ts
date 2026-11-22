@@ -146,6 +146,21 @@ describe('Add Player (POST /teams/:teamId/players)', () => {
     expect((err as JerseyNumberTakenError).body()).toMatchObject({ playerId: holderId, playerDeletedAt: deletedAt });
   });
 
+  it('re-adding a current member with their own number says they are on the team, not that the number is taken', async () => {
+    const org = await team('add-again');
+    const memberId = await wearer('add-again-member', org, 5);
+    const email = (await prisma.user.findUniqueOrThrow({ where: { id: memberId }, select: { email: true } })).email!;
+
+    const err = await InvitationService.addRosterPlayer(
+      org.teamId,
+      { name: `add-again-${fx.run}`, playerEmail: email, jerseyNumber: 5 },
+      coachId
+    ).catch((e: unknown) => e);
+
+    expect(err).not.toBeInstanceOf(JerseyNumberTakenError);
+    expect((err as Error).message).toBe('Player is already on this team');
+  });
+
   it('always allows blank, however many members have no number', async () => {
     const org = await team('add-blank');
     await wearer('blank-holder', org, null);
@@ -265,6 +280,22 @@ describe('Edit jersey & position (PATCH /teams/:id/players/:playerId)', () => {
     expect(updated.position).toBe('Center');
   });
 
+  it('a pair that predates the rule can still edit its position, and the number stays', async () => {
+    const org = await team('edit-legacy');
+    await wearer('legacy-a', org, 8);
+    const legacyB = await wearer('legacy-b', org, 8);
+
+    const updated = await TeamService.updateTeamMember(
+      org.teamId,
+      legacyB,
+      { jerseyNumber: 8, position: 'Guard' },
+      coachId
+    );
+
+    expect(updated.jerseyNumber).toBe(8);
+    expect(updated.position).toBe('Guard');
+  });
+
   it('clearing the number is always allowed, and frees it for someone else', async () => {
     const org = await team('edit-clear');
     const firstId = await wearer('clear-first', org, 3);
@@ -302,6 +333,32 @@ describe('accepting an invitation whose number was taken meanwhile', () => {
     expect(result.invitation.status).toBe('ACCEPTED');
     expect(result.teamMember.jerseyNumber).toBeNull();
     expect(await wearers(org, 0)).toBe(1);
+  });
+
+  it('takes the player\'s User lock before the Team lock (account deletion\'s order, so the two never deadlock)', async () => {
+    const org = await team('accept-order');
+    const sent = await invitation(org, 'accept-order-invitee', 17);
+    let accept: Tracked<unknown> | undefined;
+
+    await prisma.$transaction(
+      async (holder) => {
+        // What account deletion holds while it waits for its teams.
+        await holder.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${sent.playerId} FOR UPDATE`;
+        accept = track(InvitationService.acceptInvitation(sent.id, sent.playerId));
+        accept.promise.catch(() => undefined);
+
+        const blocked = await waitForBlockedBy(holder, await backendPid(holder), {
+          tables: ['Team', 'TeamInvitation', 'TeamMember'],
+          settled: accept,
+        });
+        expect(blocked).toHaveLength(1);
+        // Waiting on the User row while holding nothing on the team side.
+        expect(blocked[0].relations).toEqual([]);
+      },
+      { timeout: 10_000 }
+    );
+
+    await expect(accept?.promise).resolves.toBeDefined();
   });
 
   it('keeps the invitation\'s number when it is still free', async () => {

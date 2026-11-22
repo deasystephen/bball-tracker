@@ -929,7 +929,7 @@ describe('ManagePlayersScreen — roster status and actions', () => {
         },
       });
 
-    it('Add Player shows the refusal on the jersey field, not a toast, and typing clears it', async () => {
+    it('Add Player shows the refusal on the jersey field and in a toast, and typing clears the field error', async () => {
       mockAddRosterPlayer.mutateAsync.mockRejectedValue(jerseyTaken());
       const { getByTestId, getByLabelText, findByText, queryByText } = render(<ManagePlayersScreen />);
 
@@ -941,7 +941,8 @@ describe('ManagePlayersScreen — roster status and actions', () => {
 
       const message = 'Number 8 is already worn by Ada Active. Pick another number or leave it blank.';
       expect(await findByText(message)).toBeTruthy();
-      expect(mockShowToast).not.toHaveBeenCalled();
+      // Also a toast: the submit button is below the fold, the field may not be in view.
+      expect(mockShowToast).toHaveBeenCalledWith(message, 'error');
       // The form stays open with what the coach typed.
       expect(getByTestId('add-player-name-input').props.value).toBe('New Kid');
 

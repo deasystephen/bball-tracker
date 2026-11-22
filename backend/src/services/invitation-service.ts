@@ -39,7 +39,7 @@ import { emailEquals } from '../utils/email-match';
 import { USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
 import { createOrConflict, isUniqueViolation } from '../utils/prisma-errors';
 import { lockUsers } from '../utils/user-row-lock';
-import { lockTeamRow } from '../utils/team-row-lock';
+import { lockTeamOrNotFound, lockTeamRow } from '../utils/team-row-lock';
 import { assertJerseyNumberFree, findJerseyHolder } from '../utils/jersey-number';
 import {
   assertOwnUploadUrl,
@@ -862,8 +862,11 @@ export class InvitationService {
 
     // Use transaction to ensure atomicity
     const result = await prisma.$transaction(async (tx) => {
-      // The team first, then the invitation row: the order Add Player takes
-      // them in, so the jersey check below cannot race a roster add (#1087).
+      // The player's User row, then the team, then the invitation row: the
+      // order Add Player and account deletion take them in (the member insert
+      // below needs a key-share on the User row, which deletion's FOR UPDATE
+      // blocks), so the jersey check cannot race a roster add (#1087).
+      await lockUsers(tx, [invitation.playerId]);
       await lockTeamRow(tx, invitation.teamId);
       // Flip PENDING -> ACCEPTED only if it is still PENDING. Two concurrent
       // accepts (double-tap, web + app) race here; the loser sees 0 rows and
@@ -1174,11 +1177,6 @@ export class InvitationService {
     if (data.profilePictureUrl) {
       assertOwnUploadUrl(data.profilePictureUrl, userId);
     }
-    // One number per team (#1087). Checked here for every case, so the
-    // invitation-only case 3 never sends a number another member wears; cases
-    // 1 and 2 check again behind the team row lock before the member insert.
-    await assertJerseyNumberFree(prisma, teamId, data.jerseyNumber);
-
     const result: AddRosterPlayerResult = {
       rostered: false,
       invited: false,
@@ -1205,7 +1203,9 @@ export class InvitationService {
           select: { id: true },
         });
 
-        await lockTeamRow(tx, teamId);
+        // One number per team (#1087), behind the team lock so two concurrent
+        // adds of one number cannot both win.
+        await lockTeamOrNotFound(tx, teamId);
         await assertJerseyNumberFree(tx, teamId, data.jerseyNumber);
         return tx.teamMember.create({
           data: {
@@ -1323,6 +1323,9 @@ export class InvitationService {
     userId: string
   ): Promise<{ invitation: InvitationSummary; emailSent: boolean | null }> {
     await this.assertInvitable(teamId, playerId);
+    // Case 3 writes no member row, so no lock: it only must not send a number
+    // another member wears now (#1087). The accept handles a later collision.
+    await assertJerseyNumberFree(prisma, teamId, data.jerseyNumber, playerId);
 
     const token = this.generateToken();
     const invitation = await this.createInvitationRow(
@@ -1433,7 +1436,7 @@ export class InvitationService {
 
       // User before Team (utils/team-row-lock.ts), and the team before any
       // invitation row, the order accept takes them in (#1087).
-      await lockTeamRow(tx, teamId);
+      await lockTeamOrNotFound(tx, teamId);
       const existingMember = await tx.teamMember.findUnique({
         where: { teamId_playerId: { teamId, playerId } },
       });
@@ -1644,7 +1647,8 @@ export class InvitationService {
     }
 
     const result = await prisma.$transaction(async (tx) => {
-      // Team lock first, as in acceptInvitation (#1087).
+      // User, then Team, as in acceptInvitation (#1087).
+      await lockUsers(tx, [invitation.playerId]);
       await lockTeamRow(tx, invitation.teamId);
       const updatedInvitation = await this.transitionPending(
         tx,

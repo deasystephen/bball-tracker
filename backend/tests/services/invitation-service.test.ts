@@ -23,7 +23,20 @@ const mockedMailerSend = (jest.requireMock('../../src/services/mailer') as unkno
 // controllable and free by default.
 jest.mock('../../src/utils/team-row-lock', () => ({
   lockTeamRow: jest.fn().mockResolvedValue(true),
+  lockTeamOrNotFound: jest.fn().mockResolvedValue(undefined),
 }));
+// The accepts lock the player's User row (#1087); the accept tests' mocked
+// transactions carry no raw query, so there the lock is a no-op. Every other
+// caller (case 2's adoption) keeps the real helper over its mocked $queryRaw.
+jest.mock('../../src/utils/user-row-lock', () => {
+  const actual = jest.requireActual('../../src/utils/user-row-lock');
+  return {
+    ...actual,
+    lockUsers: jest.fn((tx: { $queryRaw?: unknown }, ids: string[]) =>
+      typeof tx.$queryRaw === 'function' ? actual.lockUsers(tx, ids) : Promise.resolve([])
+    ),
+  };
+});
 jest.mock('../../src/utils/jersey-number', () => ({
   findJerseyHolder: jest.fn().mockResolvedValue(null),
   assertJerseyNumberFree: jest.fn().mockResolvedValue(undefined),
@@ -3573,7 +3586,7 @@ describe('InvitationService', () => {
       expect(domainEvent(infoSpy, 'Invitation accepted')).not.toHaveProperty('jerseyNumberDropped');
     });
 
-    it('Add Player refuses a taken number with 409 jersey_number_taken before writing anything', async () => {
+    it('Add Player refuses a taken number with 409 jersey_number_taken before the member insert', async () => {
       const coach = createCoach();
       const team = createTeam();
       const role = createTeamRole({ teamId: team.id, type: 'HEAD_COACH' });
@@ -3583,11 +3596,16 @@ describe('InvitationService', () => {
         role,
       });
       mockJersey.assertJerseyNumberFree.mockRejectedValueOnce(taken());
+      const txMemberCreate = jest.fn();
+      (mockPrisma.$transaction as jest.Mock).mockImplementation(async (cb) =>
+        cb({ user: { create: jest.fn().mockResolvedValue({ id: 'managed-1' }) }, teamMember: { create: txMemberCreate } })
+      );
 
       await expect(
         InvitationService.addRosterPlayer(team.id, { name: 'Kid', jerseyNumber: 8 }, coach.id)
       ).rejects.toMatchObject({ statusCode: 409, code: 'jersey_number_taken' });
-      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+      // Checked inside the case-1 transaction, so the user it created rolls back.
+      expect(txMemberCreate).not.toHaveBeenCalled();
     });
 
     it('an invitation with an explicit taken number is refused before it is created', async () => {
