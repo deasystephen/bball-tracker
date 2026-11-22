@@ -6,9 +6,24 @@
  * until the coach removes it). A PENDING invitation reserves nothing; its
  * number is applied at accept only if it is still free.
  *
- * Every write that sets a member's number calls this inside its transaction,
- * after `lockTeamRow` on the team, so two concurrent adds of the same number
- * serialise and the second sees the first. There is no unique index on
+ * Every write that INSERTS or CHANGES a member's number calls this inside its
+ * transaction, after the team row lock, so two concurrent adds of one number
+ * serialise and the second sees the first: Add Player cases 1 and 2,
+ * `TeamService.addPlayer`, and `updateTeamMember` when the number differs
+ * from the one the member wears (read again under the lock).
+ *
+ * Paths that do not take that locked check, and why:
+ * - Sending an invitation (`createInvitation`, Add Player case 3) checks
+ *   without a lock: it writes no member row, and a number taken by accept
+ *   time is dropped there (`InvitationService.acceptedJerseyNumber`, which
+ *   runs behind the lock and never refuses).
+ * - Keeping one's own number is not checked, so a pair that predates the
+ *   rule can still edit its position.
+ * - Season rollover copies the source roster's numbers as they are
+ *   (`createMany`), pre-rule pairs included: it creates no new collision.
+ *
+ * So the rule holds for every number written since it shipped, but not for
+ * rows from before it. There is no unique index on
  * `(teamId, jerseyNumber)` yet: production had duplicate pairs before this
  * rule, and the index follows once they are resolved
  * (`docs/architecture/roster-and-invitations.md`, Jersey numbers).

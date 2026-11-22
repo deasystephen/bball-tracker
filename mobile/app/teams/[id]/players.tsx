@@ -875,6 +875,7 @@ export default function ManagePlayersScreen() {
                           subtitle={player.email || undefined}
                           onPress={() => {
                             setSelectedPlayer(player);
+                            setJerseyError(null);
                             setSearchQuery('');
                           }}
                           rightElement={
@@ -911,7 +912,10 @@ export default function ManagePlayersScreen() {
                       </ThemedText>
                     </View>
                     <TouchableOpacity
-                      onPress={() => setSelectedPlayer(null)}
+                      onPress={() => {
+                        setSelectedPlayer(null);
+                        setJerseyError(null);
+                      }}
                       style={styles.clearSelection}
                       hitSlop={CLEAR_SELECTION_HIT_SLOP}
                       accessibilityRole="button"
@@ -957,7 +961,10 @@ export default function ManagePlayersScreen() {
                   <Button
                     title={t('teams.addPlayer')}
                     variant="outline"
-                    onPress={() => setShowAddForm(true)}
+                    onPress={() => {
+                      setShowAddForm(true);
+                      setJerseyError(null);
+                    }}
                     fullWidth
                     testID="add-player-button"
                   />

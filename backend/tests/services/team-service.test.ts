@@ -1724,12 +1724,52 @@ describe('TeamService', () => {
         expect(mockPrisma.teamMember.update).toHaveBeenCalled();
       });
 
+      it('decides "unchanged" from the row read under the lock, not the earlier unlocked read', async () => {
+        const { teamId, coachId, playerId } = setup();
+        // Unlocked read: 10. Under the lock another coach has moved them to 7.
+        (mockPrisma.teamMember.findUnique as jest.Mock)
+          .mockResolvedValueOnce(createTeamMember({ teamId, playerId, jerseyNumber: 10 }))
+          .mockResolvedValueOnce({ jerseyNumber: 7 });
+        (mockPrisma.teamMember.findFirst as jest.Mock).mockResolvedValueOnce({
+          playerId: 'holder-1',
+          player: { name: 'Holder', deletedAt: null },
+        });
+
+        await expect(
+          TeamService.updateTeamMember(teamId, playerId, { jerseyNumber: 10, position: 'Guard' }, coachId)
+        ).rejects.toMatchObject({ statusCode: 409, code: 'jersey_number_taken' });
+        expect(mockPrisma.teamMember.update).not.toHaveBeenCalled();
+      });
+
+      it('a member removed meanwhile is a 404, not a 500', async () => {
+        const { teamId, coachId, playerId } = setup();
+        (mockPrisma.teamMember.update as jest.Mock).mockRejectedValueOnce(
+          new Prisma.PrismaClientKnownRequestError('Record not found', { code: 'P2025', clientVersion: 'test' })
+        );
+
+        await expect(
+          TeamService.updateTeamMember(teamId, playerId, { position: 'Guard' }, coachId)
+        ).rejects.toMatchObject({ statusCode: 404, message: 'Player is not on this team' });
+      });
+
+      it('a member removed before the lock is a 404', async () => {
+        const { teamId, coachId, playerId } = setup();
+        (mockPrisma.teamMember.findUnique as jest.Mock)
+          .mockResolvedValueOnce(createTeamMember({ teamId, playerId, jerseyNumber: 10 }))
+          .mockResolvedValueOnce(null);
+
+        await expect(
+          TeamService.updateTeamMember(teamId, playerId, { jerseyNumber: 4 }, coachId)
+        ).rejects.toMatchObject({ statusCode: 404, message: 'Player is not on this team' });
+      });
+
       it('clearing the number takes no lock and checks nothing', async () => {
         const { teamId, coachId, playerId } = setup();
 
         await TeamService.updateTeamMember(teamId, playerId, { jerseyNumber: null }, coachId);
 
         expect(mockPrisma.teamMember.findFirst).not.toHaveBeenCalled();
+        expect(mockPrisma.$queryRaw).not.toHaveBeenCalled();
         expect(mockPrisma.teamMember.update).toHaveBeenCalledWith(
           expect.objectContaining({ data: { jerseyNumber: null } })
         );

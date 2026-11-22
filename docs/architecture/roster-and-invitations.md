@@ -620,9 +620,12 @@ themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by 
   accepts lock the player's `User` row, then the team, and the accepts do so **before** flipping
   the invitation. The User lock comes first because the member insert key-shares the player's
   `User` row, which account deletion holds `FOR UPDATE` while it waits for the teams it heads: with
-  Team first, an accept and a deletion could deadlock. Case 3 writes no member row, so its check
-  is unlocked. An edit that keeps or clears the number takes no lock. No P2002 retry anywhere: the
-  lock is the guard.
+  Team first, an accept and a deletion could deadlock. Case 3 and `POST /teams/:teamId/invitations`
+  write no member row, so their check is unlocked and runs after the existing refusals (already on
+  the team, pending invitation). An edit that sends a number takes the lock and decides "unchanged"
+  from the member row read again under it (the earlier read is unlocked and may be stale); an edit
+  that clears the number takes none; a member removed meanwhile is a 404. No P2002 retry anywhere:
+  the lock is the guard.
 - **Invitations reserve nothing.** A PENDING invitation's number is not held: only current members
   hold numbers. A Resend that inherits a number (supersede, see above) is not re-checked.
 - **Accept never fails over a number** (owner decision 2026-11-22: no friction in the accept or

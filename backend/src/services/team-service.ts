@@ -1478,26 +1478,41 @@ export class TeamService {
       updateData.position = data.position;
     }
 
-    // Update team member. A CHANGED number is checked behind the team row
-    // lock (#1087); keeping one's own number (even one another member shares
-    // from before the rule, so a position-only edit always saves) or clearing
-    // it is never refused.
-    const numberChanges = data.jerseyNumber != null && data.jerseyNumber !== teamMember.jerseyNumber;
+    // Update team member. A number is checked behind the team row lock
+    // (#1087), against the member row read again under that lock (the read
+    // above is unlocked and may be stale). Keeping the number the member wears
+    // now is never refused, even when another member shares it from before
+    // the rule, so a position-only edit always saves (the mobile sheet always
+    // sends the number). Clearing it takes no lock.
     const updatedMember = await prisma.$transaction(async (tx) => {
-      if (numberChanges) {
+      if (data.jerseyNumber != null) {
         await lockTeamOrNotFound(tx, teamId);
-        await assertJerseyNumberFree(tx, teamId, data.jerseyNumber, playerId);
+        const current = await tx.teamMember.findUnique({
+          where: { teamId_playerId: { teamId, playerId } },
+          select: { jerseyNumber: true },
+        });
+        if (!current) {
+          throw new NotFoundError('Player is not on this team');
+        }
+        if (current.jerseyNumber !== data.jerseyNumber) {
+          await assertJerseyNumberFree(tx, teamId, data.jerseyNumber, playerId);
+        }
       }
-      return tx.teamMember.update({
-        where: {
-          teamId_playerId: {
-            teamId,
-            playerId,
-          },
-        },
-        data: updateData,
-        include: TEAM_MEMBER_INCLUDE,
-      });
+      // A removal that committed meanwhile is the same 404, not a P2025 500.
+      return orNotFound(
+        () =>
+          tx.teamMember.update({
+            where: {
+              teamId_playerId: {
+                teamId,
+                playerId,
+              },
+            },
+            data: updateData,
+            include: TEAM_MEMBER_INCLUDE,
+          }),
+        new NotFoundError('Player is not on this team')
+      );
     });
 
     logger.info('Roster member updated', { teamId, playerId, userId });

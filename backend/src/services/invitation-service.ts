@@ -370,11 +370,13 @@ export class InvitationService {
       throw new NotFoundError('User not found');
     }
 
-    // A number the coach typed must be free now (#1087); one a Resend inherits
-    // is not re-checked here, because the accept drops it if it was taken.
-    await assertJerseyNumberFree(prisma, teamId, data.jerseyNumber, player.id);
-
     await this.assertSupersedeTarget(teamId, player, data.supersede);
+
+    // A number the coach typed must be free now (#1087), checked after the
+    // refusals above so they keep priority. Unlocked: an invitation writes no
+    // member row, and the accept drops a number taken by then. One a Resend
+    // inherits is not re-checked, for the same reason.
+    await assertJerseyNumberFree(prisma, teamId, data.jerseyNumber, player.id);
 
     const invitation = data.supersede
       ? await this.createInvitationRowSuperseding(invitationData(player), player.email)

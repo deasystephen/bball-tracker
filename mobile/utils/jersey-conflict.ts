@@ -1,8 +1,10 @@
 /**
  * The 409 `jersey_number_taken` refusal (#1087): another current member of
  * the team already wears the number. The API refuses it on Add Player, on
- * sending an invitation with a number and on "Edit jersey & position"; the
- * roster screen shows it against the jersey field, not as a toast.
+ * sending an invitation with a number and on "Edit jersey & position". The
+ * roster screen shows it against the jersey field; the add and invite forms
+ * also toast it (their submit sits below the fold, so the field may be out of
+ * view), while the edit sheet shows it inline only.
  *
  * Kept free of imports other than `api-error-code`, like that helper, so it
  * works in tests that mock the api-client.
