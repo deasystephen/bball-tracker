@@ -12,8 +12,8 @@
  *     `disconnect` packet is sent on purpose: a server-initiated disconnect
  *     (`io server disconnect`) is NOT auto-reconnected by socket.io-client, and
  *     live games would stay dark. A connection still open after
- *     SHUTDOWN_HTTP_DRAIN_MS is destroyed (`destroyConnections`), which lets the
- *     close settle (#1052: a peer that never answers the WebSocket close frame
+ *     SHUTDOWN_HTTP_DRAIN_MS and not serving a request is destroyed
+ *     (`destroyConnections`), which lets the close settle (#1052: a peer that never answers the WebSocket close frame
  *     holds it for ws's 30 s close timeout; a connection that has sent no
  *     complete request, or an unhandled Upgrade, holds it until the peer
  *     closes).
@@ -61,11 +61,11 @@ export interface ShutdownDeps {
   /** Closes every socket and the underlying HTTP server. */
   io: { close(): Promise<void> };
   /**
-   * Destroys every TCP connection the HTTP server still holds and returns how
-   * many there were. Called when `io.close()` has not settled after
+   * Destroys every TCP connection the HTTP server still holds that is not
+   * serving a request. Called when `io.close()` has not settled after
    * SHUTDOWN_HTTP_DRAIN_MS.
    */
-  destroyConnections?: () => number;
+  destroyConnections?: () => { destroyed: number; inFlight: number };
   /** Null when SES_EVENTS_QUEUE_URL is unset. */
   consumer: { stop(): Promise<void> } | null;
   disconnectPrisma: () => Promise<void>;
@@ -151,10 +151,13 @@ export function createShutdown(deps: ShutdownDeps): (signal: NodeJS.Signals) => 
     const closeHttp = async (): Promise<void> => {
       const closing = deps.io.close();
       if (!(await settlesWithin(closing, SHUTDOWN_HTTP_DRAIN_MS)) && deps.destroyConnections) {
-        const count = deps.destroyConnections();
-        logger.warn('Shutdown: destroyed connections still open', {
+        // `destroyed` 0 with `inFlight` 0 means no connection is holding the
+        // close: socket.io is stuck before `httpServer.close()` (the adapter).
+        const { destroyed, inFlight } = deps.destroyConnections();
+        logger.warn('Shutdown: HTTP close still pending after drain', {
           signal,
-          count,
+          destroyed,
+          inFlight,
           afterMs: SHUTDOWN_HTTP_DRAIN_MS,
         });
       }

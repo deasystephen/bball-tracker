@@ -20,33 +20,59 @@
  *  - a WebSocket whose peer does not answer the close frame: ws waits 30 s
  *    (its `closeTimeout`) before destroying it, past the shutdown grace.
  *
- * `trackConnections` covers all three at shutdown: `destroyAll()` destroys
- * whatever is still open (`utils/shutdown.ts`, after its drain period).
+ * `trackConnections` covers all three at shutdown: `destroyIdle()` destroys
+ * every connection still open that is not serving a request
+ * (`utils/shutdown.ts`, after its drain period).
  */
 
-import type { Server } from 'http';
+import type { IncomingMessage, Server, ServerResponse } from 'http';
 import type { Duplex } from 'stream';
+
+export interface DestroyResult {
+  /** Connections destroyed: none was serving an HTTP request. */
+  destroyed: number;
+  /** Connections left alone because a request on them is still running. */
+  inFlight: number;
+}
 
 export interface ConnectionTracker {
   /** Connections currently open. */
   size(): number;
-  /** Destroy every open connection; returns how many there were. */
-  destroyAll(): number;
+  /**
+   * Destroy every open connection that is not serving an HTTP request (an
+   * upgraded or refused-upgrade socket, an idle or half-sent connection). A
+   * request still running keeps its connection, so shutdown never cuts a
+   * response off mid-write; the step bound covers a request that never ends.
+   */
+  destroyIdle(): DestroyResult;
 }
 
 export function trackConnections(server: Server): ConnectionTracker {
   const open = new Set<Duplex>();
+  const busy = new Set<Duplex>();
   server.on('connection', (socket: Duplex) => {
     open.add(socket);
-    socket.once('close', () => open.delete(socket));
+    socket.once('close', () => {
+      open.delete(socket);
+      busy.delete(socket);
+    });
+  });
+  server.on('request', (req: IncomingMessage, res: ServerResponse) => {
+    const { socket } = req;
+    busy.add(socket);
+    res.once('close', () => busy.delete(socket));
   });
   return {
     size: () => open.size,
-    destroyAll: () => {
-      const count = open.size;
-      for (const socket of open) socket.destroy();
-      open.clear();
-      return count;
+    destroyIdle: () => {
+      let destroyed = 0;
+      for (const socket of open) {
+        if (busy.has(socket)) continue;
+        socket.destroy();
+        open.delete(socket);
+        destroyed += 1;
+      }
+      return { destroyed, inFlight: open.size };
     },
   };
 }
@@ -57,14 +83,16 @@ export const REFUSED_UPGRADE_DESTROY_MS = 2_000;
 const BAD_REQUEST = 'HTTP/1.1 400 Bad Request\r\nConnection: close\r\nContent-Length: 0\r\n\r\n';
 
 /**
- * Answer every Upgrade request outside `enginePath` with a 400 and destroy the
- * socket once the answer is written. `enginePath` is Socket.io's `io.path()`
- * plus a trailing slash, matched as engine.io matches it (a prefix of the raw
- * URL), so engine.io keeps every upgrade it would handle.
+ * Answer every Upgrade request whose URL does not start with `enginePathBase`
+ * with a 400, and destroy the socket once the answer is written. Pass
+ * Socket.io's `io.path()`: the trailing slash is dropped, so this is never
+ * stricter than engine.io's own prefix match (with or without
+ * `addTrailingSlash`); anything engine.io might handle is left to it.
  */
-export function refuseUnhandledUpgrades(server: Server, enginePath: string): void {
-  server.on('upgrade', (req: { url?: string }, socket: Duplex) => {
-    if ((req.url ?? '').startsWith(enginePath)) return;
+export function refuseUnhandledUpgrades(server: Server, enginePathBase: string): void {
+  const base = enginePathBase.replace(/\/+$/, '');
+  server.on('upgrade', (req: IncomingMessage, socket: Duplex) => {
+    if ((req.url ?? '').startsWith(base)) return;
     if (!socket.writable) {
       socket.destroy();
       return;

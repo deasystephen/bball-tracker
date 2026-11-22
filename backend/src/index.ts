@@ -61,7 +61,7 @@ const io = new SocketServer(httpServer, {
 // An Upgrade request for any other path gets a 400 and a closed socket, not
 // engine.io's bare FIN, which leaves the socket open for as long as the peer
 // keeps its side open (#1052, utils/http-connections.ts).
-refuseUnhandledUpgrades(httpServer, `${io.path()}/`);
+refuseUnhandledUpgrades(httpServer, io.path());
 
 const PORT = process.env.PORT || 3000;
 
@@ -240,7 +240,7 @@ if (require.main === module) {
         await io.close();
       },
     },
-    destroyConnections: () => connections.destroyAll(),
+    destroyConnections: () => connections.destroyIdle(),
     consumer,
     disconnectPrisma: () => prisma.$disconnect(),
     closeRedis: async () => {

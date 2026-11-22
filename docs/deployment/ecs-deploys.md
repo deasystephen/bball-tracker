@@ -95,7 +95,7 @@ the few seconds ECS takes to start the drain and the clients take to reconnect.
 - **Then the clients converge.** On SIGTERM the shutdown routine (`utils/shutdown.ts`, #747)
   closes every socket with a transport close, socket.io-client reconnects to the new task, re-joins
   the room and resyncs from the join snapshot (every broadcast also carries the score).
-  A connection still open 10 s into the shutdown is destroyed, each closer has its own bound, and
+  A connection still open 10 s into the shutdown and not serving a request is destroyed, each closer has its own bound, and
   every step logs its outcome, so the old task exits within the 25 s grace and a slow step is
   named (#1052, `docs/architecture/backend-services.md#shutdown-utilsshutdownts`).
 - Verify the applied value:

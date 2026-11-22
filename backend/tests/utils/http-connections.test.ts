@@ -44,6 +44,16 @@ function peer(port: number, payload: string): Promise<{ socket: Socket; received
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
+/** Poll `condition` until it holds or `ms` passes; returns whether it held. */
+async function until(condition: () => boolean, ms = 5_000): Promise<boolean> {
+  const deadline = Date.now() + ms;
+  while (!condition()) {
+    if (Date.now() > deadline) return false;
+    await sleep(10);
+  }
+  return true;
+}
+
 /** Whether `promise` settles within `ms`. */
 async function settlesWithin(promise: Promise<unknown>, ms: number): Promise<boolean> {
   let timer: NodeJS.Timeout | undefined;
@@ -75,14 +85,13 @@ describe('the stuck closer (#1052)', () => {
     const p = await peer(port, UPGRADE_OTHER_PATH);
     // engine.io sends its bare FIN after 1 s; the socket is still counted after it.
     await p.ended;
-    await sleep(200);
     expect(tracker.size()).toBe(1);
 
     const closing = io.close();
     expect(await settlesWithin(closing, 1_000)).toBe(false);
 
     // The shutdown routine's fallback after its drain period.
-    expect(tracker.destroyAll()).toBe(1);
+    expect(tracker.destroyIdle()).toEqual({ destroyed: 1, inFlight: 0 });
     expect(await settlesWithin(closing, 5_000)).toBe(true);
   });
 
@@ -90,11 +99,11 @@ describe('the stuck closer (#1052)', () => {
     const tracker = trackConnections(httpServer);
     const port = await listen();
     await peer(port, 'GET / HTTP/1.1\r\nHost: x\r\n');
-    await sleep(50);
+    expect(await until(() => tracker.size() === 1)).toBe(true);
 
     const closing = io.close();
     expect(await settlesWithin(closing, 1_000)).toBe(false);
-    expect(tracker.destroyAll()).toBe(1);
+    expect(tracker.destroyIdle()).toEqual({ destroyed: 1, inFlight: 0 });
     expect(await settlesWithin(closing, 5_000)).toBe(true);
   });
 });
@@ -104,7 +113,7 @@ describe('refuseUnhandledUpgrades', () => {
     ['a WebSocket upgrade on another path', UPGRADE_OTHER_PATH],
     ['an h2c upgrade', UPGRADE_H2C],
   ])('answers %s with 400 and closes the socket, so io.close() settles', async (_label, payload) => {
-    refuseUnhandledUpgrades(httpServer, `${io.path()}/`);
+    refuseUnhandledUpgrades(httpServer, io.path());
     const tracker = trackConnections(httpServer);
     const port = await listen();
     const p = await peer(port, payload);
@@ -112,13 +121,22 @@ describe('refuseUnhandledUpgrades', () => {
     await p.ended;
     expect(p.received()).toMatch(/^HTTP\/1\.1 400 Bad Request\r\n/);
     // Closed on the server side although the peer never closed its own.
-    await sleep(50);
-    expect(tracker.size()).toBe(0);
+    expect(await until(() => tracker.size() === 0)).toBe(true);
     expect(await settlesWithin(io.close(), 5_000)).toBe(true);
   });
 
+  it('never refuses a URL under the engine path, whatever its trailing slash', async () => {
+    refuseUnhandledUpgrades(httpServer, '/socket.io/');
+    const tracker = trackConnections(httpServer);
+    const port = await listen();
+    const p = await peer(port, UPGRADE_OTHER_PATH.replace('GET /ws ', 'GET /socket.io?EIO=4&transport=websocket '));
+    await sleep(200);
+    expect(p.received()).not.toMatch(/^HTTP\/1\.1 400 Bad Request\r\n/);
+    expect(tracker.size()).toBe(1);
+  });
+
   it('leaves Socket.io upgrades to engine.io', async () => {
-    refuseUnhandledUpgrades(httpServer, `${io.path()}/`);
+    refuseUnhandledUpgrades(httpServer, io.path());
     const port = await listen();
     const connected = new Promise<void>((r) => io.on('connection', () => r()));
     const { io: ioClient } = await import('socket.io-client');
@@ -136,11 +154,27 @@ describe('trackConnections', () => {
     const tracker = trackConnections(httpServer);
     const port = await listen();
     const p = await peer(port, '');
-    await sleep(50);
-    expect(tracker.size()).toBe(1);
+    expect(await until(() => tracker.size() === 1)).toBe(true);
     p.socket.destroy();
-    await sleep(50);
-    expect(tracker.size()).toBe(0);
-    expect(tracker.destroyAll()).toBe(0);
+    expect(await until(() => tracker.size() === 0)).toBe(true);
+    expect(tracker.destroyIdle()).toEqual({ destroyed: 0, inFlight: 0 });
+  });
+
+  it('leaves a connection serving a request alone, and destroys the idle ones', async () => {
+    let finish: () => void = () => undefined;
+    httpServer.removeAllListeners('request');
+    httpServer.on('request', (_req, res) => {
+      finish = () => res.end('late');
+    });
+    const tracker = trackConnections(httpServer);
+    const port = await listen();
+    const busy = await peer(port, 'GET /slow HTTP/1.1\r\nHost: x\r\n\r\n');
+    await peer(port, '');
+    expect(await until(() => tracker.size() === 2)).toBe(true);
+    await sleep(20);
+
+    expect(tracker.destroyIdle()).toEqual({ destroyed: 1, inFlight: 1 });
+    finish();
+    expect(await until(() => busy.received().includes('late'))).toBe(true);
   });
 });

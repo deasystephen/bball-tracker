@@ -168,7 +168,7 @@ describe('createShutdown', () => {
     const close = jest.fn(() => new Promise<void>((resolve) => { release = resolve; }));
     const destroyConnections = jest.fn(() => {
       release();
-      return 2;
+      return { destroyed: 2, inFlight: 1 };
     });
     const { deps: d } = deps({ io: { close }, destroyConnections });
     const done = createShutdown(d)('SIGTERM');
@@ -177,9 +177,10 @@ describe('createShutdown', () => {
     expect(destroyConnections).not.toHaveBeenCalled();
     await advance(1);
     expect(destroyConnections).toHaveBeenCalledTimes(1);
-    expect(logger.warn).toHaveBeenCalledWith('Shutdown: destroyed connections still open', {
+    expect(logger.warn).toHaveBeenCalledWith('Shutdown: HTTP close still pending after drain', {
       signal: 'SIGTERM',
-      count: 2,
+      destroyed: 2,
+      inFlight: 1,
       afterMs: SHUTDOWN_HTTP_DRAIN_MS,
     });
     await done;
@@ -218,7 +219,7 @@ describe('createShutdown', () => {
 
   it('abandons an HTTP close that outlives the destroy, then still quits everything else', async () => {
     jest.useFakeTimers();
-    const destroyConnections = jest.fn(() => 1);
+    const destroyConnections = jest.fn(() => ({ destroyed: 1, inFlight: 0 }));
     const { deps: d } = deps({ io: { close: jest.fn(never) }, destroyConnections });
     const done = createShutdown(d)('SIGTERM');
     await advance(STEP_TIMEOUT_MS.http);
