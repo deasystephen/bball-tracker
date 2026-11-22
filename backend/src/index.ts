@@ -22,6 +22,7 @@ import { enforceReplicaGuard } from './utils/replica-guard';
 import { assertWorkOSConfig, WorkOSConfigError } from './utils/workos-client';
 import { createSesEventConsumer } from './services/mailer/ses-event-consumer';
 import { createShutdown } from './utils/shutdown';
+import { refuseUnhandledUpgrades, trackConnections } from './utils/http-connections';
 import { closeRedis } from './utils/redis';
 import { attachRedisAdapter } from './websocket/redis-adapter';
 
@@ -56,6 +57,11 @@ const io = new SocketServer(httpServer, {
     methods: ['GET', 'POST'],
   },
 });
+
+// An Upgrade request for any other path gets a 400 and a closed socket, not
+// engine.io's bare FIN, which leaves the socket open for as long as the peer
+// keeps its side open (#1052, utils/http-connections.ts).
+refuseUnhandledUpgrades(httpServer, `${io.path()}/`);
 
 const PORT = process.env.PORT || 3000;
 
@@ -213,6 +219,9 @@ if (require.main === module) {
   warnMissingUrlConfig();
   // Before listening, so no socket connects on the in-memory adapter.
   const socketAdapter = attachRedisAdapter(io);
+  // Before listening, so every connection is seen; shutdown destroys what is
+  // left after its drain period (#1052).
+  const connections = trackConnections(httpServer);
   httpServer.listen(PORT, () => {
     logger.info(`Server running on port ${PORT}`, { env: process.env.NODE_ENV || 'development' });
   });
@@ -231,6 +240,7 @@ if (require.main === module) {
         await io.close();
       },
     },
+    destroyConnections: () => connections.destroyAll(),
     consumer,
     disconnectPrisma: () => prisma.$disconnect(),
     closeRedis: async () => {
