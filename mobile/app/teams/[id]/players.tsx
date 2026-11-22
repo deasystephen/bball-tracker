@@ -160,7 +160,16 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 type AgeAnswer = 'yes' | 'no';
 
 /** Roster statuses where the player is still waiting on an invitation email. */
-const AWAITING_INVITE: ReadonlySet<RosterStatus> = new Set(['invited', 'invite_expired', 'not_invited']);
+const AWAITING_INVITE: ReadonlySet<RosterStatus> = new Set([
+  'invited',
+  'invite_expired',
+  'not_invited',
+  // The parent states say nothing about the player's own email: with an
+  // address on file an invitation to it is still owed (#1082).
+  'parent_connected',
+  'parent_invited',
+  'parent_invite_expired',
+]);
 
 /** Statuses where the player has no invitation of their own, so one can be sent to their address. */
 const NO_OWN_INVITE: ReadonlySet<RosterStatus> = new Set([
@@ -170,12 +179,13 @@ const NO_OWN_INVITE: ReadonlySet<RosterStatus> = new Set([
   'parent_invite_expired',
 ]);
 
-/** Statuses where a parent is already invited or linked: the menu opens the list, it does not offer a first invite. */
-const HAS_PARENT_STATE: ReadonlySet<RosterStatus> = new Set([
-  'parent_connected',
-  'parent_invited',
-  'parent_invite_expired',
-]);
+/**
+ * Statuses where a parent is linked or holds a live invitation: the menu opens
+ * the parents list (which shows the pending row and its Resend), it does not
+ * offer a first invite. A lapsed invitation is not listed there, so that
+ * state keeps "Invite a parent".
+ */
+const HAS_PARENT_STATE: ReadonlySet<RosterStatus> = new Set(['parent_connected', 'parent_invited']);
 
 export default function ManagePlayersScreen() {
   const router = useRouter();
@@ -630,8 +640,9 @@ export default function ManagePlayersScreen() {
     }
     if (member.player.isManaged) {
       items.push({
-        // Once a parent is invited or linked, "Invite a parent" would read as
-        // if nothing had been sent (#1082); the same screen holds Resend.
+        // Once a parent is linked or holds a live invitation, "Invite a parent"
+        // would read as if nothing had been sent (#1082); the same screen
+        // lists the pending invitation with its Resend.
         label: HAS_PARENT_STATE.has(status) ? t('guardians.title') : t('guardians.inviteParent'),
         onPress: () => router.push(`/teams/${id}/players/${member.playerId}/guardians`),
       });

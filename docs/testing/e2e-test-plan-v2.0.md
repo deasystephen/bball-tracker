@@ -399,7 +399,8 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
     email, requires a valid parent email and shows the "Players under 13 don't
     get their own login" hint; the player is rostered "Parent invited" (#1082;
     "Parent connected" once the parent accepts) and only the parent is emailed.
-    The row menu then reads "Parents & guardians", not "Invite a parent". The
+    The row menu then reads "Parents & guardians", not "Invite a parent" (it goes
+    back to "Invite a parent" once that invitation lapses). The
     answer is not sent to the API.
   - Maestro: `.maestro/roster-management.yaml`, `.maestro/roster-invite-status.yaml`.
 - **Notes:** Per `POST /api/v1/teams/:teamId/players` (unified endpoint; the

@@ -446,6 +446,12 @@ describe('TeamService', () => {
   });
 
   describe('getTeamById', () => {
+    beforeEach(() => {
+      // Roster managers also read the parent invitation state (#1082).
+      (mockPrisma.guardianInvitation.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.guardian.findMany as jest.Mock).mockResolvedValue([]);
+    });
+
     it("says whether the row is its lineage's newest team-season, to a staff manager only (isLatestInLineage, #461)", async () => {
       const { team, coach, season, league, headCoachRole, coachStaff } = createFullTeam();
       (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue({
@@ -528,7 +534,7 @@ describe('TeamService', () => {
         ...team,
         season: { ...season, league },
         staff: [{ ...coachStaff, user: { id: coach.id, name: coach.name, email: coach.email }, role: headCoachRole }],
-        members: [{ playerId: player.id, player: { id: player.id, name: player.name, email: player.email, guardiansAsChild: [], guardianInvitationsAsChild: [] } }],
+        members: [{ playerId: player.id, player: { id: player.id, name: player.name, email: player.email } }],
         games: [],
         invitations: [],
       });
@@ -559,7 +565,7 @@ describe('TeamService', () => {
         ...team,
         season: { ...season, league },
         staff: [{ ...coachStaff, user: { id: coach.id, name: coach.name, email: coach.email }, role: headCoachRole }],
-        members: [{ playerId: player.id, player: { ...rosterPlayer, guardiansAsChild: [], guardianInvitationsAsChild: [] } }],
+        members: [{ playerId: player.id, player: rosterPlayer }],
         games: [],
         invitations: [],
       });
@@ -612,12 +618,6 @@ describe('TeamService', () => {
             email: player.email,
             emailSuppressedAt: new Date('2026-09-27T18:00:00.000Z'),
             emailSuppressedReason: 'COMPLAINT',
-            // A linked parent and a pending parent invitation: neither may
-            // reach a caller who does not manage the roster (#1082).
-            guardiansAsChild: [{ id: 'guardian-link' }],
-            guardianInvitationsAsChild: [
-              { id: 'ginv-1', status: 'PENDING', expiresAt: new Date('2026-12-01T00:00:00Z'), createdAt: new Date('2026-11-22T00:00:00Z') },
-            ],
           },
         })),
         games: [],
@@ -635,18 +635,20 @@ describe('TeamService', () => {
         // as spam, is roster-management information too (#449).
         expect(m.player).not.toHaveProperty('emailSuppressedAt');
         expect(m.player).not.toHaveProperty('emailSuppressedReason');
-        expect(m.player).not.toHaveProperty('guardiansAsChild');
-        expect(m.player).not.toHaveProperty('guardianInvitationsAsChild');
         expect(m.player.id).toBeDefined();
         expect(m.player.name).toBeDefined();
       }
       // jersey etc. preserved
       expect(result.members[0]).toHaveProperty('jerseyNumber', members[0].member.jerseyNumber);
+      // The parent invitation state is roster-management information too, and
+      // is not even read for this caller (#1082).
       expect(result.guardianInvitations).toEqual([]);
       expect(result.guardianLinkedPlayerIds).toEqual([]);
+      expect(mockPrisma.guardianInvitation.findMany).not.toHaveBeenCalled();
+      expect(mockPrisma.guardian.findMany).not.toHaveBeenCalled();
     });
 
-    it('gives roster managers the parent invitation state per player, off the player object (#1082)', async () => {
+    it('gives roster managers the parent invitation state per player, scoped to the team lineage (#1082)', async () => {
       const { team, coach, season, league, members, headCoachRole, coachStaff } = createFullTeam({ memberCount: 3 });
       const [invited, linked, bare] = members.map((m) => m.player);
       const expiresAt = new Date('2026-12-01T00:00:00Z');
@@ -661,24 +663,17 @@ describe('TeamService', () => {
         ...team,
         season: { ...season, league },
         staff: [{ ...coachStaff, user: { id: coach.id, name: coach.name, email: coach.email }, role: headCoachRole }],
-        members: [
-          {
-            playerId: invited.id,
-            player: {
-              ...rosterPlayer(invited),
-              guardiansAsChild: [],
-              guardianInvitationsAsChild: [{ id: 'ginv-1', status: 'PENDING', expiresAt, createdAt }],
-            },
-          },
-          { playerId: linked.id, player: { ...rosterPlayer(linked), guardiansAsChild: [{ id: 'g-1' }], guardianInvitationsAsChild: [] } },
-          { playerId: bare.id, player: { ...rosterPlayer(bare), guardiansAsChild: [], guardianInvitationsAsChild: [] } },
-        ],
+        members: [invited, linked, bare].map((p) => ({ playerId: p.id, player: rosterPlayer(p) })),
         games: [],
         invitations: [],
       });
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(coach);
       (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(coachStaff);
       (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue({ ...coachStaff, role: headCoachRole });
+      (mockPrisma.guardianInvitation.findMany as jest.Mock).mockResolvedValueOnce([
+        { id: 'ginv-1', childId: invited.id, expiresAt, createdAt },
+      ]);
+      (mockPrisma.guardian.findMany as jest.Mock).mockResolvedValueOnce([{ childId: linked.id }]);
 
       const result = await TeamService.getTeamById(team.id, coach.id);
 
@@ -686,17 +681,22 @@ describe('TeamService', () => {
         { id: 'ginv-1', playerId: invited.id, status: 'PENDING', expiresAt, createdAt },
       ]);
       expect(result.guardianLinkedPlayerIds).toEqual([linked.id]);
-      // The relations never ride on the player object, and the manager keeps the email.
+      // Nothing rides on the player object, and the manager keeps the email.
       expect(result.members.map((m) => m.player)).toEqual([invited, linked, bare].map(rosterPlayer));
 
-      // Only PENDING rows are read, and never the token or the invited address.
-      const [{ include }] = (mockPrisma.team.findUnique as jest.Mock).mock.calls[0] as [
-        { include: { members: { include: { player: { select: Record<string, { where?: object; select: object }> } } } } },
-      ];
-      const select = include.members.include.player.select;
-      expect(select.guardianInvitationsAsChild.where).toEqual({ status: 'PENDING' });
-      expect(select.guardianInvitationsAsChild.select).toEqual({ id: true, status: true, expiresAt: true, createdAt: true });
-      expect(select.guardiansAsChild.select).toEqual({ id: true });
+      // PENDING rows of rostered players, sent from this team's lineage only,
+      // and never the token or the invited address.
+      const playerIds = [invited.id, linked.id, bare.id];
+      expect(mockPrisma.guardianInvitation.findMany).toHaveBeenCalledWith({
+        where: { childId: { in: playerIds }, status: 'PENDING', team: { lineageId: team.lineageId } },
+        select: { id: true, childId: true, expiresAt: true, createdAt: true },
+        orderBy: { expiresAt: 'desc' },
+      });
+      expect(mockPrisma.guardian.findMany).toHaveBeenCalledWith({
+        where: { childId: { in: playerIds } },
+        select: { childId: true },
+        distinct: ['childId'],
+      });
     });
 
     it('omitRosterManagerFields removes only email and its delivery state (#642)', () => {
@@ -751,7 +751,7 @@ describe('TeamService', () => {
         ...team,
         season: { ...season, league },
         staff: [{ ...coachStaff, user: { id: coach.id, name: coach.name, email: coach.email }, role: headCoachRole }],
-        members: [{ playerId: player.id, player: { id: player.id, name: player.name, email: player.email, guardiansAsChild: [], guardianInvitationsAsChild: [] } }],
+        members: [{ playerId: player.id, player: { id: player.id, name: player.name, email: player.email } }],
         games: [],
         invitations: [
           // Rostered case-2 player: stays in the payload (drives the chip)
@@ -779,7 +779,7 @@ describe('TeamService', () => {
         ...team,
         season: { ...season, league },
         staff: [{ ...coachStaff, user: { id: coach.id, name: coach.name, email: coach.email }, role: headCoachRole }],
-        members: [{ playerId: player.id, player: { id: player.id, name: player.name, email: player.email, guardiansAsChild: [], guardianInvitationsAsChild: [] } }],
+        members: [{ playerId: player.id, player: { id: player.id, name: player.name, email: player.email } }],
         games: [],
         invitations: [{ id: 'inv-1', playerId: player.id, status: 'PENDING', expiresAt: new Date(), createdAt: new Date() }],
       });
@@ -801,7 +801,7 @@ describe('TeamService', () => {
         ...team,
         season: { ...season, league },
         staff: [{ ...coachStaff, user: { id: coach.id, name: coach.name, email: coach.email }, role: headCoachRole }],
-        members: [{ playerId: player.id, player: { id: player.id, name: player.name, email: player.email, guardiansAsChild: [], guardianInvitationsAsChild: [] } }],
+        members: [{ playerId: player.id, player: { id: player.id, name: player.name, email: player.email } }],
         games: [],
       });
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(player);
@@ -826,7 +826,7 @@ describe('TeamService', () => {
         ...team,
         season: { ...season, league },
         staff: [{ ...coachStaff, user: { id: coach.id, name: coach.name, email: coach.email }, role: headCoachRole }],
-        members: [{ playerId: child.id, player: { id: child.id, name: child.name, email: child.email, guardiansAsChild: [], guardianInvitationsAsChild: [] } }],
+        members: [{ playerId: child.id, player: { id: child.id, name: child.name, email: child.email } }],
         games: [],
       });
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(parent);

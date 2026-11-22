@@ -4,9 +4,10 @@
  * A child under 13 has no invitation of their own; the parent has a
  * `GuardianInvitation`. The roster chip reads that state from the team detail
  * payload. The mocked service suite proves the shaping; this proves the select
- * itself: only PENDING rows come back, a linked guardian is reported once per
- * player, nothing rides on the player object, and a caller who does not manage
- * the roster gets neither list.
+ * itself: only PENDING rows sent from this team's lineage come back (another
+ * club's invitation for the same child does not), a linked guardian is reported
+ * once per player, nothing rides on the player object, and a caller who does
+ * not manage the roster gets neither list.
  *
  * Every row is namespaced by the fixture run id and removed in afterAll.
  */
@@ -29,12 +30,17 @@ let linkedChildId: string;
 let bareChildId: string;
 let pendingId: string;
 
-async function guardianInvitation(childId: string, status: 'PENDING' | 'EXPIRED', local: string): Promise<string> {
+async function guardianInvitation(
+  childId: string,
+  status: 'PENDING' | 'EXPIRED',
+  local: string,
+  teamId: string = org.teamId
+): Promise<string> {
   const row = await prisma.guardianInvitation.create({
     data: {
       token: randomBytes(32).toString('base64url'),
       childId,
-      teamId: org.teamId,
+      teamId,
       invitedEmail: `${local}.${fx.run}@example.test`,
       relationship: 'MOTHER',
       invitedById: coachId,
@@ -67,6 +73,12 @@ beforeAll(async () => {
   // A superseded invitation is history, not state: it must not come back.
   await guardianInvitation(invitedChildId, 'EXPIRED', 'mum-old');
 
+  // The same child is also on another club's team, whose coach invited a
+  // parent: that invitation is theirs, not this roster's.
+  const otherClub = await fx.org('other-club');
+  await fx.member(bareChildId, otherClub);
+  await guardianInvitation(bareChildId, 'PENDING', 'other-club-mum', otherClub.teamId);
+
   // Two linked guardians still report the player once.
   const mother = await fx.user('mother', 'PARENT');
   const father = await fx.user('father', 'PARENT');
@@ -80,7 +92,7 @@ afterAll(async () => {
 });
 
 describe('team detail carries the parent invitation state for roster managers (#1082)', () => {
-  it('returns the pending parent invitation and the linked players to a coach, never on the player object', async () => {
+  it('returns this lineage\'s pending parent invitation and the linked players to a coach', async () => {
     const team = await TeamService.getTeamById(org.teamId, coachId);
 
     expect(team.guardianInvitations).toHaveLength(1);
@@ -88,10 +100,6 @@ describe('team detail carries the parent invitation state for roster managers (#
     expect(Object.keys(team.guardianInvitations[0]).sort()).toEqual(['createdAt', 'expiresAt', 'id', 'playerId', 'status']);
     expect(team.guardianLinkedPlayerIds).toEqual([linkedChildId]);
 
-    for (const member of team.members) {
-      expect(member.player).not.toHaveProperty('guardiansAsChild');
-      expect(member.player).not.toHaveProperty('guardianInvitationsAsChild');
-    }
     // The coach still gets roster emails.
     expect(team.members.find((m) => m.playerId === bareChildId)?.player).toHaveProperty('email');
   });
@@ -102,8 +110,6 @@ describe('team detail carries the parent invitation state for roster managers (#
     expect(team.guardianInvitations).toEqual([]);
     expect(team.guardianLinkedPlayerIds).toEqual([]);
     for (const member of team.members) {
-      expect(member.player).not.toHaveProperty('guardiansAsChild');
-      expect(member.player).not.toHaveProperty('guardianInvitationsAsChild');
       expect(member.player).not.toHaveProperty('email');
     }
   });

@@ -235,17 +235,21 @@ describe('ManagePlayersScreen — roster status and actions', () => {
     expect(screen.getByText('Parent connected')).toBeTruthy();
     expect(screen.getAllByText('Not invited')).toHaveLength(1);
 
-    // Invited, expired and linked all open the parents list (it holds Resend);
-    // none reads as if no parent had been invited.
-    for (const name of ['Gus ParentInvited', 'Hal ParentExpired', 'Ivy ParentLinked']) {
+    // A live invitation or a linked parent opens the parents list (it shows the
+    // pending row with Resend); neither reads as if no parent had been invited.
+    for (const name of ['Gus ParentInvited', 'Ivy ParentLinked']) {
       openMenu(screen, name);
       expect(visibleMenuItems(screen)).toEqual(['Parents & guardians', 'Edit jersey & position', 'Remove player']);
       closeMenu(screen);
     }
 
-    // No parent at all: the first invite is still offered.
-    openMenu(screen, 'Jo NoParent');
-    expect(visibleMenuItems(screen)).toEqual(['Invite a parent', 'Edit jersey & position', 'Remove player']);
+    // A lapsed invitation is not listed on that screen, and with no parent at
+    // all there is nothing to list: both still offer the invite.
+    for (const name of ['Hal ParentExpired', 'Jo NoParent']) {
+      openMenu(screen, name);
+      expect(visibleMenuItems(screen)).toEqual(['Invite a parent', 'Edit jersey & position', 'Remove player']);
+      closeMenu(screen);
+    }
   });
 
   it('menu contents are contextual to the chip status', () => {

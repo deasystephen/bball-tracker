@@ -54,15 +54,20 @@ eng-review amendments recorded there).
   three states (#1082):** a child under 13 has no invitation of their own, so without them every
   child added with a parent email read "Not invited" although the parent's email had gone out.
   The same payload carries, for roster managers only, `guardianInvitations` (PENDING
-  `GuardianInvitation` rows of rostered players: `id`, `playerId`, `status`, `expiresAt`,
-  `createdAt`; never the invited address or the token) and `guardianLinkedPlayerIds` (players
-  with at least one `Guardian` row). Both are read on the member's player in the same query
-  (`ROSTER_PLAYER_SELECT`) and lifted out in `getTeamById`, so no player object carries them for
-  any caller. With no invitation of the player's own: a linked parent = Parent connected; a live
-  PENDING guardian invitation = Parent invited; only lapsed ones = Parent invite expired. The
-  player's own invitation wins when there is one. In those three states the row menu's "Invite a
-  parent" reads "Parents & guardians" (same screen, which holds Resend), and "Send invitation"
-  is still offered when the player has an address. Existing-account pending invites
+  `GuardianInvitation` rows of rostered players **sent from this team's lineage**, the scope
+  Resend works in, so another club's invitation for the same child never shows here: `id`,
+  `playerId`, `status`, `expiresAt`, `createdAt`; never the invited address or the token) and
+  `guardianLinkedPlayerIds` (players with at least one `Guardian` row, whichever team the link
+  came through). `getTeamById` reads both only inside the `canManageRoster` branch; other
+  callers get empty lists and no query runs for them. With no invitation of the player's own: a
+  linked parent = Parent connected; a live PENDING guardian invitation = Parent invited; only
+  lapsed ones = Parent invite expired. The player's own invitation wins when there is one. For
+  Parent connected and Parent invited the row menu's "Invite a parent" reads "Parents &
+  guardians" (the same screen, which lists the live invitation with its Resend). Parent invite
+  expired keeps "Invite a parent", because that screen lists unexpired invitations only. The
+  parent states say nothing about the player's own address, so "Send invitation" and the
+  fix-email sheet's "Save and send" are still offered when the player has one.
+  Existing-account pending invites
   (case 3, no member row) render client-side from `GET /invitations?teamId=`, deduped against
   `members[]` by `playerId`.
 - **Resend = supersede:** `POST /teams/:id/invitations { playerId, supersede: true }` expires the
