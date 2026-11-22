@@ -94,6 +94,65 @@ describe('removing a league admin cancels the staff invitations they can no long
   });
 });
 
+describe('removing a league admin and the same person\'s head-coach row at once (#1038)', () => {
+  it('the removal that runs second sees the other and cancels: the team lock serialises them', async () => {
+    const org = await fx.org('lgRace');
+    await assistantRole(org);
+    const adminId = await fx.user('raceadmin', 'COACH');
+    await fx.leagueAdmin(adminId, org);
+    await fx.staff(adminId, org); // also head coach
+    const invitation = await StaffInvitationService.inviteStaff(
+      org.teamId,
+      { email: address('race-invitee'), roleType: 'ASSISTANT_COACH' },
+      adminId
+    );
+
+    let removal: ReturnType<typeof track<unknown>> | undefined;
+    await prisma.$transaction(
+      async (holder) => {
+        // What a head-coach removal holds while it deletes the staff row.
+        await holder.$queryRaw`SELECT "id" FROM "Team" WHERE "id" = ${org.teamId} FOR NO KEY UPDATE`;
+        const pid = await backendPid(holder);
+        removal = track(LeagueService.removeLeagueAdmin(org.leagueId, adminId, sysAdminId));
+        removal.promise.catch(() => undefined);
+        await waitForBlockedBy(holder, pid, { tables: ['Team'], timeoutMs: 4000, settled: removal });
+        await holder.teamStaff.deleteMany({ where: { teamId: org.teamId, userId: adminId } });
+      },
+      { timeout: 10_000 }
+    );
+
+    await expect(removal?.promise).resolves.toEqual({ success: true });
+    expect(await statusOf(invitation.id)).toBe('CANCELLED');
+  });
+});
+
+describe('POST /teams/:teamId/staff by a league admin removed while it waits (#1038)', () => {
+  it('re-checks the requester behind the requester\'s user lock and answers 403, with no staff row', async () => {
+    const org = await fx.org('reqLock');
+    await assistantRole(org);
+    const adminId = await fx.user('reqadmin', 'COACH');
+    await fx.leagueAdmin(adminId, org);
+    const targetId = await fx.user('reqtarget', 'COACH');
+
+    let add: ReturnType<typeof track<unknown>> | undefined;
+    await prisma.$transaction(
+      async (holder) => {
+        // What removeLeagueAdmin holds on the former admin while it deletes the row.
+        await holder.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${adminId} FOR NO KEY UPDATE`;
+        const pid = await backendPid(holder);
+        add = track(TeamService.addStaffMember(org.teamId, { userId: targetId, roleType: 'ASSISTANT_COACH' }, adminId));
+        add.promise.catch(() => undefined);
+        await waitForBlockedBy(holder, pid, { tables: ['User'], timeoutMs: 4000, settled: add });
+        await holder.leagueAdmin.deleteMany({ where: { leagueId: org.leagueId, userId: adminId } });
+      },
+      { timeout: 10_000 }
+    );
+
+    await expect(add?.promise).rejects.toMatchObject({ statusCode: 403 });
+    expect(await prisma.teamStaff.count({ where: { teamId: org.teamId, userId: targetId } })).toBe(0);
+  });
+});
+
 describe('POST /teams/:teamId/staff writes under the target user lock (#1038)', () => {
   it('an adoption that marks the row managed while the add waits makes the add a 400, with no staff row', async () => {
     const org = await fx.org('staffLock');

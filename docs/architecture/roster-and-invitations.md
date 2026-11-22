@@ -199,13 +199,15 @@ with code `staff_target_not_found` since #460 so the app can offer an invitation
 (400 `staff_target_needs_invitation`) an unclaimed **managed** roster record, named by address or by id:
 its managing coach could rewrite that email (B2.10) and claim the role, so such an address is invited
 instead (the app offers the invitation on either code). Since #1038 the write runs in one transaction
-under the target's `User` row lock (`lockUsers`) and then the team lock (`lockTeamRow`), account
-deletion's user-then-team order: the managed-record refusal, the tombstone check (404
-`staff_target_not_found`) and the already-staff check are repeated on the locked row. Add Player's
-case-2 adoption takes the same user lock before it marks a row managed, so the two serialise by
-construction (before, only the `PATCH /players/:id` email guard below kept a managed record that
-slipped into a staff role from being claimed); the team lock serialises it with a staff accept. Proven
-in `tests/integration/staff-invitation-followups.db.test.ts`.
+under the `User` row locks of the target and the requester (one sorted `lockUsers` statement) and then
+the team lock (`lockTeamRow`), account deletion's user-then-team order. Behind them it repeats, in this
+order: the requester's `canManageStaff` (403; a head-coach removal or demotion holds the team lock, a
+league admin removal holds the former admin's user lock, so either one that commits meanwhile is
+seen), then the target's tombstone check (404 `staff_target_not_found`), the managed-record refusal
+and the already-staff check. Add Player's case-2 adoption takes the target's user lock before it marks
+a row managed, so the two serialise by construction (before, only the `PATCH /players/:id` email guard
+below kept a managed record that slipped into a staff role from being claimed); the team lock
+serialises it with a staff accept. Proven in `tests/integration/staff-invitation-followups.db.test.ts`.
 `services/staff-invitation-service.ts` invites any address to a staff role through a
 **`StaffInvitation`** row, the third invitation kind next to `TeamInvitation` and
 `GuardianInvitation`. It reuses the same machinery rather than copying it: a random bearer-secret
@@ -307,7 +309,10 @@ for every address match and the address stored trimmed and lower-cased; the shar
     removing a league admin row (`LeagueService.removeLeagueAdmin`, #1038) does the same on every
     team of that league, in the removal's transaction and behind the former admin's `User` row lock,
     which a staff invite takes on its inviter, so an invite in flight is either cancelled or refused,
-    and a head coach of one of those teams keeps that team's invitations; an accept already past its
+    and then behind each affected team's lock (the lock head-coach removal and demotion hold, so when
+    both of a person's roles go at once the second removal sees the first and cancels; the set is
+    re-read after locking, for a rollover that moved rows meanwhile); a head coach of one of those
+    teams keeps that team's invitations; an accept already past its
     inviter re-check when the removal commits can still land, as one that committed just before it
     would); refuses
     an invitation whose team-season is no longer its lineage's latest (the staff row would land on

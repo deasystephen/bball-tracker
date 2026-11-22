@@ -1808,9 +1808,17 @@ describe('TeamService', () => {
   describe('addStaffMember', () => {
     beforeEach(() => {
       // lockUsers / lockTeamRow (#1038): every row asked for exists and is live.
-      (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([{ id: 'locked', deletedAt: null }]);
+      (mockPrisma.$queryRaw as jest.Mock).mockImplementation(async (_sql: unknown, ...values: unknown[]) =>
+        values
+          // Prisma.join(ids) arrives as a Sql object carrying `values`.
+          .flatMap((value) =>
+            value && typeof value === 'object' && 'values' in value ? (value as { values: unknown[] }).values : [value]
+          )
+          .map((id) => ({ id, deletedAt: null }))
+      );
     });
     afterEach(() => {
+      (mockPrisma.$queryRaw as jest.Mock).mockReset();
       (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([{ '?column?': 1 }]);
     });
     it('adds staff by userId as a head coach and returns the row with user+role', async () => {

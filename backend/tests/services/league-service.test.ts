@@ -643,6 +643,14 @@ describe('LeagueService', () => {
         expect((mockPrisma.$queryRaw as jest.Mock).mock.invocationCallOrder[0]).toBeLessThan(
           (mockPrisma.leagueAdmin.deleteMany as jest.Mock).mock.invocationCallOrder[0]
         );
+        // The affected teams are locked (after the user) before any cancel reads canManageStaff.
+        const teamLockIndex = (mockPrisma.$queryRaw as jest.Mock).mock.calls.findIndex((call) =>
+          sqlOf(call).includes('FROM "Team"')
+        );
+        expect(teamLockIndex).toBeGreaterThan(0);
+        expect((mockPrisma.$queryRaw as jest.Mock).mock.invocationCallOrder[teamLockIndex]).toBeLessThan(
+          (mockPrisma.staffInvitation.updateMany as jest.Mock).mock.invocationCallOrder[0]
+        );
         expect(mockPrisma.staffInvitation.findMany).toHaveBeenCalledWith({
           where: { invitedById: fixture.targetId, status: 'PENDING', team: { season: { leagueId: fixture.leagueId } } },
           select: { teamId: true },

@@ -1576,14 +1576,22 @@ export class TeamService {
       throw new BadRequestError('User is already a staff member of this team');
     }
 
-    // The write, under the target's `User` row lock and then the team lock
-    // (#1038): account deletion's user-then-team order, which a staff accept
-    // follows too. The user lock is the one Add Player's case-2 adoption takes
-    // before it marks a row managed, so the two serialise: either the adoption
-    // committed first and the re-read below refuses the now-managed record, or
-    // the adoption waits and then sees this staff row and re-branches to case
-    // 3. The team lock serialises with a staff accept, so the second of the
-    // two sees the other's row. A deletion that committed meanwhile is a 404.
+    // The write (#1038), under the `User` row locks of the target AND the
+    // requester (one sorted statement, `lockUsers`), then the team lock:
+    // account deletion's user-then-team order, which a staff accept follows
+    // too. Every check is repeated behind those locks, the requester's right
+    // first so a caller who lost it learns nothing about the target:
+    //  - the requester's `canManageStaff`: a head coach removed or demoted
+    //    meanwhile (that change holds the team lock) or a league admin row
+    //    removed meanwhile (`removeLeagueAdmin` holds the former admin's user
+    //    lock) adds nobody;
+    //  - the target: a deletion that committed meanwhile is a 404; Add
+    //    Player's case-2 adoption takes the target's user lock before it marks
+    //    a row managed, so either it committed first and the managed record is
+    //    refused, or it waits and then sees this staff row and re-branches to
+    //    case 3;
+    //  - the staff row: the team lock serialises with a staff accept, so the
+    //    second of the two sees the other's row.
     // A lost race on @@unique([teamId, userId]) still answers the pre-check's
     // 400 (#727); the index is one role per user per team (#463), and the
     // retired [teamId, userId, roleId] name is accepted for a database still
@@ -1591,8 +1599,15 @@ export class TeamService {
     const teamStaff = await createOrConflict(
       () =>
         prisma.$transaction(async (tx) => {
-          const [locked] = await lockUsers(tx, [user.id]);
-          if (!locked || locked.deletedAt !== null) {
+          const locked = await lockUsers(tx, [user.id, requestingUserId]);
+          if (!(await lockTeamRow(tx, teamId))) {
+            throw new NotFoundError('Team not found');
+          }
+          if (!(await canManageStaff(requestingUserId, teamId, tx))) {
+            throw new ForbiddenError('You do not have permission to manage team staff');
+          }
+          const target = locked.find((row) => row.id === user.id);
+          if (!target || target.deletedAt !== null) {
             throw new StaffTargetNotFoundError();
           }
           const fresh = await tx.user.findUnique({
@@ -1601,15 +1616,6 @@ export class TeamService {
           });
           if (fresh && fresh.workosUserId === null && fresh.isManaged) {
             throw new StaffTargetNeedsInvitationError();
-          }
-          if (!(await lockTeamRow(tx, teamId))) {
-            throw new NotFoundError('Team not found');
-          }
-          // The requester's right again behind the team lock, as the staff
-          // invite does: a head coach removed or demoted while this request
-          // was in flight (that change holds the same lock) adds nobody.
-          if (!(await canManageStaff(requestingUserId, teamId, tx))) {
-            throw new ForbiddenError('You do not have permission to manage team staff');
           }
           const staffNow = await tx.teamStaff.findUnique({
             where: { teamId_userId: { teamId, userId: user.id } },
