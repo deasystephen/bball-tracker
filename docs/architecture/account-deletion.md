@@ -123,14 +123,33 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   WorkOS identity or refresh-token removal and none of the retained-row rules, and the next sign-in
   would mint a fresh account for the same identity. "Claimed" is the `workosUserId` column, the one
   `deleteAccount`, `syncUser` and `convertToManaged` read, never `role`, name or email. Unclaimed
-  rows still delete through it (when on no team and with no events): a managed roster record, an
-  Add Player pre-provision that never signed in, and a row the age screen un-claimed. The
-  check runs on the unlocked read for the clean 403, and again inside the write (`where: { id,
-  deletedAt: null, AND: [{ workosUserId: null }] }`; the unique-where type takes no bare `null`):
-  a row claimed in between matches nothing, and the P2025 handler re-reads and answers the same
-  403 (a tombstone stays 404). `revokeUserSockets` fires only after a delete that happened. The
-  only client call, mobile `useDeletePlayer`, has no screen. Tests:
+  rows (a managed roster record, an Add Player pre-provision that never signed in, a row the age
+  screen un-claimed) still delete through it, under the rule below. The check runs on the
+  unlocked read for the clean 403, and again on the locked row: a row claimed in between answers
+  the same 403 (a tombstone stays 404). `revokeUserSockets` fires only after a delete that
+  happened. The only client call, mobile `useDeletePlayer`, has no screen. Tests:
   `tests/api/players-delete-unmocked.test.ts`, `tests/services/player-service.test.ts`.
+- **`DELETE /players/:id` erases an unclaimed row only when nothing references it (#1047).** The
+  `User` delete cascades through every relation, so it is allowed only on a row that account
+  deletion would itself erase without purging anything: the #529 rule, `isUnreferenced` over
+  `USER_REFERENCE_SELECT`. Anything else answers **409 `player_has_records`** with `relations`, the
+  `User` relation names still holding rows (`account-service.ts#referencingRelations`), and nothing
+  is written. The 400s for a row on a team or with game events stay as the first, unlocked checks.
+  A refused record leaves only through `deleteAccount`'s retention rules: a guardian deletes a
+  managed child (`DELETE /players/:id/account`), an operator uses the data-subject-request script.
+  Inside one transaction the row is locked `FOR UPDATE` before the count (as `deleteAccount` does),
+  so a reference inserted while the delete waits (its foreign key takes a key-share lock on the
+  row) is seen and refused, never cascaded. What a record that passes the team and events checks
+  can still carry, shown through the production paths in
+  `tests/integration/player-delete-records.db.test.ts`: a managed child who left the team keeps its
+  `Guardian` link, the guardian invitation Add Player sent, the guardian's game RSVP and past
+  practice answers (removal from the roster keeps those as history); a player added by email and
+  removed keeps the team invitation. `PlayerStats` cannot outlive the events (deleting the last
+  event of a FINISHED game re-finalizes the rows away). Before #1047 the delete cascaded all of
+  these away. Alternative considered: routing the delete through `deleteAccount` (purge, then
+  erase or tombstone), which would make every such record deletable by its coach at the cost of a
+  new deletion mode and a coach-initiated purge of guardian links; not taken while the endpoint
+  has no screen.
 - **Last head coach blocks** with 400 `code: 'last_head_coach'` + `teams`, scoped to teams whose
   season `isActive` (a `Team` row is a team-season, so past seasons go headless rather than forcing
   a coach to delete history). The rule is `utils/permissions.ts#lastHeadCoachTeams` (one set-based

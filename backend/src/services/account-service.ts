@@ -134,7 +134,19 @@ type UserReferences = Prisma.UserGetPayload<{ select: typeof USER_REFERENCE_SELE
 
 /** True when no row in any relation still points at the user (#529). */
 export function isUnreferenced(refs: UserReferences): boolean {
-  return refs.personalLeague === null && Object.values(refs._count).every((count) => count === 0);
+  return referencingRelations(refs).length === 0;
+}
+
+/**
+ * The relations that still point at the user, by `User` field name
+ * (`personalLeague` included). Empty exactly when `isUnreferenced`. Used by
+ * `DELETE /players/:id` to name what blocks a roster-record delete (#1047).
+ */
+export function referencingRelations(refs: UserReferences): string[] {
+  const relations = Object.entries(refs._count)
+    .filter(([, count]) => count > 0)
+    .map(([relation]) => relation);
+  return refs.personalLeague === null ? relations : [...relations, 'personalLeague'];
 }
 
 /**
