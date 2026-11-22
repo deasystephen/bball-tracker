@@ -98,7 +98,7 @@ router.post('/:id/accept', validateUuidParams('id'), async (req, res) => {
     // first because its accept creates a Guardian link, not a TeamMember.
     const guardianInvitation = await GuardianService.findInvitationForUser(id, req.user!.id);
     if (guardianInvitation) {
-      const accepted = await GuardianService.acceptInvitation(id, req.user!.id);
+      const accepted = await GuardianService.acceptInvitation(id, req.user!.id, guardianInvitation);
       res.json({
         success: true,
         kind: 'guardian',
@@ -112,6 +112,9 @@ router.post('/:id/accept', validateUuidParams('id'), async (req, res) => {
     // Staff invitation (#460) addressed to the signed-in account? Tried
     // before the team kind: its accept creates a TeamStaff row. An app build
     // that predates staff invitations reaches here from its deep-link screen.
+    // The kinds share one id space with no kind in the URL, so a team
+    // invitation costs two primary-key misses first; each found row is handed
+    // to its accept rather than read again (#1038).
     const staffInvitation = await StaffInvitationService.findInvitationForUser(id, req.user!.email);
     if (staffInvitation) {
       const accepted = await StaffInvitationService.acceptInvitation(id, req.user!.id, staffInvitation);
@@ -152,7 +155,7 @@ router.post('/:id/reject', validateUuidParams('id'), async (req, res) => {
 
     const guardianInvitation = await GuardianService.findInvitationForUser(id, req.user!.id);
     if (guardianInvitation) {
-      const rejected = await GuardianService.rejectInvitation(id, req.user!.id);
+      const rejected = await GuardianService.rejectInvitation(id, req.user!.id, guardianInvitation);
       res.json({
         success: true,
         kind: 'guardian',

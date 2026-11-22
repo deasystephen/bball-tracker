@@ -167,6 +167,12 @@ describe('staff invitations (#460) through the real StaffInvitationService', () 
     mockPrisma.guardianInvitation.findMany.mockResolvedValue([]);
     mockPrisma.staffInvitation.findFirst.mockResolvedValue(null);
     mockPrisma.staffInvitation.updateMany.mockResolvedValue({ count: 0 });
+    // A guarded single-row update (accept's status flip, decline, cancel)
+    // answers the row with its new fields, through the caller's select.
+    mockPrisma.staffInvitation.update.mockImplementation(
+      async ({ data, select }: { data: Record<string, unknown>; select: Record<string, unknown> }) =>
+        applySelect(invitationRow(data), select)
+    );
     mockPrisma.staffInvitation.create.mockImplementation(
       async ({ data, select }: { data: Record<string, unknown>; select: Record<string, unknown> }) =>
         applySelect(invitationRow({ ...data, createdAt: new Date() }), select)
@@ -590,10 +596,22 @@ describe('staff invitations (#460) through the real StaffInvitationService', () 
         staff: { teamId: TEAM_ID, userId: INVITEE_ID, role: { type: 'ASSISTANT_COACH' } },
       });
       expectNoSecret(res.body);
-      expect(mockPrisma.staffInvitation.updateMany).toHaveBeenCalledWith({
+      // One guarded statement flips the status and returns the row (#1038: no re-read).
+      expect(mockPrisma.staffInvitation.update).toHaveBeenCalledWith({
         where: { id: INVITATION_ID, status: 'PENDING' },
         data: { status: 'ACCEPTED', acceptedAt: expect.any(Date) },
+        select: expect.objectContaining({ id: true, status: true }),
       });
+      expect(mockPrisma.staffInvitation.findUniqueOrThrow).not.toHaveBeenCalled();
+      // The latest-season check is one query, without reading the team's lineage first.
+      expect(mockPrisma.team.findFirst).toHaveBeenCalledWith({
+        where: { lineage: { teams: { some: { id: TEAM_ID } } } },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        select: { id: true },
+      });
+      expect(mockPrisma.team.findUnique).not.toHaveBeenCalledWith(
+        expect.objectContaining({ select: { lineageId: true } })
+      );
       expect(mockPrisma.teamStaff.create).toHaveBeenCalledWith(
         expect.objectContaining({ data: { teamId: TEAM_ID, userId: INVITEE_ID, roleId: ROLE_ID } })
       );
@@ -662,7 +680,10 @@ describe('staff invitations (#460) through the real StaffInvitationService', () 
 
     it('the loser of a concurrent accept gets 400, and a tombstoned account 404', async () => {
       givenTeam();
-      mockPrisma.staffInvitation.updateMany.mockResolvedValue({ count: 0 });
+      const { Prisma } = jest.requireActual('@prisma/client');
+      mockPrisma.staffInvitation.update.mockRejectedValueOnce(
+        new Prisma.PrismaClientKnownRequestError('Record not found', { code: 'P2025', clientVersion: 'test' })
+      );
       const lost = await request(app).post(`/api/v1/invitations/${INVITATION_ID}/accept`);
       expect(lost.status).toBe(400);
       expect(lost.body.error).toBe('Cannot accept invitation: it is no longer pending');
@@ -681,11 +702,6 @@ describe('staff invitations (#460) through the real StaffInvitationService', () 
     });
 
     it('reject strips the address (rejection-only strip) with a status-guarded update', async () => {
-      mockPrisma.staffInvitation.update.mockImplementation(
-        async ({ data, select }: { data: Record<string, unknown>; select: Record<string, unknown> }) =>
-          applySelect(invitationRow(data), select)
-      );
-
       const res = await request(app).post(`/api/v1/invitations/${INVITATION_ID}/reject`);
 
       expect(res.status).toBe(200);
@@ -701,6 +717,9 @@ describe('staff invitations (#460) through the real StaffInvitationService', () 
         })
       );
       expect(JSON.stringify(res.body)).not.toContain(INVITEE_EMAIL);
+      // Nor the sentinel that replaced it (#1038): the declined row carries no address field.
+      expect(res.body.invitation).not.toHaveProperty('invitedEmail');
+      expect(JSON.stringify(res.body)).not.toContain('@invalid');
       expectNoSecret(res.body);
     });
 
@@ -985,7 +1004,7 @@ describe('staff invitations (#460) through the real StaffInvitationService', () 
         expect.objectContaining({ where: { teamId: TEAM_ID, userId: HEAD_COACH_ID, role: { type: 'HEAD_COACH' } } })
       );
       // Never accepted; the dead invitation is cancelled after the rollback.
-      expect(mockPrisma.staffInvitation.updateMany).not.toHaveBeenCalledWith(
+      expect(mockPrisma.staffInvitation.update).not.toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ status: 'ACCEPTED' }) })
       );
       expect(mockPrisma.staffInvitation.updateMany).toHaveBeenCalledWith({
@@ -1005,7 +1024,7 @@ describe('staff invitations (#460) through the real StaffInvitationService', () 
       expect(res.status).toBe(400);
       expect(mockPrisma.user.count).toHaveBeenCalledWith({ where: { id: HEAD_COACH_ID, deletedAt: null } });
       // Never accepted; the dead invitation is cancelled after the rollback.
-      expect(mockPrisma.staffInvitation.updateMany).not.toHaveBeenCalledWith(
+      expect(mockPrisma.staffInvitation.update).not.toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ status: 'ACCEPTED' }) })
       );
       expect(mockPrisma.staffInvitation.updateMany).toHaveBeenCalledWith({
@@ -1025,7 +1044,7 @@ describe('staff invitations (#460) through the real StaffInvitationService', () 
       expect(res.body.error).toContain('past season');
       expect(mockPrisma.teamStaff.create).not.toHaveBeenCalled();
       // Never accepted; the dead invitation is cancelled after the rollback.
-      expect(mockPrisma.staffInvitation.updateMany).not.toHaveBeenCalledWith(
+      expect(mockPrisma.staffInvitation.update).not.toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ status: 'ACCEPTED' }) })
       );
       expect(mockPrisma.staffInvitation.updateMany).toHaveBeenCalledWith({

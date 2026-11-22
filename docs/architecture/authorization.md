@@ -42,6 +42,8 @@ Authorization helpers live in `backend/src/utils/permissions.ts` (`isSystemAdmin
   and `DELETE /leagues/:id/admins/:userId` (404 if not an admin) are **system-ADMIN-only** — an existing
   league admin can no longer grant the role to others (`LeagueService.addLeagueAdmin` was tightened to
   match `removeLeagueAdmin`; revisit if delegated league administration becomes a product decision).
+  The removal also cancels the PENDING staff invitations the former admin sent on that league's teams
+  where they no longer manage staff (#1038; `roster-and-invitations.md`, staff invitations).
   The session user payload on `GET /auth/me`, `GET /auth/callback` and `POST /auth/dev-login` carries
   `notifyOnReplies` (#768), `guardianOf` and `leagueAdminOf: string[]` (league ids from `LeagueAdmin` rows, sorted; empty for most users, and **not**
   populated for system ADMINs, who are implied admins of every league via `role === 'ADMIN'`).
