@@ -111,8 +111,10 @@ describe('updatePracticeSchema', () => {
     });
 
     it('needs both halves, and refuses mixing them with startsAt', () => {
-      expect(updatePracticeSchema.safeParse({ startDate: '2030-03-12' }).success).toBe(false);
-      expect(updatePracticeSchema.safeParse({ startTime: '18:00' }).success).toBe(false);
+      // The issue names the missing half.
+      expect(updatePracticeSchema.safeParse({ startDate: '2030-03-12' }).error?.issues[0].path).toEqual(['startTime']);
+      expect(updatePracticeSchema.safeParse({ startTime: '18:00' }).error?.issues[0].path).toEqual(['startDate']);
+      expect(updatePracticeSchema.safeParse({ timezone: 'Europe/London' }).error?.issues[0].path).toEqual(['timezone']);
       expect(
         updatePracticeSchema.safeParse({
           startDate: '2030-03-12',

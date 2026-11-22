@@ -149,9 +149,13 @@ export const updatePracticeSchema = z
   .refine((data) => Object.values(data).some((value) => value !== undefined), {
     message: 'At least one field must be provided',
   })
-  .refine((data) => (data.startDate === undefined) === (data.startTime === undefined), {
-    message: 'Send startDate and startTime together',
-    path: ['startDate'],
+  .superRefine((data, ctx) => {
+    // The issue goes on the half that is missing.
+    if (data.startDate !== undefined && data.startTime === undefined) {
+      ctx.addIssue({ code: 'custom', path: ['startTime'], message: 'Send startDate and startTime together' });
+    } else if (data.startTime !== undefined && data.startDate === undefined) {
+      ctx.addIssue({ code: 'custom', path: ['startDate'], message: 'Send startDate and startTime together' });
+    }
   })
   .refine((data) => data.startsAt === undefined || data.startDate === undefined, {
     message: 'Send either startsAt or startDate and startTime, not both',
@@ -160,7 +164,7 @@ export const updatePracticeSchema = z
   // A new zone alone would move the local time: it comes with a new start.
   .refine((data) => data.timezone === undefined || data.startsAt !== undefined || data.startDate !== undefined, {
     message: 'Send startsAt (or startDate and startTime) together with timezone',
-    path: ['startsAt'],
+    path: ['timezone'],
   });
 
 /** POST /practices/:id/cancel. */
