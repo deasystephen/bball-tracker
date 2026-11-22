@@ -140,6 +140,7 @@ describe('AnnouncementReplyService', () => {
       expect(mockedMailerSend).toHaveBeenCalledWith(
         expect.objectContaining({
           to: 'frank@example.test',
+          senderName: 'LeBron James',
           variables: {
             recipientName: 'Frank Vogel',
             teamName: 'Lakers',

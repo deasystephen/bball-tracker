@@ -2,6 +2,7 @@ import { SESv2Client, SendEmailCommand, type SendEmailCommandOutput } from '@aws
 import { Mailer, MailSendParams, MailSendResult } from './index';
 import { logger } from '../../utils/logger';
 import { hashRecipient } from '../../utils/hash-recipient';
+import { formatFromAddress } from './sender';
 
 // Re-exported so existing importers keep working; the implementation lives in
 // utils/hash-recipient.ts, which the seed imports without loading the SES SDK.
@@ -38,14 +39,14 @@ export class SesMailer implements Mailer {
   }
 
   async send(params: MailSendParams): Promise<MailSendResult> {
-    const { template, to, variables, metadata } = params;
+    const { template, to, variables, metadata, senderName } = params;
 
     const subject = template.subject(variables);
     const html = template.html(variables);
     const text = template.text(variables);
 
     const command = new SendEmailCommand({
-      FromEmailAddress: this.fromAddress,
+      FromEmailAddress: formatFromAddress(this.fromAddress, senderName),
       ...(this.configurationSetName && { ConfigurationSetName: this.configurationSetName }),
       ...(this.replyToAddress && { ReplyToAddresses: [this.replyToAddress] }),
       Destination: { ToAddresses: [to] },

@@ -357,6 +357,7 @@ export class StaffInvitationService {
             acceptUrl: `${publicAppUrl()}/invite/${token}`,
             acceptInApp: acceptInApp ? 'true' : '',
           },
+          senderName: inviter?.name ?? undefined,
           metadata: {
             event_type: 'staff_invitation.created',
             teamId,

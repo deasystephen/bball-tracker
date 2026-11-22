@@ -148,6 +148,7 @@ export class AnnouncementService {
             body: announcement.body,
             authorName,
           },
+          senderName: authorName,
           metadata: {
             userId: announcement.authorId,
             event_type: 'announcement.created',

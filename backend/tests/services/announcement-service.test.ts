@@ -366,6 +366,7 @@ describe('AnnouncementService', () => {
           'mom@test.com',
         ]);
         expect(mockedMailerSend.mock.calls[2][0]).toMatchObject({
+          senderName: admin.name,
           variables: {
             recipientName: 'Mom',
             teamName: 'Hoops',

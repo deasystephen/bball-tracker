@@ -589,7 +589,7 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 - **Steps:** Open the email from E.1.
 - **Expected:**
   - Subject: `You've been invited to join Test Team`
-  - From: `noreply@mail.hooplings.com`
+  - From: `<inviter's name> via Hooplings`, address `noreply@mail.hooplings.com`
   - HTML body has team name, inviter name, optional message, expiration date, **a styled "Accept Invitation" button**, and a plaintext fallback link
   - Both button and plaintext link target `https://hooplings.com/invite/<token>`
   - Plain-text version (view source / view raw) also has the URL
@@ -1188,10 +1188,10 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 
 Cross-cuts E, I, J — but worth aggregating here.
 
-### O.1 — Email sent uses `noreply@mail.hooplings.com` as From
+### O.1 — Email sent uses `noreply@mail.hooplings.com` as From, with a display name
 - [ ] Pass / Fail / Skipped
 - **Steps:** Inspect any received email.
-- **Expected:** `From: noreply@mail.hooplings.com`. Matches `SES_FROM_ADDRESS` env var.
+- **Expected:** the address is `noreply@mail.hooplings.com` (matches the `SES_FROM_ADDRESS` env var). The display name is `Hooplings`, or `<name> via Hooplings` on an invitation (the inviter), an announcement (its author) and a reply notification (the replier). Reply goes to `support@hooplings.com`.
 - **Notes:** ___________
 
 ### O.2 — HTML escaping defends against template injection

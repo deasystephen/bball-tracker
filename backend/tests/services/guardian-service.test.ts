@@ -301,6 +301,9 @@ describe('GuardianService', () => {
       expect(sendArgs.variables.childName).toBe('Kid Smith');
       expect(sendArgs.variables.acceptUrl).toMatch(/^https:\/\/app\.example\.test\/invite\/[A-Za-z0-9_-]+$/);
       expect(sendArgs.metadata.event_type).toBe('guardian_invitation.created');
+      // The From display name is the inviting coach, the same person the body names.
+      expect(sendArgs.senderName).toBeTruthy();
+      expect(sendArgs.senderName).toBe(sendArgs.variables.inviterName);
     });
 
     it('reuses an existing account for the email without changing its role', async () => {

@@ -71,6 +71,11 @@ describe('StaffInvitationService (real Postgres, #460)', () => {
 
     expect(invitation).not.toHaveProperty('token');
     expect(invitation.invitedEmail).toBe(email.toLowerCase());
+    // The email's From display name is the inviting head coach.
+    const { mailer } = jest.requireMock('../../src/services/mailer') as { mailer: { send: jest.Mock } };
+    const coach = await prisma.user.findUniqueOrThrow({ where: { id: headCoachId }, select: { name: true } });
+    const sendArgs = mailer.send.mock.calls[mailer.send.mock.calls.length - 1][0] as { senderName?: string };
+    expect(sendArgs.senderName).toBe(coach.name);
     expect(await prisma.user.count({ where: { email: { equals: email, mode: 'insensitive' } } })).toBe(0);
 
     // A second plain invite answers the dedupe 400.

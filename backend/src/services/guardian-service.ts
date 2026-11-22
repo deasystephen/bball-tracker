@@ -424,6 +424,7 @@ export class GuardianService {
           expiresAt: formatEmailDate(invitation.expiresAt),
           acceptUrl,
         },
+        senderName: inviter?.name ?? undefined,
         metadata: {
           userId: parent.id,
           event_type: 'guardian_invitation.created',

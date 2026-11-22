@@ -430,6 +430,7 @@ export class InvitationService {
           acceptUrl,
           variant,
         },
+        senderName: invitation.invitedBy.name ?? undefined,
         metadata: {
           userId: invitation.playerId,
           event_type: 'invitation.created',
