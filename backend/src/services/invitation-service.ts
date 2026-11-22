@@ -39,6 +39,8 @@ import { emailEquals } from '../utils/email-match';
 import { USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
 import { createOrConflict, isUniqueViolation } from '../utils/prisma-errors';
 import { lockUsers } from '../utils/user-row-lock';
+import { lockTeamRow } from '../utils/team-row-lock';
+import { assertJerseyNumberFree, findJerseyHolder } from '../utils/jersey-number';
 import {
   assertOwnUploadUrl,
   checkAvatarUpload,
@@ -367,6 +369,10 @@ export class InvitationService {
     if (!player) {
       throw new NotFoundError('User not found');
     }
+
+    // A number the coach typed must be free now (#1087); one a Resend inherits
+    // is not re-checked here, because the accept drops it if it was taken.
+    await assertJerseyNumberFree(prisma, teamId, data.jerseyNumber, player.id);
 
     await this.assertSupersedeTarget(teamId, player, data.supersede);
 
@@ -856,6 +862,9 @@ export class InvitationService {
 
     // Use transaction to ensure atomicity
     const result = await prisma.$transaction(async (tx) => {
+      // The team first, then the invitation row: the order Add Player takes
+      // them in, so the jersey check below cannot race a roster add (#1087).
+      await lockTeamRow(tx, invitation.teamId);
       // Flip PENDING -> ACCEPTED only if it is still PENDING. Two concurrent
       // accepts (double-tap, web + app) race here; the loser sees 0 rows and
       // gets a 400 instead of a P2002 500 from the TeamMember insert (audit #58).
@@ -871,6 +880,7 @@ export class InvitationService {
       // (unification spec, case 2) are rostered at creation, so the membership
       // may already exist — accept then only flips the invitation; the
       // roster row (and any coach-set jersey/position) is left untouched.
+      const jersey = await this.acceptedJerseyNumber(tx, invitation);
       const teamMember = await tx.teamMember.upsert({
         where: {
           teamId_playerId: {
@@ -881,14 +891,14 @@ export class InvitationService {
         create: {
           teamId: invitation.teamId,
           playerId: invitation.playerId,
-          jerseyNumber: invitation.jerseyNumber,
+          jerseyNumber: jersey.jerseyNumber,
           position: invitation.position,
         },
         update: {},
         include: ACCEPTED_MEMBER_INCLUDE,
       });
 
-      return { invitation: updatedInvitation, teamMember };
+      return { invitation: updatedInvitation, teamMember, jerseyHolderId: jersey.holderId };
     });
 
     logger.info('Invitation accepted', {
@@ -897,9 +907,48 @@ export class InvitationService {
       playerId: invitation.playerId,
       userId,
       via: 'app',
+      ...this.jerseyDroppedFields(invitation.jerseyNumber, result.jerseyHolderId),
     });
 
-    return result;
+    return { invitation: result.invitation, teamMember: result.teamMember };
+  }
+
+  /**
+   * The number an accept gives a NEW member row (#1087): the invitation's,
+   * unless another current member took it after the invitation was sent, in
+   * which case the person joins with no number. Never refuses: accepting must
+   * not fail or slow down over a number. The coach sees the row without a
+   * number, and the accept log line says why (`jerseyDroppedFields`). Runs
+   * behind the team row lock the accept takes first. When the member row
+   * already exists (case 2) the upsert writes nothing, so nothing is dropped.
+   */
+  private static async acceptedJerseyNumber(
+    tx: Prisma.TransactionClient,
+    invitation: { teamId: string; playerId: string; jerseyNumber: number | null }
+  ): Promise<{ jerseyNumber: number | null; holderId: string | null }> {
+    if (invitation.jerseyNumber == null) {
+      return { jerseyNumber: null, holderId: null };
+    }
+    const holder = await findJerseyHolder(tx, invitation.teamId, invitation.jerseyNumber, invitation.playerId);
+    if (!holder) {
+      return { jerseyNumber: invitation.jerseyNumber, holderId: null };
+    }
+    const existing = await tx.teamMember.findUnique({
+      where: { teamId_playerId: { teamId: invitation.teamId, playerId: invitation.playerId } },
+      select: { id: true },
+    });
+    // An existing row keeps its own number (the upsert writes nothing).
+    return existing
+      ? { jerseyNumber: invitation.jerseyNumber, holderId: null }
+      : { jerseyNumber: null, holderId: holder.playerId };
+  }
+
+  /** Fields for the `Invitation accepted` line when the number was dropped (ids and the number only). */
+  private static jerseyDroppedFields(
+    jerseyNumber: number | null,
+    holderId: string | null
+  ): Record<string, unknown> {
+    return holderId ? { jerseyNumberDropped: jerseyNumber, jerseyHolderId: holderId } : {};
   }
 
   /**
@@ -1125,6 +1174,10 @@ export class InvitationService {
     if (data.profilePictureUrl) {
       assertOwnUploadUrl(data.profilePictureUrl, userId);
     }
+    // One number per team (#1087). Checked here for every case, so the
+    // invitation-only case 3 never sends a number another member wears; cases
+    // 1 and 2 check again behind the team row lock before the member insert.
+    await assertJerseyNumberFree(prisma, teamId, data.jerseyNumber);
 
     const result: AddRosterPlayerResult = {
       rostered: false,
@@ -1152,6 +1205,8 @@ export class InvitationService {
           select: { id: true },
         });
 
+        await lockTeamRow(tx, teamId);
+        await assertJerseyNumberFree(tx, teamId, data.jerseyNumber);
         return tx.teamMember.create({
           data: {
             teamId,
@@ -1376,12 +1431,16 @@ export class InvitationService {
         playerId = created.id;
       }
 
+      // User before Team (utils/team-row-lock.ts), and the team before any
+      // invitation row, the order accept takes them in (#1087).
+      await lockTeamRow(tx, teamId);
       const existingMember = await tx.teamMember.findUnique({
         where: { teamId_playerId: { teamId, playerId } },
       });
       if (existingMember) {
         throw new BadRequestError('Player is already on this team');
       }
+      await assertJerseyNumberFree(tx, teamId, data.jerseyNumber);
 
       // Re-adding a removed player with the same address is an
       // expire-and-recreate too, so the resend cooldown applies (#715).
@@ -1585,6 +1644,8 @@ export class InvitationService {
     }
 
     const result = await prisma.$transaction(async (tx) => {
+      // Team lock first, as in acceptInvitation (#1087).
+      await lockTeamRow(tx, invitation.teamId);
       const updatedInvitation = await this.transitionPending(
         tx,
         invitation.id,
@@ -1595,6 +1656,7 @@ export class InvitationService {
 
       // Membership may already exist for players rostered at creation
       // (unification spec, case 2) — see acceptInvitation.
+      const jersey = await this.acceptedJerseyNumber(tx, invitation);
       const teamMember = await tx.teamMember.upsert({
         where: {
           teamId_playerId: {
@@ -1605,13 +1667,13 @@ export class InvitationService {
         create: {
           teamId: invitation.teamId,
           playerId: invitation.playerId,
-          jerseyNumber: invitation.jerseyNumber,
+          jerseyNumber: jersey.jerseyNumber,
           position: invitation.position,
         },
         update: {},
       });
 
-      return { invitation: updatedInvitation, teamMember };
+      return { invitation: updatedInvitation, teamMember, jerseyHolderId: jersey.holderId };
     });
 
     logger.info('Invitation accepted', {
@@ -1619,9 +1681,10 @@ export class InvitationService {
       teamId: invitation.teamId,
       playerId: invitation.playerId,
       via: 'token',
+      ...this.jerseyDroppedFields(invitation.jerseyNumber, result.jerseyHolderId),
     });
 
-    return result;
+    return { invitation: result.invitation, teamMember: result.teamMember };
   }
 
   /**

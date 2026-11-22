@@ -5,7 +5,7 @@
 import { InvitationService } from '../../src/services/invitation-service';
 import { INVITATION_RESEND_COOLDOWN_MS } from '../../src/utils/resend-cooldown';
 import { GuardianService } from '../../src/services/guardian-service';
-import { BadRequestError, ResendCooldownError, UploadExpiredError } from '../../src/utils/errors';
+import { BadRequestError, JerseyNumberTakenError, ResendCooldownError, UploadExpiredError } from '../../src/utils/errors';
 import { mockPrisma } from '../setup';
 import { logger } from '../../src/utils/logger';
 import { domainEvent, spyOnInfo } from '../support/domain-events';
@@ -16,6 +16,22 @@ jest.mock('../../src/services/mailer', () => ({
 }));
 
 const mockedMailerSend = (jest.requireMock('../../src/services/mailer') as unknown as { mailer: { send: jest.Mock } }).mailer.send;
+
+// The team row lock is a raw query the mocked transactions do not carry; the
+// real lock and the jersey rule (#1087) are proven in
+// tests/integration/jersey-number.db.test.ts. Here the holder lookup is
+// controllable and free by default.
+jest.mock('../../src/utils/team-row-lock', () => ({
+  lockTeamRow: jest.fn().mockResolvedValue(true),
+}));
+jest.mock('../../src/utils/jersey-number', () => ({
+  findJerseyHolder: jest.fn().mockResolvedValue(null),
+  assertJerseyNumberFree: jest.fn().mockResolvedValue(undefined),
+}));
+const mockJersey = jest.requireMock('../../src/utils/jersey-number') as {
+  findJerseyHolder: jest.Mock;
+  assertJerseyNumberFree: jest.Mock;
+};
 
 jest.mock('../../src/services/upload-service', () => ({
   discardOwnAvatar: jest.fn().mockResolvedValue(undefined),
@@ -3463,6 +3479,134 @@ describe('InvitationService', () => {
           data: { status: 'EXPIRED' },
         })
       );
+    });
+  });
+
+  describe('jersey numbers (#1087)', () => {
+    const holder = { playerId: 'holder-1', playerName: 'Holder', playerDeletedAt: null };
+    const taken = (): JerseyNumberTakenError =>
+      new JerseyNumberTakenError({ jerseyNumber: 8, ...holder });
+
+    /** The accept transaction, with or without an existing member row. */
+    const mockAcceptTx = (
+      invitation: Record<string, unknown>,
+      existingMember: unknown
+    ): { txUpsert: jest.Mock } => {
+      const txUpsert = jest.fn(async (args: { create: Record<string, unknown> }) => ({
+        ...args.create,
+        player: { id: invitation.playerId, name: 'P', email: null },
+        team: { id: invitation.teamId, name: 'T' },
+      }));
+      (mockPrisma.$transaction as jest.Mock).mockImplementation(async (callback) =>
+        callback({
+          teamInvitation: {
+            updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+            findUniqueOrThrow: jest.fn().mockResolvedValue({ ...invitation, status: 'ACCEPTED' }),
+          },
+          teamMember: { upsert: txUpsert, findUnique: jest.fn().mockResolvedValue(existingMember) },
+        })
+      );
+      return { txUpsert };
+    };
+
+    it('accept by id joins with no number when another member took it, and says so in the log line', async () => {
+      const { invitation, player } = createFullInvitation();
+      const withNumber = { ...invitation, jerseyNumber: 8 };
+      (mockPrisma.teamInvitation.findUnique as jest.Mock).mockResolvedValue(withNumber);
+      mockJersey.findJerseyHolder.mockResolvedValueOnce(holder);
+      const { txUpsert } = mockAcceptTx(withNumber, null);
+      const infoSpy = spyOnInfo();
+
+      const result = await InvitationService.acceptInvitation(invitation.id, player.id);
+
+      expect(txUpsert).toHaveBeenCalledWith(
+        expect.objectContaining({ create: expect.objectContaining({ jerseyNumber: null }) })
+      );
+      expect(result.teamMember).toHaveProperty('jerseyNumber', null);
+      expect(domainEvent(infoSpy, 'Invitation accepted')).toMatchObject({
+        jerseyNumberDropped: 8,
+        jerseyHolderId: holder.playerId,
+      });
+    });
+
+    it('accept by token joins with no number when another member took it', async () => {
+      const { invitation } = createFullInvitation();
+      const withNumber = { ...invitation, jerseyNumber: 0 };
+      (mockPrisma.teamInvitation.findUnique as jest.Mock).mockResolvedValue(withNumber);
+      mockJersey.findJerseyHolder.mockResolvedValueOnce(holder);
+      const { txUpsert } = mockAcceptTx(withNumber, null);
+      const infoSpy = spyOnInfo();
+
+      await InvitationService.acceptInvitationByToken(invitation.token);
+
+      expect(txUpsert).toHaveBeenCalledWith(
+        expect.objectContaining({ create: expect.objectContaining({ jerseyNumber: null }) })
+      );
+      expect(domainEvent(infoSpy, 'Invitation accepted')).toMatchObject({ jerseyNumberDropped: 0 });
+    });
+
+    it('accept keeps a free number and logs nothing about it', async () => {
+      const { invitation, player } = createFullInvitation();
+      const withNumber = { ...invitation, jerseyNumber: 8 };
+      (mockPrisma.teamInvitation.findUnique as jest.Mock).mockResolvedValue(withNumber);
+      const { txUpsert } = mockAcceptTx(withNumber, null);
+      const infoSpy = spyOnInfo();
+
+      await InvitationService.acceptInvitation(invitation.id, player.id);
+
+      expect(txUpsert).toHaveBeenCalledWith(
+        expect.objectContaining({ create: expect.objectContaining({ jerseyNumber: 8 }) })
+      );
+      expect(domainEvent(infoSpy, 'Invitation accepted')).not.toHaveProperty('jerseyNumberDropped');
+    });
+
+    it('accept by an already-rostered player drops nothing (the row keeps its own number)', async () => {
+      const { invitation, player } = createFullInvitation();
+      const withNumber = { ...invitation, jerseyNumber: 8 };
+      (mockPrisma.teamInvitation.findUnique as jest.Mock).mockResolvedValue(withNumber);
+      mockJersey.findJerseyHolder.mockResolvedValueOnce(holder);
+      mockAcceptTx(withNumber, { id: 'member-1' });
+      const infoSpy = spyOnInfo();
+
+      await InvitationService.acceptInvitation(invitation.id, player.id);
+
+      expect(domainEvent(infoSpy, 'Invitation accepted')).not.toHaveProperty('jerseyNumberDropped');
+    });
+
+    it('Add Player refuses a taken number with 409 jersey_number_taken before writing anything', async () => {
+      const coach = createCoach();
+      const team = createTeam();
+      const role = createTeamRole({ teamId: team.id, type: 'HEAD_COACH' });
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
+      (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue({
+        ...createTeamStaff({ teamId: team.id, userId: coach.id, roleId: role.id }),
+        role,
+      });
+      mockJersey.assertJerseyNumberFree.mockRejectedValueOnce(taken());
+
+      await expect(
+        InvitationService.addRosterPlayer(team.id, { name: 'Kid', jerseyNumber: 8 }, coach.id)
+      ).rejects.toMatchObject({ statusCode: 409, code: 'jersey_number_taken' });
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('an invitation with an explicit taken number is refused before it is created', async () => {
+      const coach = createCoach();
+      const player = createPlayer();
+      const team = createTeam();
+      const role = createTeamRole({ teamId: team.id, type: 'HEAD_COACH' });
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(player);
+      (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue({
+        ...createTeamStaff({ teamId: team.id, userId: coach.id, roleId: role.id }),
+        role,
+      });
+      mockJersey.assertJerseyNumberFree.mockRejectedValueOnce(taken());
+
+      await expect(
+        InvitationService.createInvitation(team.id, createInvitationInput({ playerId: player.id, jerseyNumber: 8 }), coach.id)
+      ).rejects.toBeInstanceOf(JerseyNumberTakenError);
+      expect(mockPrisma.teamInvitation.create).not.toHaveBeenCalled();
     });
   });
 });

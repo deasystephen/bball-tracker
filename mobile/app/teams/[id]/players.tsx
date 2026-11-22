@@ -74,6 +74,7 @@ import { isInvitationExpired } from '../../../utils/invitation-expiry';
 import { RelationshipChips } from '../../../components/RelationshipChips';
 import { ActionMenu, type ActionMenuItem } from '../../../components/ActionMenu';
 import { displayName } from '../../../utils/display-name';
+import { getJerseyConflict } from '../../../utils/jersey-conflict';
 import { isUnder13AgeGroup } from '../../../utils/age-group';
 import type { GuardianRelationship } from '../../../../shared/types';
 import { useToast } from '../../../components/Toast';
@@ -212,6 +213,8 @@ export default function ManagePlayersScreen() {
   const [playerEmailTouched, setPlayerEmailTouched] = useState(false);
   const [guardianEmailTouched, setGuardianEmailTouched] = useState(false);
   const [jerseyNumber, setJerseyNumber] = useState('');
+  // The server's 409 jersey_number_taken, shown on the jersey field (#1087).
+  const [jerseyError, setJerseyError] = useState<string | null>(null);
   const [position, setPosition] = useState('');
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
@@ -219,6 +222,7 @@ export default function ManagePlayersScreen() {
   // Jersey/position edit sheet (opened from the row's ActionMenu)
   const [editingMember, setEditingMember] = useState<TeamMember | null>(null);
   const [editJersey, setEditJersey] = useState('');
+  const [editJerseyError, setEditJerseyError] = useState<string | null>(null);
   const [editPosition, setEditPosition] = useState('');
   // Fix-email sheet (opened from the ActionMenu of a row with an email issue)
   const [emailEditMember, setEmailEditMember] = useState<TeamMember | null>(null);
@@ -261,6 +265,25 @@ export default function ManagePlayersScreen() {
   const cancelInvitation = useCancelInvitation();
   const toast = useToast();
 
+  /**
+   * The inline text for a 409 jersey_number_taken (#1087), or null for any
+   * other error. A deleted account reads as the localized label (`displayName`).
+   */
+  const jerseyTakenMessage = (err: unknown): string | null => {
+    const conflict = getJerseyConflict(err);
+    if (!conflict) return null;
+    return t('roster.jerseyTaken', {
+      number: conflict.jerseyNumber,
+      name: displayName({ name: conflict.playerName, deletedAt: conflict.playerDeletedAt }),
+    });
+  };
+
+  /** Typing a new number clears the refusal for the old one. */
+  const changeJersey = (text: string) => {
+    setJerseyNumber(text.replace(/[^0-9]/g, ''));
+    setJerseyError(null);
+  };
+
   // Roster changes need `canManageRoster` (backend team-service); guard the
   // screen itself since it is reachable by deep link.
   const user = useAuthUser();
@@ -297,6 +320,7 @@ export default function ManagePlayersScreen() {
     setPlayerEmailTouched(false);
     setGuardianEmailTouched(false);
     setJerseyNumber('');
+    setJerseyError(null);
     setPosition('');
     setAvatarUri(null);
     setShowAddForm(false);
@@ -353,6 +377,11 @@ export default function ManagePlayersScreen() {
       toastAddResult(result, !!trimmedGuardianEmail);
     } catch (err) {
       setUploadingAvatar(false);
+      const taken = jerseyTakenMessage(err);
+      if (taken) {
+        setJerseyError(taken);
+        return;
+      }
       toast.showToast(uploadAwareErrorMessage(err, t, 'roster.addFailed'), 'error');
     }
   };
@@ -374,6 +403,7 @@ export default function ManagePlayersScreen() {
       });
 
       setJerseyNumber('');
+      setJerseyError(null);
       setPosition('');
       setSelectedPlayer(null);
       setSearchQuery('');
@@ -382,6 +412,11 @@ export default function ManagePlayersScreen() {
         toast.showToast(t('roster.inviteEmailFailed'), 'error');
       }
     } catch (err) {
+      const taken = jerseyTakenMessage(err);
+      if (taken) {
+        setJerseyError(taken);
+        return;
+      }
       toast.showToast(err instanceof Error ? err.message : t('guardians.inviteFailed'), 'error');
     }
   };
@@ -431,6 +466,7 @@ export default function ManagePlayersScreen() {
     // `!= null` — 0 is a valid jersey number
     setEditJersey(member.jerseyNumber != null ? String(member.jerseyNumber) : '');
     setEditPosition(member.position ?? '');
+    setEditJerseyError(null);
     setEditingMember(member);
   };
 
@@ -453,6 +489,11 @@ export default function ManagePlayersScreen() {
       setEditingMember(null);
       toast.showToast(t('roster.detailsUpdated'), 'success');
     } catch (err) {
+      const taken = jerseyTakenMessage(err);
+      if (taken) {
+        setEditJerseyError(taken);
+        return;
+      }
       toast.showToast(err instanceof Error ? err.message : t('roster.updateFailed'), 'error');
     }
   };
@@ -884,7 +925,8 @@ export default function ManagePlayersScreen() {
                     label={t('players.jerseyNumber')}
                     placeholder={t('roster.jerseyPlaceholder')}
                     value={jerseyNumber}
-                    onChangeText={(text) => setJerseyNumber(text.replace(/[^0-9]/g, ''))}
+                    onChangeText={changeJersey}
+                    error={jerseyError ?? undefined}
                     keyboardType="number-pad"
                     maxLength={2}
                   />
@@ -977,7 +1019,8 @@ export default function ManagePlayersScreen() {
                 label={t('players.jerseyNumber')}
                 placeholder={t('roster.jerseyPlaceholder')}
                 value={jerseyNumber}
-                onChangeText={(text) => setJerseyNumber(text.replace(/[^0-9]/g, ''))}
+                onChangeText={changeJersey}
+                error={jerseyError ?? undefined}
                 keyboardType="number-pad"
                 maxLength={2}
                 testID="add-player-jersey-input"
@@ -1160,7 +1203,11 @@ export default function ManagePlayersScreen() {
               label={t('players.jerseyNumber')}
               placeholder={t('roster.jerseyClearPlaceholder')}
               value={editJersey}
-              onChangeText={(text) => setEditJersey(text.replace(/[^0-9]/g, ''))}
+              onChangeText={(text) => {
+                setEditJersey(text.replace(/[^0-9]/g, ''));
+                setEditJerseyError(null);
+              }}
+              error={editJerseyError ?? undefined}
               keyboardType="number-pad"
               maxLength={2}
               testID="edit-member-jersey-input"

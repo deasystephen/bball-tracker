@@ -56,6 +56,7 @@ import { lockLeagueRow } from '../utils/league-row-lock';
 import { USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
 import { createOrConflict, orNotFound } from '../utils/prisma-errors';
 import { lockTeamRow } from '../utils/team-row-lock';
+import { assertJerseyNumberFree } from '../utils/jersey-number';
 import { lockUsers } from '../utils/user-row-lock';
 import { findOrCreateSeason, findSeasonByName, type SeasonByName } from './season-service';
 
@@ -1332,17 +1333,22 @@ export class TeamService {
     }
 
     // Add player to team; a lost race on @@unique([teamId, playerId]) answers
-    // the pre-check's 400 (#727).
+    // the pre-check's 400 (#727). The jersey number is checked behind the
+    // team row lock, so two concurrent adds of one number cannot both win (#1087).
     const teamMember = await createOrConflict(
       () =>
-        prisma.teamMember.create({
-          data: {
-            teamId,
-            playerId: data.playerId,
-            jerseyNumber: data.jerseyNumber,
-            position: data.position,
-          },
-          include: TEAM_MEMBER_INCLUDE,
+        prisma.$transaction(async (tx) => {
+          await lockTeamRow(tx, teamId);
+          await assertJerseyNumberFree(tx, teamId, data.jerseyNumber);
+          return tx.teamMember.create({
+            data: {
+              teamId,
+              playerId: data.playerId,
+              jerseyNumber: data.jerseyNumber,
+              position: data.position,
+            },
+            include: TEAM_MEMBER_INCLUDE,
+          });
         }),
       'Player is already on this team',
       'TeamMember_teamId_playerId_key'
@@ -1469,16 +1475,23 @@ export class TeamService {
       updateData.position = data.position;
     }
 
-    // Update team member
-    const updatedMember = await prisma.teamMember.update({
-      where: {
-        teamId_playerId: {
-          teamId,
-          playerId,
+    // Update team member. A new number is checked behind the team row lock
+    // (#1087); keeping one's own number, or clearing it, is never refused.
+    const updatedMember = await prisma.$transaction(async (tx) => {
+      if (data.jerseyNumber != null) {
+        await lockTeamRow(tx, teamId);
+        await assertJerseyNumberFree(tx, teamId, data.jerseyNumber, playerId);
+      }
+      return tx.teamMember.update({
+        where: {
+          teamId_playerId: {
+            teamId,
+            playerId,
+          },
         },
-      },
-      data: updateData,
-      include: TEAM_MEMBER_INCLUDE,
+        data: updateData,
+        include: TEAM_MEMBER_INCLUDE,
+      });
     });
 
     logger.info('Roster member updated', { teamId, playerId, userId });

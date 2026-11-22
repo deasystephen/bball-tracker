@@ -98,12 +98,27 @@ appId: com.bballtracker.mobile
 - tapOn:
     id: "edit-member-jersey-input"
 - eraseText
-- inputText: "12"
+# One number per team (#1087): LeBron James wears 23 on the seeded Lakers, so
+# the save is refused against the jersey field and the sheet stays open.
+- inputText: "23"
 - tapOn:
     id: "edit-member-position-input"
 - inputText: "Guard"
 # Enter blurs a single-line field. Not hideKeyboard: on iOS it cannot always
 # hide the keyboard, and since Maestro 2.11 that fails the flow (#584).
+- pressKey: Enter
+- tapOn:
+    id: "edit-member-save"
+- extendedWaitUntil:
+    visible: "Number 23 is already worn by .*"
+    timeout: 10000
+# A free number saves.
+- tapOn:
+    id: "edit-member-jersey-input"
+- eraseText
+- inputText: "12"
+- tapOn:
+    id: "edit-member-position-input"
 - pressKey: Enter
 - tapOn:
     id: "edit-member-save"

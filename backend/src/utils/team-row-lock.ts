@@ -28,6 +28,12 @@ import { Prisma } from '@prisma/client';
  * `removeStaffMember` and `changeStaffRole` take only Team. So no two of
  * them wait on each other in a cycle.
  *
+ * The jersey-number rule (#1087, `utils/jersey-number.ts`) takes it too: Add
+ * Player (case 2: the reused User, then Team, then the invitation rows it
+ * expires), `addPlayer`, a number change on `updateTeamMember`, and both
+ * invitation accepts, which take Team BEFORE flipping the invitation row, so
+ * an accept and an Add Player never hold those two in opposite orders.
+ *
  * `FOR NO KEY UPDATE`, not `FOR UPDATE`: it conflicts with itself, which is
  * all the serialisation needs, but not with the `FOR KEY SHARE` that every
  * foreign-key insert naming the team takes, so a game, roster or staff insert

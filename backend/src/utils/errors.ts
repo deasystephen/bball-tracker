@@ -380,6 +380,39 @@ export class PlayerHasRecordsError extends DetailedError<{ relations: string[] }
   }
 }
 
+export interface JerseyNumberTakenDetails extends Record<string, unknown> {
+  /** The number that was asked for. */
+  jerseyNumber: number;
+  /** The current member of the team who holds it. */
+  playerId: string;
+  /** That member's name, for the inline error ("#8 is already worn by …"); never in the message. */
+  playerName: string;
+  /** Set when that member is a deleted account's roster entry: the client shows its own label (#813). */
+  playerDeletedAt: Date | null;
+}
+
+/**
+ * 409 `jersey_number_taken`: another current member of the team already wears
+ * this number (#1087). Refused on Add Player, on adding a member, on sending an
+ * invitation with an explicit number and on "Edit jersey & position"; the app
+ * shows it against the jersey field. Never raised on accepting an invitation:
+ * that joins with no number instead (`utils/jersey-number.ts`).
+ */
+export class JerseyNumberTakenError extends DetailedError<JerseyNumberTakenDetails> {
+  constructor(details: JerseyNumberTakenDetails) {
+    // The message never names the holder: route catches log it
+    // (`logRouteError`), and a name never goes into a log line. The name
+    // rides in the body only.
+    super(
+      'jersey_number_taken',
+      details,
+      `Another player on this team already wears number ${details.jerseyNumber}.`,
+      409
+    );
+    Object.setPrototypeOf(this, JerseyNumberTakenError.prototype);
+  }
+}
+
 export class ConflictError extends AppError {
   constructor(message: string = 'Conflict') {
     super(message, 409);

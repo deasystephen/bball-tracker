@@ -108,7 +108,9 @@ eng-review amendments recorded there).
 - **Accept tolerates existing membership:** both accept paths use `teamMember.upsert`
   (create-if-missing, `update: {}` — coach-set jersey/position never overwritten). The old
   "You are already on this team" 400 on accept is gone. Race rules (`transitionPending`,
-  audit #58) unchanged.
+  audit #58) unchanged. Since #1087 both accepts take the team row lock first, and a new member
+  row whose number another member took meanwhile is created with no number (Jersey numbers,
+  below).
 - **Rejection strips the unclaimed email (consent, spec T1 as narrowed by ship review):** only
   the invitee's explicit REJECTED transition nulls `User.email` (guarded: `workosUserId` null and
   no other PENDING **or ACCEPTED** invitation references the player) — otherwise `syncUser`'s
@@ -590,6 +592,70 @@ themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by 
   `__tests__/app/join-request.test.tsx`, `__tests__/app/team-join-link.test.tsx`,
   `__tests__/utils/qr-path.test.ts`. Web: `web/__tests__/join-page.test.tsx`.
 
+### Jersey numbers: one per team (#1087)
+
+- **Rule.** A jersey number is held by a **current member** of the team: a `TeamMember` row with
+  that `jerseyNumber` (a deleted account's "Deleted user" roster entry too, until the coach removes
+  it). A number another current member holds is refused with **409 `jersey_number_taken`**
+  (`utils/errors.ts#JerseyNumberTakenError`, body via `DetailedError.body()`:
+  `{ error, code, jerseyNumber, playerId, playerName, playerDeletedAt }`, naming the holder; the
+  `error` message never names them, because route catches log it). Blank (`null` / absent) is always
+  allowed; `0` is a number like any other (`!= null`, never truthiness); setting a member to the
+  number they already hold is a no-op, not an error. Another team's numbers never count.
+- **Where it is refused:** Add Player (`POST /teams/:teamId/players`, every case: case 3 sends no
+  number another member wears), sending an invitation with an **explicit** number
+  (`POST /teams/:teamId/invitations { playerId, jerseyNumber }`), "Edit jersey & position"
+  (`PATCH /teams/:id/players/:playerId`), and `TeamService.addPlayer` (add an existing user by id;
+  no route mounts it today). The one helper is `utils/jersey-number.ts`
+  (`findJerseyHolder`, `assertJerseyNumberFree`).
+- **Concurrency.** Every write that sets a member's number runs the check inside its transaction
+  behind `lockTeamRow` on the team (the `FOR NO KEY UPDATE` lock staff changes take), so two
+  concurrent adds of one number serialise and the second is refused. Lock order stays User → Team
+  → invitation rows: case 2 takes the reused user's lock, then the team, then expires invitation
+  rows; both accepts take the team lock **before** flipping the invitation, so an accept and an Add
+  Player cannot deadlock. Add Player also checks once before its transaction (unlocked), which is
+  the only check case 3 needs, since case 3 writes no member row. A clear (`null`) on edit takes no
+  lock. No P2002 retry anywhere: the lock is the guard.
+- **Invitations reserve nothing.** A PENDING invitation's number is not held: only current members
+  hold numbers. A Resend that inherits a number (supersede, see above) is not re-checked.
+- **Accept never fails over a number** (owner decision 2026-11-22: no friction in the accept or
+  sign-up flow). When the accept creates the member row (case 3) and another current member took
+  the invitation's number after it was sent, the person joins **with no number**
+  (`InvitationService.acceptedJerseyNumber`, by id and by token). A case-2 accept writes nothing to
+  the existing row, so nothing is dropped. **How the coach is told:** the roster row shows no
+  number (the coach sets one with Edit jersey & position), and the `Invitation accepted` log line
+  carries `jerseyNumberDropped` (the number) and `jerseyHolderId`. There is no push or email for
+  it: no existing helper made that a few lines, and a notification for this alone was out of scope.
+- **Season rollover** copies the roster with its numbers unchanged (`createMany` of the source
+  rows) and is never refused over a number: the source team's numbers are already unique under
+  this rule. A pair that predates the rule is carried as it is, so it is resolved on either row.
+- **No unique index yet.** Production had duplicate pairs before this rule (two number 8s on the
+  owner's test team), so a partial unique index on `(teamId, jerseyNumber) WHERE jerseyNumber IS
+  NOT NULL` would fail to migrate. It is the follow-up once the duplicates are resolved. The
+  read-only query that lists them (run it against production before writing that migration):
+
+  ```sql
+  SELECT tm."teamId", t.name AS team, tm."jerseyNumber", count(*) AS holders,
+         array_agg(tm."playerId" ORDER BY tm."createdAt") AS player_ids
+  FROM "TeamMember" tm JOIN "Team" t ON t.id = tm."teamId"
+  WHERE tm."jerseyNumber" IS NOT NULL
+  GROUP BY tm."teamId", t.name, tm."jerseyNumber"
+  HAVING count(*) > 1
+  ORDER BY t.name, tm."jerseyNumber";
+  ```
+- **Mobile.** `utils/jersey-conflict.ts#getJerseyConflict` reads the 409; the Add Player form, the
+  existing-player invite form and the Edit jersey & position sheet in
+  `app/teams/[id]/players.tsx` show `roster.jerseyTaken` ("Number 8 is already worn by Ada. Pick
+  another number or leave it blank.") against the jersey field instead of a toast, the holder named
+  through `displayName` (a deleted account reads as the localized label); typing in the field clears
+  it. An API without the rule never sends the code, so the app is safe in either deploy order.
+- **Tests:** `backend/tests/integration/jersey-number.db.test.ts` (real Postgres: refusals on add,
+  invite and edit; 0, blank and the own-number no-op; a deleted holder; two concurrent adds held
+  behind the team lock leave one holder, and fail without it; accepts by id and by token joining
+  with no number), `tests/services/{invitation,team}-service.test.ts`, `tests/api/teams.test.ts`
+  (the 409 body on all three routes); mobile `__tests__/app/players-roster-status.test.tsx` and
+  `__tests__/utils/jersey-conflict.test.ts`.
+
 ### Mobile roster & invite-status chips (roster/invite unification)
 
 - `app/teams/[id]/players.tsx` has ONE **Add Player** form (`useAddRosterPlayer` →
@@ -650,7 +716,9 @@ themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by 
   `!= null` rule so jersey 0 renders) → `useUpdateTeamMember` →
   `PATCH /teams/:id/players/:playerId`; an emptied input sends `null`, which clears the stored
   value (`updateTeamMemberSchema` is `.nullable()` for both fields). This is the recovery path for
-  members rostered without a number (e.g. pre-fix resend-superseded invites).
+  members rostered without a number (e.g. pre-fix resend-superseded invites, or an accept whose
+  number was taken meanwhile). A number another member wears is refused inline on the jersey
+  field (Jersey numbers, above).
 - **"Email bounced" is a second chip, never a roster status (#449).** The team payload carries
   what SES reported for each rostered player's address (`player.emailSuppressedAt` /
   `emailSuppressedReason`, roster managers only — see `email.md`). Derive it
