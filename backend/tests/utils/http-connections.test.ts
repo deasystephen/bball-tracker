@@ -177,4 +177,21 @@ describe('trackConnections', () => {
     finish();
     expect(await until(() => busy.received().includes('late'))).toBe(true);
   });
+
+  it('keeps a connection busy while a pipelined request is still running', async () => {
+    const pending: Array<() => void> = [];
+    httpServer.removeAllListeners('request');
+    httpServer.on('request', (_req, res) => {
+      pending.push(() => res.end('done'));
+    });
+    const tracker = trackConnections(httpServer);
+    const port = await listen();
+    await peer(port, 'GET /a HTTP/1.1\r\nHost: x\r\n\r\nGET /b HTTP/1.1\r\nHost: x\r\n\r\n');
+    expect(await until(() => pending.length === 2)).toBe(true);
+
+    pending[0]();
+    await sleep(20);
+    expect(tracker.destroyIdle()).toEqual({ destroyed: 0, inFlight: 1 });
+    pending[1]();
+  });
 });

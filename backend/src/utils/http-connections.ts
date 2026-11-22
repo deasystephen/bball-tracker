@@ -49,7 +49,9 @@ export interface ConnectionTracker {
 
 export function trackConnections(server: Server): ConnectionTracker {
   const open = new Set<Duplex>();
-  const busy = new Set<Duplex>();
+  // Requests running per connection: a count, because a pipelined request
+  // can start before the previous response on the same socket has closed.
+  const busy = new Map<Duplex, number>();
   server.on('connection', (socket: Duplex) => {
     open.add(socket);
     socket.once('close', () => {
@@ -59,8 +61,12 @@ export function trackConnections(server: Server): ConnectionTracker {
   });
   server.on('request', (req: IncomingMessage, res: ServerResponse) => {
     const { socket } = req;
-    busy.add(socket);
-    res.once('close', () => busy.delete(socket));
+    busy.set(socket, (busy.get(socket) ?? 0) + 1);
+    res.once('close', () => {
+      const left = (busy.get(socket) ?? 1) - 1;
+      if (left > 0) busy.set(socket, left);
+      else busy.delete(socket);
+    });
   });
   return {
     size: () => open.size,
