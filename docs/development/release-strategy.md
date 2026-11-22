@@ -8,7 +8,7 @@ different things per package:
 | `backend/` | Docker image → ECR → ECS Fargate (`api.hooplings.com`) | **Automatic** on every merge to `main` that touches `backend/` (`.github/workflows/ci.yml`; Prisma migrations run from `docker/entrypoint.sh`) |
 | `mobile/` JS-only changes | EAS **OTA update** on the `production` branch | Manual: `cd mobile && npm ci && npm run ota:production -- --message "…"` (see Mobile below) |
 | `mobile/` native changes (new native module, `app.config.js` plugins/entitlements, Expo SDK bump) | EAS **build** → TestFlight / App Store | Manual: `npx eas-cli build --platform ios --profile production --auto-submit --non-interactive` |
-| `web/` | Not deployed yet (`hooplings.com` has no hosting target) | — |
+| `web/` | ECS service behind the API's ALB at `hooplings.com` (live since 2026-11-22, #30) | Automatic on a push to `main` that changes `web/` or `infra/web-task-definition.json` (`build-and-deploy-web`; `docs/deployment/web-app.md`) |
 
 ## Backend
 
