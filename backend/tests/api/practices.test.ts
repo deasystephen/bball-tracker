@@ -246,6 +246,90 @@ describe('PATCH /api/v1/practices/:id', () => {
     });
   });
 
+  describe('a local startDate + startTime (#1051)', () => {
+    beforeEach(() => freezeDate('2030-02-01T12:00:00Z'));
+    afterEach(() => jest.useRealTimers());
+
+    /** A standalone New York practice at 18:00 EST on 2030-03-07, then the PATCH. */
+    const patchLocal = async (body: Record<string, unknown>): Promise<request.Response> => {
+      mockPrisma.practiceSession.findUnique.mockResolvedValue({
+        id: SESSION_ID,
+        teamId: TEAM_ID,
+        seriesId: null,
+        status: 'SCHEDULED',
+      });
+      mockPrisma.$queryRaw.mockResolvedValueOnce([
+        {
+          status: 'SCHEDULED',
+          exceptionFields: [],
+          type: 'PRACTICE',
+          title: null,
+          location: 'Main gym',
+          notes: null,
+          startsAt: new Date('2030-03-07T23:00:00Z'),
+          durationMinutes: 90,
+          timezone: 'America/New_York',
+        },
+      ]);
+      mockPrisma.practiceSession.update.mockResolvedValue(practiceRow());
+      return request(app).patch(`/api/v1/practices/${SESSION_ID}`).send(body);
+    };
+
+    it('moves a practice across spring forward in its own zone, whatever zone the caller is in', async () => {
+      const res = await patchLocal({ startDate: '2030-03-12', startTime: '18:00' });
+      expect(res.status).toBe(200);
+      // 18:00 EDT, not the 23:00Z the old offset would give.
+      expect(mockPrisma.practiceSession.update.mock.calls[0][0].data).toEqual({
+        startsAt: new Date('2030-03-12T22:00:00Z'),
+      });
+    });
+
+    it('moves a time inside the spring-forward gap forward by the jump', async () => {
+      const res = await patchLocal({ startDate: '2030-03-10', startTime: '02:30' });
+      expect(res.status).toBe(200);
+      expect(mockPrisma.practiceSession.update.mock.calls[0][0].data.startsAt).toEqual(
+        new Date('2030-03-10T07:30:00Z')
+      );
+    });
+
+    it('takes the earlier instant of a repeated hour', async () => {
+      const res = await patchLocal({ startDate: '2030-11-03', startTime: '01:30' });
+      expect(res.status).toBe(200);
+      expect(mockPrisma.practiceSession.update.mock.calls[0][0].data.startsAt).toEqual(
+        new Date('2030-11-03T05:30:00Z')
+      );
+    });
+
+    it('reads the time in a timezone sent with it', async () => {
+      const res = await patchLocal({ startDate: '2030-03-12', startTime: '18:00', timezone: 'Europe/London' });
+      expect(res.status).toBe(200);
+      expect(mockPrisma.practiceSession.update.mock.calls[0][0].data).toEqual({
+        startsAt: new Date('2030-03-12T18:00:00Z'),
+        timezone: 'Europe/London',
+      });
+    });
+
+    it('still accepts the UTC instant older app builds send', async () => {
+      const res = await patchLocal({ startsAt: '2030-03-12T22:00:00Z' });
+      expect(res.status).toBe(200);
+      expect(mockPrisma.practiceSession.update.mock.calls[0][0].data).toEqual({
+        startsAt: new Date('2030-03-12T22:00:00Z'),
+      });
+    });
+
+    it('answers 400 for half a local time, both forms at once, or an impossible date', async () => {
+      const url = `/api/v1/practices/${SESSION_ID}`;
+      expect((await request(app).patch(url).send({ startDate: '2030-03-12' })).status).toBe(400);
+      expect((await request(app).patch(url).send({ startTime: '18:00' })).status).toBe(400);
+      expect(
+        (await request(app).patch(url).send({ startDate: '2030-03-12', startTime: '18:00', startsAt: '2030-03-12T22:00:00Z' }))
+          .status
+      ).toBe(400);
+      expect((await request(app).patch(url).send({ startDate: '2030-02-30', startTime: '18:00' })).status).toBe(400);
+      expect(mockPrisma.practiceSession.update).not.toHaveBeenCalled();
+    });
+  });
+
   it('answers 400 for an empty body or a status change, and for a cancelled practice', async () => {
     expect((await request(app).patch(`/api/v1/practices/${SESSION_ID}`).send({})).status).toBe(400);
     expect((await request(app).patch(`/api/v1/practices/${SESSION_ID}`).send({ status: 'CANCELLED' })).status).toBe(400);

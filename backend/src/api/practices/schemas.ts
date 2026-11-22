@@ -122,7 +122,17 @@ export const createPracticeSchema = z
   })
   .strict();
 
-/** PATCH /practices/:id: edits one session; on a series occurrence it becomes an exception. */
+/**
+ * PATCH /practices/:id: edits one session; on a series occurrence it becomes an exception.
+ *
+ * A new start comes in one of two forms, never both:
+ * - `startDate` "YYYY-MM-DD" + `startTime` "HH:MM": wall time in the session's
+ *   own zone (or in `timezone` when sent), turned into an instant on the server
+ *   with `zonedTimeToUtc`, as `POST /practice-series` does (#1051). A time in a
+ *   spring-forward gap moves forward by the jump; a repeated time takes the
+ *   earlier instant.
+ * - `startsAt`: an instant, what app builds before #1051 send.
+ */
 export const updatePracticeSchema = z
   .object({
     type: z.enum(PracticeType).optional(),
@@ -130,6 +140,8 @@ export const updatePracticeSchema = z
     location: optionalText(PRACTICE_LOCATION_MAX, 'location'),
     notes: optionalText(PRACTICE_NOTES_MAX, 'notes'),
     startsAt: instantSchema.optional(),
+    startDate: localDateSchema('startDate').optional(),
+    startTime: localTimeSchema.optional(),
     durationMinutes: durationSchema.optional(),
     timezone: timezoneSchema.optional(),
   })
@@ -137,10 +149,22 @@ export const updatePracticeSchema = z
   .refine((data) => Object.values(data).some((value) => value !== undefined), {
     message: 'At least one field must be provided',
   })
-  // `startsAt` is an instant; a new zone alone would move the local time.
-  .refine((data) => data.timezone === undefined || data.startsAt !== undefined, {
-    message: 'Send startsAt together with timezone',
+  .superRefine((data, ctx) => {
+    // The issue goes on the half that is missing.
+    if (data.startDate !== undefined && data.startTime === undefined) {
+      ctx.addIssue({ code: 'custom', path: ['startTime'], message: 'Send startDate and startTime together' });
+    } else if (data.startTime !== undefined && data.startDate === undefined) {
+      ctx.addIssue({ code: 'custom', path: ['startDate'], message: 'Send startDate and startTime together' });
+    }
+  })
+  .refine((data) => data.startsAt === undefined || data.startDate === undefined, {
+    message: 'Send either startsAt or startDate and startTime, not both',
     path: ['startsAt'],
+  })
+  // A new zone alone would move the local time: it comes with a new start.
+  .refine((data) => data.timezone === undefined || data.startsAt !== undefined || data.startDate !== undefined, {
+    message: 'Send startsAt (or startDate and startTime) together with timezone',
+    path: ['timezone'],
   });
 
 /** POST /practices/:id/cancel. */
