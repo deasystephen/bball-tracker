@@ -1451,6 +1451,24 @@ describe('TeamService', () => {
   });
 
   describe('addPlayer', () => {
+    it('refuses a jersey number another member wears (#1087)', async () => {
+      const { team, coach, headCoachRole, coachStaff } = createFullTeam();
+      const player = createPlayer();
+      (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
+      (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue({ ...coachStaff, role: headCoachRole });
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(player);
+      (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.teamMember.findFirst as jest.Mock).mockResolvedValueOnce({
+        playerId: 'holder-1',
+        player: { name: 'Holder', deletedAt: null },
+      });
+
+      await expect(
+        TeamService.addPlayer(team.id, { playerId: player.id, jerseyNumber: 0 }, coach.id)
+      ).rejects.toMatchObject({ statusCode: 409, code: 'jersey_number_taken' });
+      expect(mockPrisma.teamMember.create).not.toHaveBeenCalled();
+    });
+
     it('should add player to team successfully', async () => {
       const { team, coach, headCoachRole, coachStaff } = createFullTeam();
       const player = createPlayer();
@@ -1661,6 +1679,103 @@ describe('TeamService', () => {
   });
 
   describe('updateTeamMember', () => {
+    describe('jersey numbers (#1087)', () => {
+      const setup = (): { teamId: string; coachId: string; playerId: string } => {
+        const { team, coach, headCoachRole, coachStaff } = createFullTeam();
+        const player = createPlayer();
+        const member = createTeamMember({ teamId: team.id, playerId: player.id, jerseyNumber: 10 });
+        (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
+        (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue({ ...coachStaff, role: headCoachRole });
+        (mockPrisma.teamMember.findUnique as jest.Mock).mockResolvedValue(member);
+        (mockPrisma.teamMember.update as jest.Mock).mockResolvedValue(member);
+        return { teamId: team.id, coachId: coach.id, playerId: player.id };
+      };
+
+      it('refuses a number another member wears with 409 jersey_number_taken naming them', async () => {
+        const { teamId, coachId, playerId } = setup();
+        (mockPrisma.teamMember.findFirst as jest.Mock).mockResolvedValueOnce({
+          playerId: 'holder-1',
+          player: { name: 'Holder', deletedAt: null },
+        });
+
+        await expect(
+          TeamService.updateTeamMember(teamId, playerId, { jerseyNumber: 8 }, coachId)
+        ).rejects.toMatchObject({
+          statusCode: 409,
+          code: 'jersey_number_taken',
+          details: { jerseyNumber: 8, playerId: 'holder-1', playerName: 'Holder', playerDeletedAt: null },
+        });
+        expect(mockPrisma.teamMember.update).not.toHaveBeenCalled();
+        // The member being edited never counts as the holder (own number = no-op).
+        expect(mockPrisma.teamMember.findFirst).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: { teamId, jerseyNumber: 8, playerId: { not: playerId } },
+          })
+        );
+      });
+
+      it('re-sending the number the member already wears is never checked (position-only edit)', async () => {
+        const { teamId, coachId, playerId } = setup();
+
+        // The member wears 10: even a pair sharing it from before the rule saves (no holder lookup).
+        await TeamService.updateTeamMember(teamId, playerId, { jerseyNumber: 10, position: 'Guard' }, coachId);
+
+        expect(mockPrisma.teamMember.findFirst).not.toHaveBeenCalled();
+        expect(mockPrisma.teamMember.update).toHaveBeenCalled();
+      });
+
+      it('decides "unchanged" from the row read under the lock, not the earlier unlocked read', async () => {
+        const { teamId, coachId, playerId } = setup();
+        // Unlocked read: 10. Under the lock another coach has moved them to 7.
+        (mockPrisma.teamMember.findUnique as jest.Mock)
+          .mockResolvedValueOnce(createTeamMember({ teamId, playerId, jerseyNumber: 10 }))
+          .mockResolvedValueOnce({ jerseyNumber: 7 });
+        (mockPrisma.teamMember.findFirst as jest.Mock).mockResolvedValueOnce({
+          playerId: 'holder-1',
+          player: { name: 'Holder', deletedAt: null },
+        });
+
+        await expect(
+          TeamService.updateTeamMember(teamId, playerId, { jerseyNumber: 10, position: 'Guard' }, coachId)
+        ).rejects.toMatchObject({ statusCode: 409, code: 'jersey_number_taken' });
+        expect(mockPrisma.teamMember.update).not.toHaveBeenCalled();
+      });
+
+      it('a member removed meanwhile is a 404, not a 500', async () => {
+        const { teamId, coachId, playerId } = setup();
+        (mockPrisma.teamMember.update as jest.Mock).mockRejectedValueOnce(
+          new Prisma.PrismaClientKnownRequestError('Record not found', { code: 'P2025', clientVersion: 'test' })
+        );
+
+        await expect(
+          TeamService.updateTeamMember(teamId, playerId, { position: 'Guard' }, coachId)
+        ).rejects.toMatchObject({ statusCode: 404, message: 'Player is not on this team' });
+      });
+
+      it('a member removed before the lock is a 404', async () => {
+        const { teamId, coachId, playerId } = setup();
+        (mockPrisma.teamMember.findUnique as jest.Mock)
+          .mockResolvedValueOnce(createTeamMember({ teamId, playerId, jerseyNumber: 10 }))
+          .mockResolvedValueOnce(null);
+
+        await expect(
+          TeamService.updateTeamMember(teamId, playerId, { jerseyNumber: 4 }, coachId)
+        ).rejects.toMatchObject({ statusCode: 404, message: 'Player is not on this team' });
+      });
+
+      it('clearing the number takes no lock and checks nothing', async () => {
+        const { teamId, coachId, playerId } = setup();
+
+        await TeamService.updateTeamMember(teamId, playerId, { jerseyNumber: null }, coachId);
+
+        expect(mockPrisma.teamMember.findFirst).not.toHaveBeenCalled();
+        expect(mockPrisma.$queryRaw).not.toHaveBeenCalled();
+        expect(mockPrisma.teamMember.update).toHaveBeenCalledWith(
+          expect.objectContaining({ data: { jerseyNumber: null } })
+        );
+      });
+    });
+
     it('should update team member successfully', async () => {
       const { team, coach, headCoachRole, coachStaff } = createFullTeam();
       const player = createPlayer();

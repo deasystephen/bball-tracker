@@ -452,6 +452,30 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
   `docs/runbooks/email-deliverability.md`, "Applying and verifying".
 - **Notes:** ___________
 
+### D.3c — One jersey number per team (NEW, #1087)
+- [ ] Pass / Fail / Skipped
+- **Role:** COACH with `canManageRoster`
+- **Steps:**
+  1. On a team where a player wears `8`, Add Player with jersey `8`.
+  2. Open another player's **Edit jersey & position**, enter `8`, Save. Then
+     enter that player's own number and Save; then clear the field and Save.
+  3. Add Player with jersey `0` twice (the second is refused), and with no
+     number twice (both succeed).
+  4. Send an invitation (email of an existing account) with jersey `12`; before
+     it is accepted, give `12` to a rostered player; accept the invitation (in
+     the app, or from the web link).
+  5. Repeat 1 on a Spanish device.
+- **Expected:**
+  - (1, 2) The form or sheet stays open and the jersey field reads "Number 8 is
+    already worn by <name>. Pick another number or leave it blank." No toast;
+    typing a new number clears it. Own number and blank save normally.
+  - (4) The accept succeeds with no error and no delay; the new member's row
+    shows no number. The API log line `Invitation accepted` carries
+    `jerseyNumberDropped: 12` and `jerseyHolderId`.
+  - (5) The refusal reads in Spanish.
+  - Maestro: `.maestro/roster-management.yaml` (edit refused on Lakers' `23`).
+- **Notes:** ___________
+
 ### D.4 — Edit team name
 - [ ] Pass / Fail / Skipped
 - **Role:** COACH with `canManageTeam`
@@ -1506,3 +1530,4 @@ After B3-prod-access lands and production access is granted, this step is no lon
 - 2026-10-05: first ticked boxes. K.3a and P.10–P.13 recorded as passed on a device by the owner after OTA f08483ab-0387-4b03-8148-5d949d7970fa (main at `78eebfb`); the record for each is on its Notes line, and the matching issues (#655 #772 #773 #775 #776 #778) carry the same note. G.3c (#773, opponent score buttons) is not yet recorded.
 - 2026-10-24: Maestro for the day's mobile work. New E.7a (the web page's `?src=web` invite link, signed out, return path kept; #972, #973) with `.maestro/invite-deep-link.yaml`, which also covers E.9; B.4 gained `.maestro/spanish-locale.yaml` (#671), F.6 the "Share game" absence checks (#731). The flow list in appendix B lists both new flows, and announcements came off its "Not covered" line (`announcement-reply.yaml`). None of the new flows has been run yet. Nothing marked passed.
 - 2026-10-24: runtime 1.7.0 binary branch (#644, #671). Target build moved to 1.7.0. B.4 gained the per-app Language check (`CFBundleLocalizations`), P.5 now expects symbolicated frames for the embedded and the OTA bundle under the native release name. Nothing marked passed.
+- 2026-11-22: #1087 — one jersey number per team. New D.3c (refused on add, invite and edit with an inline error; accept never fails and joins with no number). `roster-management.yaml` asserts the edit refusal. Nothing marked passed.

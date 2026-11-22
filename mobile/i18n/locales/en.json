@@ -710,6 +710,7 @@
     "searching": "Searching...",
     "noPlayersFound": "No players found",
     "jerseyPlaceholder": "e.g., 23",
+    "jerseyTaken": "Number {{number}} is already worn by {{name}}. Pick another number or leave it blank.",
     "positionPlaceholder": "e.g., Forward, Guard",
     "sendInvitation": "Send Invitation",
     "namePlaceholder": "Enter player name",

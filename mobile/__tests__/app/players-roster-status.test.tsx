@@ -912,6 +912,92 @@ describe('ManagePlayersScreen — roster status and actions', () => {
     );
   });
 
+  describe('jersey number already worn (#1087)', () => {
+    /** The api-client's normalised 409 `jersey_number_taken`. */
+    const jerseyTaken = (deletedAt: string | null = null): Error =>
+      Object.assign(new Error('Another player on this team already wears number 8.'), {
+        isAxiosError: true,
+        code: 'jersey_number_taken',
+        apiError: {
+          status: 409,
+          error: 'Another player on this team already wears number 8.',
+          code: 'jersey_number_taken',
+          jerseyNumber: 8,
+          playerId: 'p-active',
+          playerName: 'Ada Active',
+          playerDeletedAt: deletedAt,
+        },
+      });
+
+    it('Add Player shows the refusal on the jersey field and in a toast, and typing clears the field error', async () => {
+      mockAddRosterPlayer.mutateAsync.mockRejectedValue(jerseyTaken());
+      const { getByTestId, getByLabelText, findByText, queryByText } = render(<ManagePlayersScreen />);
+
+      fireEvent.press(getByTestId('add-player-button'));
+      fireEvent.press(getByLabelText(AGE_YES));
+      fireEvent.changeText(getByTestId('add-player-name-input'), 'New Kid');
+      fireEvent.changeText(getByTestId('add-player-jersey-input'), '8');
+      fireEvent.press(getByTestId('add-player-submit'));
+
+      const message = 'Number 8 is already worn by Ada Active. Pick another number or leave it blank.';
+      expect(await findByText(message)).toBeTruthy();
+      // Also a toast: the submit button is below the fold, the field may not be in view.
+      expect(mockShowToast).toHaveBeenCalledWith(message, 'error');
+      // The form stays open with what the coach typed.
+      expect(getByTestId('add-player-name-input').props.value).toBe('New Kid');
+
+      fireEvent.changeText(getByTestId('add-player-jersey-input'), '9');
+      expect(queryByText(message)).toBeNull();
+    });
+
+    it('the edit sheet shows the refusal on the jersey field and stays open, in Spanish too', async () => {
+      mockUpdateTeamMember.mutateAsync.mockRejectedValue(jerseyTaken());
+      await i18n.changeLanguage('es');
+      try {
+        const screen = render(<ManagePlayersScreen />);
+
+        fireEvent.press(screen.getByLabelText('Opciones del jugador: Eve RosterOnly'));
+        fireEvent.press(screen.getByText('Editar número y posición'));
+        fireEvent.changeText(screen.getByTestId('edit-member-jersey-input'), '8');
+        fireEvent.press(screen.getByTestId('edit-member-save'));
+
+        expect(
+          await screen.findByText('Ada Active ya lleva el número 8. Elige otro número o déjalo vacío.')
+        ).toBeTruthy();
+        expect(mockShowToast).not.toHaveBeenCalled();
+        expect(screen.getByTestId('edit-member-jersey-input').props.value).toBe('8');
+      } finally {
+        await i18n.changeLanguage('en');
+      }
+    });
+
+    it('names a deleted account\'s roster entry with the localized label, never the stored name', async () => {
+      mockUpdateTeamMember.mutateAsync.mockRejectedValue(jerseyTaken('2026-11-01T00:00:00Z'));
+      const screen = render(<ManagePlayersScreen />);
+
+      openMenu(screen, 'Eve RosterOnly');
+      fireEvent.press(screen.getByText('Edit jersey & position'));
+      fireEvent.changeText(screen.getByTestId('edit-member-jersey-input'), '8');
+      fireEvent.press(screen.getByTestId('edit-member-save'));
+
+      expect(
+        await screen.findByText('Number 8 is already worn by Deleted user. Pick another number or leave it blank.')
+      ).toBeTruthy();
+    });
+
+    it('any other edit failure is still a toast', async () => {
+      mockUpdateTeamMember.mutateAsync.mockRejectedValue(new Error('Player is not on this team'));
+      const screen = render(<ManagePlayersScreen />);
+
+      openMenu(screen, 'Eve RosterOnly');
+      fireEvent.press(screen.getByText('Edit jersey & position'));
+      fireEvent.changeText(screen.getByTestId('edit-member-jersey-input'), '8');
+      fireEvent.press(screen.getByTestId('edit-member-save'));
+
+      await waitFor(() => expect(mockShowToast).toHaveBeenCalledWith('Player is not on this team', 'error'));
+    });
+  });
+
   it('a rejected member update surfaces the API error and keeps the sheet open', async () => {
     mockUpdateTeamMember.mutateAsync.mockRejectedValue(
       new Error('You do not have permission to update team members')

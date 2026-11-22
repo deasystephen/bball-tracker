@@ -7,7 +7,7 @@ import { transactionClosed } from '../factories';
 import { app, httpServer } from '../../src/index';
 import { TeamService, type TeamList, type TeamListItem } from '../../src/services/team-service';
 import { InvitationService } from '../../src/services/invitation-service';
-import { NotFoundError, ForbiddenError, PaymentRequiredError, BadRequestError } from '../../src/utils/errors';
+import { NotFoundError, ForbiddenError, PaymentRequiredError, BadRequestError, JerseyNumberTakenError } from '../../src/utils/errors';
 import { invalidateUsage } from '../../src/services/usage-service';
 import { prismaMock } from '../setup';
 import { TEST_TEAM_LIMIT, lineageRows, withFiniteFreeTeamLimit } from '../helpers';
@@ -18,6 +18,19 @@ const TEST_TEAM_ID = 'b2c3d4e5-f6a7-4901-a345-67890abcdef0';
 const TEST_LEAGUE_ID = 'c3d4e5f6-a7b8-4012-a456-7890abcdef01';
 const TEST_SEASON_ID = 'f6a7b8c9-d0e1-4345-a789-0abcdef01234';
 const TEST_PLAYER_ID = 'd4e5f6a7-b8c9-4123-a567-890abcdef012';
+const TEST_HOLDER_ID = 'e5f6a7b8-c9d0-4234-a678-90abcdef0123';
+
+/** The 409 every roster write answers for a number another member wears (#1087). */
+const jerseyTaken = (): JerseyNumberTakenError =>
+  new JerseyNumberTakenError({ jerseyNumber: 8, playerId: TEST_HOLDER_ID, playerName: 'Sam Holder', playerDeletedAt: null });
+const JERSEY_TAKEN_BODY = {
+  error: 'Another player on this team already wears number 8.',
+  code: 'jersey_number_taken',
+  jerseyNumber: 8,
+  playerId: TEST_HOLDER_ID,
+  playerName: 'Sam Holder',
+  playerDeletedAt: null,
+};
 
 // Mutable mock auth user. Team creation runs through `requireTeamCreateLimit`,
 // which enforces a tier's team cap when it has one. No tier does in production
@@ -692,6 +705,17 @@ describe('Teams API', () => {
       expect(JSON.stringify(response.body)).not.toContain('token');
     });
 
+    it('answers 409 jersey_number_taken with the holder when the number is worn (#1087)', async () => {
+      mockInvitationService.addRosterPlayer.mockRejectedValue(jerseyTaken());
+
+      const response = await request(app)
+        .post(`/api/v1/teams/${TEST_TEAM_ID}/players`)
+        .send({ name: 'Jane Hooper', jerseyNumber: 8 });
+
+      expect(response.status).toBe(409);
+      expect(response.body).toEqual(JERSEY_TAKEN_BODY);
+    });
+
     it('rejects a guardian email without a relationship (400)', async () => {
       const response = await request(app)
         .post(`/api/v1/teams/${TEST_TEAM_ID}/players`)
@@ -794,6 +818,17 @@ describe('Teams API', () => {
       // Audit #14: the token only travels in the invitation email.
       expect(response.body.invitation).not.toHaveProperty('token');
       expect(JSON.stringify(response.body)).not.toContain('abc123');
+    });
+
+    it('answers 409 jersey_number_taken for an explicit number another member wears (#1087)', async () => {
+      mockInvitationService.createInvitation.mockRejectedValue(jerseyTaken());
+
+      const response = await request(app)
+        .post(`/api/v1/teams/${TEST_TEAM_ID}/invitations`)
+        .send({ playerId: TEST_PLAYER_ID, jerseyNumber: 8 });
+
+      expect(response.status).toBe(409);
+      expect(response.body).toEqual(JERSEY_TAKEN_BODY);
     });
 
     it('surfaces a failed invitation email as emailSent: false', async () => {
@@ -987,6 +1022,17 @@ describe('Teams API', () => {
         expect.any(String)
       );
       expect(response.body.teamMember.jerseyNumber).toBeNull();
+    });
+
+    it('answers 409 jersey_number_taken with the holder when the number is worn (#1087)', async () => {
+      mockTeamService.updateTeamMember.mockRejectedValue(jerseyTaken());
+
+      const response = await request(app)
+        .patch(`/api/v1/teams/${TEST_TEAM_ID}/players/${TEST_PLAYER_ID}`)
+        .send({ jerseyNumber: 8 });
+
+      expect(response.status).toBe(409);
+      expect(response.body).toEqual(JERSEY_TAKEN_BODY);
     });
 
     it('should reject jersey number 100 (out of range)', async () => {

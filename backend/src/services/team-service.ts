@@ -55,8 +55,9 @@ import { emailEquals } from '../utils/email-match';
 import { lockLeagueRow } from '../utils/league-row-lock';
 import { USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
 import { createOrConflict, orNotFound } from '../utils/prisma-errors';
-import { lockTeamRow } from '../utils/team-row-lock';
-import { lockUsers } from '../utils/user-row-lock';
+import { lockTeamOrNotFound, lockTeamRow } from '../utils/team-row-lock';
+import { assertJerseyNumberFree } from '../utils/jersey-number';
+import { keyShareUsers, lockUsers } from '../utils/user-row-lock';
 import { findOrCreateSeason, findSeasonByName, type SeasonByName } from './season-service';
 
 const TEAM_SUMMARY_SELECT = {
@@ -1332,17 +1333,29 @@ export class TeamService {
     }
 
     // Add player to team; a lost race on @@unique([teamId, playerId]) answers
-    // the pre-check's 400 (#727).
+    // the pre-check's 400 (#727). The jersey number is checked behind the
+    // team row lock, so two concurrent adds of one number cannot both win (#1087).
     const teamMember = await createOrConflict(
       () =>
-        prisma.teamMember.create({
-          data: {
-            teamId,
-            playerId: data.playerId,
-            jerseyNumber: data.jerseyNumber,
-            position: data.position,
-          },
-          include: TEAM_MEMBER_INCLUDE,
+        prisma.$transaction(async (tx) => {
+          // User before Team (utils/team-row-lock.ts): the insert key-shares
+          // the player's User row, which account deletion holds FOR UPDATE, so
+          // take that key-share first. A player deleted meanwhile is a 404.
+          const [locked] = await keyShareUsers(tx, [data.playerId]);
+          if (!locked || locked.deletedAt) {
+            throw new NotFoundError('Player not found');
+          }
+          await lockTeamOrNotFound(tx, teamId);
+          await assertJerseyNumberFree(tx, teamId, data.jerseyNumber);
+          return tx.teamMember.create({
+            data: {
+              teamId,
+              playerId: data.playerId,
+              jerseyNumber: data.jerseyNumber,
+              position: data.position,
+            },
+            include: TEAM_MEMBER_INCLUDE,
+          });
         }),
       'Player is already on this team',
       'TeamMember_teamId_playerId_key'
@@ -1469,16 +1482,41 @@ export class TeamService {
       updateData.position = data.position;
     }
 
-    // Update team member
-    const updatedMember = await prisma.teamMember.update({
-      where: {
-        teamId_playerId: {
-          teamId,
-          playerId,
-        },
-      },
-      data: updateData,
-      include: TEAM_MEMBER_INCLUDE,
+    // Update team member. A number is checked behind the team row lock
+    // (#1087), against the member row read again under that lock (the read
+    // above is unlocked and may be stale). Keeping the number the member wears
+    // now is never refused, even when another member shares it from before
+    // the rule, so a position-only edit always saves (the mobile sheet always
+    // sends the number). Clearing it takes no lock.
+    const updatedMember = await prisma.$transaction(async (tx) => {
+      if (data.jerseyNumber != null) {
+        await lockTeamOrNotFound(tx, teamId);
+        const current = await tx.teamMember.findUnique({
+          where: { teamId_playerId: { teamId, playerId } },
+          select: { jerseyNumber: true },
+        });
+        if (!current) {
+          throw new NotFoundError('Player is not on this team');
+        }
+        if (current.jerseyNumber !== data.jerseyNumber) {
+          await assertJerseyNumberFree(tx, teamId, data.jerseyNumber, playerId);
+        }
+      }
+      // A removal that committed meanwhile is the same 404, not a P2025 500.
+      return orNotFound(
+        () =>
+          tx.teamMember.update({
+            where: {
+              teamId_playerId: {
+                teamId,
+                playerId,
+              },
+            },
+            data: updateData,
+            include: TEAM_MEMBER_INCLUDE,
+          }),
+        new NotFoundError('Player is not on this team')
+      );
     });
 
     logger.info('Roster member updated', { teamId, playerId, userId });

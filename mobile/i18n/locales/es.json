@@ -710,6 +710,7 @@
     "searching": "Buscando...",
     "noPlayersFound": "No se encontraron jugadores",
     "jerseyPlaceholder": "p. ej., 23",
+    "jerseyTaken": "{{name}} ya lleva el número {{number}}. Elige otro número o déjalo vacío.",
     "positionPlaceholder": "p. ej., Alero, Base",
     "sendInvitation": "Enviar invitación",
     "namePlaceholder": "Escribe el nombre del jugador",
