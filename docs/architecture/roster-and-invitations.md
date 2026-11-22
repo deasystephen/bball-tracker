@@ -412,7 +412,7 @@ themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by 
   hour per account). 404 for an unknown token. Then one transaction behind the requester's
   `User` row lock; the account is read again after the lock and must still be a live login
   (`deletedAt` null and not `isManaged`), so a request cannot slip in behind an account deletion or
-  an under-age un-claim (404):
+  an under-age un-claim (401, never the link's 404):
   - **Idempotent, before the link's state is judged.** An account already on the roster, or a
     child of that name the account already guards on the team, answers 200 `{ status:
     'already_member', teamId, teamName }` and writes nothing. A request already waiting (the SELF
@@ -422,11 +422,14 @@ themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by 
     whitespace-collapsed and case-folded (no SQL pattern match).
   - **Only a new request needs a live link:** 404 when revoked (like an unknown one), **410
     `join_link_inactive`** (`JoinLinkInactiveError`, `reason: 'expired' | 'full'`) otherwise.
-  - **Cap:** at most `MAX_PENDING_JOIN_REQUESTS_PER_ACCOUNT` (6) pending requests per account and
-    team, 400 beyond.
+  - **Cap:** at most `MAX_PENDING_JOIN_REQUESTS_PER_ACCOUNT` (6) requests per account and team
+    that are pending or were declined in the last 30 days, 400 beyond. Declined ones count so that
+    an account told "no" cannot keep asking (each ask is a push to the coaches and a use of the
+    link); approved ones never count.
   - **One use of the link**, taken by a single conditional `UPDATE … SET "useCount" = "useCount" + 1
     WHERE not revoked AND not expired AND ("maxUses" IS NULL OR "useCount" < "maxUses")`, so
-    `maxUses` holds under concurrency (zero rows → 404 or 410 from a re-read). **`maxUses` counts
+    `maxUses` holds under concurrency (zero rows → 404 or 410 from a re-read). The comparison is
+    made in UTC (`NOW() AT TIME ZONE 'UTC'`), as the columns are stored. **`maxUses` counts
     requests, approved or not.**
   - The PENDING row. 201 `{ status: 'pending', created: true, teamName, request: { id, kind,
     status, createdAt } }` (no team id: a requester is not a member yet).
@@ -436,7 +439,8 @@ themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by 
   request.
 - **A request nobody decides lapses after `JOIN_REQUEST_TTL_DAYS` (30).** It is flipped to EXPIRED
   and its `childName` cleared, **lazily**: when the team's list is read and when the requester asks
-  again (nothing in the API is scheduled, as with invitation expiry); an approve or decline of a
+  again (nothing in the API is scheduled, as with invitation expiry), in a statement of its own
+  that commits before the ask is judged, so a refused ask never undoes it; an approve or decline of a
   lapsed row that was not flipped yet answers 400. So a family is never stuck at the pending cap.
   The typed name of a request on a team whose coaches never open the list, from a requester who
   never returns, stays until one of those reads happens or the account is deleted.
@@ -444,8 +448,10 @@ themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by 
   oldest first, each with `childName`, `relationship` and `requester` (`USER_SUMMARY_WITH_EMAIL_SELECT`:
   the address is how a coach recognises who is asking; roster managers already see roster emails).
 - **`POST /teams/:teamId/join-requests/:requestId/approve`** writes the roster in one transaction:
-  locks the requester and the approver (`lockUsers`, one id-ordered statement), reads the
-  requester again as a live login (400 when deleted or un-claimed meanwhile), flips PENDING →
+  locks the requester and the approver (`lockUsers`, one id-ordered statement), then the team row
+  (the lock staff removal and re-role take) and checks `canManageRoster` again behind it (403 for
+  a coach removed while the call was in flight), reads the requester again as a live login (400
+  when deleted or un-claimed meanwhile), flips PENDING →
   ACCEPTED guarded on the status (the loser of two approvals, or of approve against decline, gets
   400) and clears `childName`. **SELF:** `teamMember.upsert` with `update: {}` for the requester.
   **CHILD:** what Add Player's case 1 plus an accepted guardian invitation produce: a managed
@@ -453,7 +459,8 @@ themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by 
   and the `Guardian` link to the requester (`isPrimary`, the record's first), and a bare PLAYER
   requester becomes PARENT (`GuardianService.promoteBareAccountToParent`, the guardian accept's
   rule, now shared). Logs `Join request approved`; best-effort push to the requester ("You have
-  been added to <team>", or "Your child has been added to <team>" for a child request).
+  been added to <team>", or "Your child has been added to <team>" for a child request; none when
+  the approver is the requester).
   **`…/decline`**: one status-guarded update, `childName` cleared, nothing written to the roster,
   no notification. Order of refusals on both: team 404, 403, request 404 (another team's id), 400.
 - **Not built (deliberate):** approving a CHILD request always creates a new roster record. When

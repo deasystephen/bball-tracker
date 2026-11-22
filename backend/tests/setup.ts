@@ -157,6 +157,7 @@ export const mockPrisma = {
     updateMany: jest.fn(),
   },
   teamJoinRequest: {
+    count: jest.fn(),
     findFirst: jest.fn(),
     findUniqueOrThrow: jest.fn(),
     findMany: jest.fn(),

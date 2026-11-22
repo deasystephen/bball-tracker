@@ -28,7 +28,13 @@
 import { JoinRequestKind, Prisma } from '@prisma/client';
 import { randomBytes } from 'crypto';
 import prisma from '../models';
-import { BadRequestError, ForbiddenError, JoinLinkInactiveError, NotFoundError } from '../utils/errors';
+import {
+  BadRequestError,
+  ForbiddenError,
+  JoinLinkInactiveError,
+  NotFoundError,
+  UnauthorizedError,
+} from '../utils/errors';
 import { hasTeamPermission } from '../utils/permissions';
 import { lockTeamRow } from '../utils/team-row-lock';
 import { lockUsers } from '../utils/user-row-lock';
@@ -43,9 +49,12 @@ import type { CreateJoinLinkInput, JoinRequestInput } from '../api/join/schemas'
 export const JOIN_LINK_DEFAULT_EXPIRES_DAYS = 14;
 
 /**
- * Pending requests one account may hold on one team (itself plus children).
- * A family with more children waits for the coach to decide some; a looping
- * account cannot fill the coach's list.
+ * Requests one account may have open on one team (itself plus children):
+ * those still PENDING plus those a coach DECLINED within the last
+ * `JOIN_REQUEST_TTL_DAYS`. Counting the declined ones is what stops an
+ * account from asking again and again after a "no", each ask a push to the
+ * coaches and a use of the link; approved requests never count, so a family
+ * with many children is slowed only while the coach has not answered.
  */
 export const MAX_PENDING_JOIN_REQUESTS_PER_ACCOUNT = 6;
 
@@ -310,13 +319,15 @@ export class JoinLinkService {
   /**
    * Lazy expiry of requests nobody decided within `JOIN_REQUEST_TTL_DAYS`:
    * EXPIRED, and the typed child's name cleared. Runs where pending requests
-   * are read (the team's list, the requester's next ask).
+   * are read (the team's list, the requester's next ask), as a statement of
+   * its own and never inside the caller's transaction: a refusal that rolls
+   * the ask back must not bring the name back, nor leave a log line for an
+   * expiry that did not happen.
    */
   private static async expireStaleRequests(
-    db: Prisma.TransactionClient,
     where: Pick<Prisma.TeamJoinRequestWhereInput, 'teamId' | 'requesterId'>
   ): Promise<void> {
-    const { count } = await db.teamJoinRequest.updateMany({
+    const { count } = await prisma.teamJoinRequest.updateMany({
       where: { ...where, status: 'PENDING', createdAt: { lt: staleBefore() } },
       data: { status: 'EXPIRED', decidedAt: new Date(), childName: null },
     });
@@ -343,7 +354,7 @@ export class JoinLinkService {
    * A signed-in account asks to join through the link. One transaction,
    * behind the requester's `User` row lock (so a double tap creates one
    * request and account deletion or an un-claim never leaves a request
-   * behind; an account that is no longer a login is refused).
+   * behind; an account that is no longer a login is refused, 401).
    *
    * Idempotent, and the idempotent answers come BEFORE the link's state is
    * judged: an account (or a child it guards, matched by name) already on the
@@ -352,7 +363,7 @@ export class JoinLinkService {
    * expired or been rotated. A retry after a lost response is therefore never
    * told to ask the coach for a new link. Only a NEW request needs a live
    * link (404 revoked, 410 expired or full), then:
-   *  - the per-account pending cap;
+   *  - the per-account cap (pending plus recently declined);
    *  - one use of the link, taken by a single conditional UPDATE (not
    *    revoked, not expired, under `maxUses`), so the cap holds under
    *    concurrency;
@@ -366,6 +377,9 @@ export class JoinLinkService {
     const kind: JoinRequestKind = data.kind === 'child' ? 'CHILD' : 'SELF';
     const childName = data.kind === 'child' ? data.childName : null;
 
+    // Committed before the ask is judged (see expireStaleRequests).
+    await this.expireStaleRequests({ teamId, requesterId: userId });
+
     const result = await prisma.$transaction(async (tx): Promise<JoinRequestResult> => {
       await lockUsers(tx, [userId]);
       // Read after the lock: deleted, or un-claimed back into a managed roster
@@ -376,12 +390,11 @@ export class JoinLinkService {
         select: { id: true },
       });
       if (!requester) {
-        throw new NotFoundError('Account not found');
+        throw new UnauthorizedError('This account can no longer sign in');
       }
 
-      await this.expireStaleRequests(tx, { teamId, requesterId: userId });
       const pending = await tx.teamJoinRequest.findMany({
-        where: { teamId, requesterId: userId, status: 'PENDING' },
+        where: { teamId, requesterId: userId, status: 'PENDING', createdAt: { gte: staleBefore() } },
         select: JOIN_REQUEST_DEDUPE_SELECT,
         orderBy: { createdAt: 'asc' },
       });
@@ -426,20 +439,25 @@ export class JoinLinkService {
       if (state !== 'active') {
         throw new JoinLinkInactiveError(state);
       }
-      if (pending.length >= MAX_PENDING_JOIN_REQUESTS_PER_ACCOUNT) {
+      const recentlyDeclined = await tx.teamJoinRequest.count({
+        where: { teamId, requesterId: userId, status: 'REJECTED', createdAt: { gte: staleBefore() } },
+      });
+      if (pending.length + recentlyDeclined >= MAX_PENDING_JOIN_REQUESTS_PER_ACCOUNT) {
         throw new BadRequestError(
-          'You already have several requests waiting for this team. Ask the coach to review them first.'
+          'You have sent several requests to this team already. Talk to the coach before sending another.'
         );
       }
 
       // One use, taken atomically: a link revoked, expired or filled since
-      // the unlocked read above matches no row.
+      // the unlocked read above matches no row. The columns are TIMESTAMP(3)
+      // holding UTC (as Prisma writes them), so the comparison is made in UTC
+      // whatever the session's time zone is.
       const taken = await tx.$executeRaw`
         UPDATE "TeamJoinLink"
-        SET "useCount" = "useCount" + 1, "updatedAt" = NOW()
+        SET "useCount" = "useCount" + 1, "updatedAt" = (NOW() AT TIME ZONE 'UTC')
         WHERE "id" = ${link.id}
           AND "revokedAt" IS NULL
-          AND "expiresAt" > NOW()
+          AND "expiresAt" > (NOW() AT TIME ZONE 'UTC')
           AND ("maxUses" IS NULL OR "useCount" < "maxUses")`;
       if (taken === 0) {
         const fresh = await tx.teamJoinLink.findUnique({ where: { id: link.id }, select: JOIN_LINK_PUBLIC_SELECT });
@@ -539,7 +557,7 @@ export class JoinLinkService {
   /** The team's pending join requests, oldest first, for roster managers only. */
   static async listRequests(teamId: string, userId: string): Promise<JoinRequestListItem[]> {
     await this.requireRosterManager(teamId, userId);
-    await this.expireStaleRequests(prisma, { teamId });
+    await this.expireStaleRequests({ teamId });
     return prisma.teamJoinRequest.findMany({
       where: { teamId, status: 'PENDING' },
       select: JOIN_REQUEST_LIST_SELECT,
@@ -602,6 +620,16 @@ export class JoinLinkService {
       const locked = await lockUsers(tx, [requesterId, userId]);
       if (!locked.some((row) => row.id === userId && row.deletedAt === null)) {
         throw new NotFoundError('Account not found');
+      }
+      // The approver's right again, behind the team row lock every staff
+      // removal and re-role takes (User rows first, then the team: account
+      // deletion's order). A coach removed while this call was in flight has
+      // either committed (seen by this read) or waits for this transaction.
+      if (!(await lockTeamRow(tx, teamId))) {
+        throw new NotFoundError('Team not found');
+      }
+      if (!(await hasTeamPermission(userId, teamId, 'canManageRoster'))) {
+        throw new ForbiddenError(NO_ROSTER_PERMISSION);
       }
       // Read after the lock, like the request: a requester deleted or
       // un-claimed into a managed record meanwhile is no longer a login, and
@@ -667,7 +695,10 @@ export class JoinLinkService {
       kind: request.kind,
       userId,
     });
-    await this.notifyRequester(requesterId, teamId, team.name, request.kind);
+    // A coach who approved their own request needs no push about it.
+    if (requesterId !== userId) {
+      await this.notifyRequester(requesterId, teamId, team.name, request.kind);
+    }
 
     return result;
   }

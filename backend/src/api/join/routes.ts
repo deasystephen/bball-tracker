@@ -93,10 +93,11 @@ router.post('/:token', authenticate, joinRequestRateLimit, async (req, res) => {
     const created = result.status === 'pending' && result.created;
     res.status(created ? 201 : 200).json({ success: true, ...result });
   } catch (error) {
+    // No `notFound` override here: the service's own 404 is already "Join
+    // link not found", and nothing else on this route may be reworded into it.
     respondWithError(res, error, {
       log: 'Error requesting to join team',
       fallback: 'Failed to send join request',
-      notFound: JOIN_LINK_NOT_FOUND,
     });
   }
 });

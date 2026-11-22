@@ -165,6 +165,7 @@ describe('Team join links API (#210)', () => {
       mockPrisma.teamJoinRequest.findFirst,
       mockPrisma.teamJoinRequest.findUniqueOrThrow,
       mockPrisma.teamJoinRequest.findMany,
+      mockPrisma.teamJoinRequest.count,
       mockPrisma.teamJoinRequest.create,
       mockPrisma.teamJoinRequest.updateMany,
       mockPrisma.$queryRaw,
@@ -185,6 +186,8 @@ describe('Team join links API (#210)', () => {
         applySelect(linkRow({ ...data, createdAt: new Date() }), select)
     );
     mockPrisma.teamJoinRequest.findMany.mockResolvedValue([]);
+    // Nothing the requester sent was declined recently.
+    mockPrisma.teamJoinRequest.count.mockResolvedValue(0);
     // A decision's status-guarded update matches the row; the lazy expiry of
     // stale requests finds none, unless a test says otherwise.
     mockPrisma.teamJoinRequest.updateMany.mockImplementation(
@@ -592,6 +595,23 @@ describe('Team join links API (#210)', () => {
       expect(mockPrisma.teamJoinRequest.create).toHaveBeenCalledTimes(1);
     });
 
+    it('counts recently declined requests toward the cap, so a "no" cannot be asked again without end', async () => {
+      mockPrisma.teamJoinRequest.findMany.mockResolvedValue([
+        { id: 'req-0', kind: 'CHILD', status: 'PENDING', createdAt: new Date(), childName: 'Child 0' },
+      ]);
+      mockPrisma.teamJoinRequest.count.mockResolvedValue(MAX_PENDING_JOIN_REQUESTS_PER_ACCOUNT - 1);
+
+      const res = await request(app).post(url).send({ kind: 'child', childName: 'Another', relationship: 'OTHER' });
+
+      expect(res.status).toBe(400);
+      expect(mockPrisma.teamJoinRequest.count).toHaveBeenCalledWith({
+        where: { teamId: TEAM_ID, requesterId: PARENT_ID, status: 'REJECTED', createdAt: { gte: expect.any(Date) } },
+      });
+      expect(mockPrisma.teamJoinRequest.create).not.toHaveBeenCalled();
+      expect(mockPrisma.$executeRaw).not.toHaveBeenCalled();
+      expect(pushSpy).not.toHaveBeenCalled();
+    });
+
     it('caps the requests one account may have waiting on a team', async () => {
       mockPrisma.teamJoinRequest.findMany.mockResolvedValue(
         Array.from({ length: MAX_PENDING_JOIN_REQUESTS_PER_ACCOUNT }, (_, i) => ({
@@ -665,7 +685,9 @@ describe('Team join links API (#210)', () => {
 
       const res = await request(app).post(url).send({ kind: 'self' });
 
-      expect(res.status).toBe(404);
+      // 401, never the link's 404: the link is fine, the account is not.
+      expect(res.status).toBe(401);
+      expect(res.body.error).not.toBe('Join link not found');
       expect(mockPrisma.user.findFirst).toHaveBeenCalledWith({
         where: { id: PARENT_ID, deletedAt: null, isManaged: false },
         select: { id: true },
@@ -722,6 +744,19 @@ describe('Team join links API (#210)', () => {
         mockPrisma.teamJoinRequest.findMany.mock.invocationCallOrder[0]
       );
       expect(domainEvent(info, 'Join requests expired')).toEqual({ teamId: TEAM_ID, expiredCount: 2 });
+    });
+
+    it('lapses stale requests in a statement of its own, before the transaction a refusal rolls back', async () => {
+      mockPrisma.teamJoinLink.findUnique.mockResolvedValue(linkRow({ expiresAt: new Date(Date.now() - 1000) }));
+
+      const res = await request(app).post(url).send({ kind: 'self' });
+
+      expect(res.status).toBe(410);
+      // The expiry ran, and ran before the transaction opened.
+      expect(mockPrisma.teamJoinRequest.updateMany).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.teamJoinRequest.updateMany.mock.invocationCallOrder[0]).toBeLessThan(
+        mockPrisma.$transaction.mock.invocationCallOrder[0]
+      );
     });
 
     it('rejects an invalid body and a malformed token with 400', async () => {
@@ -910,6 +945,46 @@ describe('Team join links API (#210)', () => {
         body: 'Your child has been added to Hornets.',
         data: { type: 'join_request_approved', teamId: TEAM_ID },
       });
+    });
+
+    it('checks the approver\'s right again behind the team lock (a coach removed meanwhile gets 403)', async () => {
+      givenTeam();
+      mockPrisma.teamJoinRequest.findFirst.mockResolvedValue(requestRow());
+      // The first permission read (before the transaction) finds the staff row, the one behind the lock does not.
+      mockPrisma.teamStaff.findUnique
+        .mockResolvedValueOnce({
+          role: {
+            type: 'ASSISTANT_COACH',
+            canManageTeam: false,
+            canManageRoster: true,
+            canTrackStats: true,
+            canViewStats: true,
+            canShareStats: false,
+          },
+        })
+        .mockResolvedValue(null);
+
+      const res = await request(app).post(url);
+
+      expect(res.status).toBe(403);
+      expect(mockPrisma.teamJoinRequest.updateMany).not.toHaveBeenCalled();
+      expect(mockPrisma.teamMember.upsert).not.toHaveBeenCalled();
+      // Users first, then the team: two lock statements before the refusal.
+      expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(2);
+    });
+
+    it('sends no approval push to a coach who approved their own request', async () => {
+      givenTeam();
+      mockPrisma.teamJoinRequest.findFirst.mockResolvedValue(
+        requestRow({ requesterId: COACH_ID, kind: 'CHILD', childName: 'Riley Park', relationship: 'FATHER' })
+      );
+      mockPrisma.user.create.mockResolvedValue({ id: CHILD_ID });
+      mockPrisma.user.findFirst.mockResolvedValue({ id: COACH_ID, role: 'COACH' });
+
+      const res = await request(app).post(url);
+
+      expect(res.status).toBe(200);
+      expect(pushSpy).not.toHaveBeenCalled();
     });
 
     it('refuses a request that lapsed but was not flipped yet', async () => {

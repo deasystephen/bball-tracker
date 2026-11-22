@@ -66,6 +66,7 @@ describe('legal pages (#25)', () => {
       ['15 days in Datadog', 'kept for **15 days**'],
       ['“Deleted user”', 'attributed to "Deleted user"'],
       ['city, region and country', '**city,\n  region and country**'],
+      ['lapses 30 days after it was sent', 'lapses, **30 days** after it was sent'],
     ];
     for (const [page, runbook] of windows) {
       expect(body).toContain(page);

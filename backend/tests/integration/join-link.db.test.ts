@@ -280,7 +280,61 @@ describe('JoinLinkService (real Postgres, #210)', () => {
     expect(await prisma.teamMember.count({ where: { teamId: club.teamId, playerId: accountId } })).toBe(0);
     await expect(
       JoinLinkService.requestToJoin(tokenOf(link), { kind: 'child', childName: `No-${fx.run}`, relationship: 'OTHER' }, accountId)
-    ).rejects.toBeInstanceOf(NotFoundError);
+    ).rejects.toMatchObject({ statusCode: 401 });
+  });
+
+  it('a lapse survives a refused ask: the name stays cleared when the old link is dead', async () => {
+    const { org: club, coachId } = await team('lapse');
+    const link = await JoinLinkService.createLink(club.teamId, {}, coachId);
+    const parentId = await adult('late');
+    const asked = await JoinLinkService.requestToJoin(
+      tokenOf(link),
+      { kind: 'child', childName: `Old-${fx.run}`, relationship: 'MOTHER' },
+      parentId
+    );
+    if (asked.status !== 'pending') throw new Error('expected a pending request');
+    const old = new Date(Date.now() - (JOIN_REQUEST_TTL_DAYS + 1) * 24 * 60 * 60 * 1000);
+    await prisma.teamJoinRequest.update({ where: { id: asked.request.id }, data: { createdAt: old } });
+    await prisma.teamJoinLink.update({ where: { id: link.id }, data: { expiresAt: new Date(Date.now() - 1000) } });
+
+    // The parent comes back a month later through the same, now expired, link.
+    await expect(
+      JoinLinkService.requestToJoin(
+        tokenOf(link),
+        { kind: 'child', childName: `Second-${fx.run}`, relationship: 'MOTHER' },
+        parentId
+      )
+    ).rejects.toMatchObject({ statusCode: 410 });
+
+    expect(await prisma.teamJoinRequest.findUniqueOrThrow({ where: { id: asked.request.id } })).toMatchObject({
+      status: 'EXPIRED',
+      childName: null,
+    });
+  });
+
+  it('an account a coach keeps declining runs into the cap; approved requests never count', async () => {
+    const { org: club, coachId } = await team('nagging');
+    const link = await JoinLinkService.createLink(club.teamId, {}, coachId);
+    const parentId = await adult('nag');
+    const ask = (n: number): ReturnType<typeof JoinLinkService.requestToJoin> =>
+      JoinLinkService.requestToJoin(
+        tokenOf(link),
+        { kind: 'child', childName: `Nag${n}-${fx.run}`, relationship: 'OTHER' },
+        parentId
+      );
+
+    // One approved (does not count), then six declined.
+    await ask(0);
+    const [first] = await JoinLinkService.listRequests(club.teamId, coachId);
+    await JoinLinkService.approveRequest(club.teamId, first.id, coachId);
+    for (let n = 1; n <= 6; n += 1) {
+      await ask(n);
+      const [pending] = await JoinLinkService.listRequests(club.teamId, coachId);
+      await JoinLinkService.declineRequest(club.teamId, pending.id, coachId);
+    }
+
+    await expect(ask(7)).rejects.toBeInstanceOf(BadRequestError);
+    expect((await prisma.teamJoinLink.findUniqueOrThrow({ where: { id: link.id } })).useCount).toBe(7);
   });
 
   it('approving a SELF request adds the member once; a second approval is refused', async () => {

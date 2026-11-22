@@ -94,10 +94,8 @@ on `deletedAt IS NULL`, so a request that raced the deletion cannot re-identify 
 - **Join requests (#210).** A request to join a team through a join link holds the requester's
   account id and, for a child, the name and relationship the parent typed. The name is cleared
   when a coach approves (it is then the roster record's name) or declines, and when the request
-  lapses, 30 days after it was sent; the lapse is applied the next time the team's request list is
+  lapses, **30 days** after it was sent; the lapse is applied the next time the team's request list is
   read or the requester asks again, not by a timer. Deleting the account deletes its requests.
-  The privacy policy does not mention join requests yet; it must before the feature is offered to
-  families.
 - RDS automated backups retain the pre-deletion data for up to **7 days**
   (`backup_retention_period` in `infra/rds.tf`); they are not edited. **Manual snapshots**
   (taken before risky migrations and major upgrades, `docs/runbooks/rds-backup-restore.md`) have
