@@ -1093,7 +1093,8 @@
       "timeZoneNote": "Las horas están en tu zona horaria ({{zone}}).",
       "submitOne": "Programar entrenamiento",
       "submitSeries": "Programar entrenamientos",
-      "practiceZoneNote": "La fecha y la hora están en la zona horaria del entrenamiento, {{zone}}."
+      "practiceZoneNote": "La fecha y la hora están en la zona horaria del entrenamiento, {{zone}}.",
+      "zoneUnknown": "Este dispositivo no reconoce la zona horaria del entrenamiento ({{zone}}), así que aquí no se pueden cambiar la fecha ni la hora. Actualiza la app o el dispositivo, o edítalo desde otro dispositivo."
     },
     "errors": {
       "weekdaysRequired": "Elige al menos un día",

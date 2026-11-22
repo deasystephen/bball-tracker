@@ -626,11 +626,15 @@ describe('edit practice', () => {
 
   it('sends a new date as the practice\'s own wall date, with no instant and no zone', async () => {
     mockParams = { id: 'p1', scope: 'one' };
-    mockPractice = practice({ timezone: deviceTimeZone() ?? 'UTC' });
+    // A start relative to now, so the API window never rots the test.
+    mockPractice = practice({
+      timezone: deviceTimeZone() ?? 'UTC',
+      startsAt: new Date(Date.now() + 3 * 86_400_000).toISOString(),
+    });
     const view = render(<EditPracticeScreen />);
     // The date picker opens on the practice's day; a week later is picked.
     const sheet = view.UNSAFE_getByProps({ mode: 'date' });
-    const wall = wallClockIn(mockPractice.startsAt, mockPractice.timezone);
+    const wall = wallClockIn(mockPractice.startsAt, mockPractice.timezone)!;
     const later = pickerDateFor(wall.date);
     later.setDate(later.getDate() + 7);
     await act(async () => {
@@ -722,6 +726,19 @@ describe('edit practice', () => {
       });
       const value = view.UNSAFE_getByProps({ mode: 'time' }).props.value as Date;
       expect(toLocalTimeKey(value)).toBe('18:00');
+    });
+
+    it('offers no date or time for a zone this device does not know, and still saves the rest', async () => {
+      mockParams = { id: 'p1', scope: 'one' };
+      mockPractice = practice({ timezone: 'Not/AZone' });
+      const view = render(<EditPracticeScreen />);
+      expect(view.queryByTestId('practice-date-button')).toBeNull();
+      expect(view.getByTestId('practice-edit-zone-unknown').props.children).toMatch(/doesn't know the practice's time zone \(Not\/AZone\)/);
+      fireEvent.changeText(view.getByTestId('practice-notes-input'), 'Bring water');
+      await act(async () => {
+        fireEvent.press(view.getByTestId('practice-edit-save'));
+      });
+      expect(mockUpdateOne).toHaveBeenCalledWith({ practiceId: 'p1', data: { notes: 'Bring water' } });
     });
 
     it('sends no start when only the notes change', async () => {

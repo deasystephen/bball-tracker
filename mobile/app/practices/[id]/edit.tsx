@@ -168,14 +168,20 @@ export default function EditPracticeScreen() {
   const initial = detailsOf(source);
   const details: PracticeDetailsValue = { ...initial, ...edits };
   // The practice's own wall time at its start, and the coach's edit of it.
+  // Null when this device does not know the practice's zone: the date and
+  // time are then shown in it where possible but not offered for change.
   const storedWall = wallClockIn(practice.startsAt, timeZone);
   const start = startEdit ?? storedWall;
-  const startMoved = start.date !== storedWall.date || start.time !== storedWall.time;
+  const startMoved = !!start && !!storedWall && (start.date !== storedWall.date || start.time !== storedWall.time);
   const duration = durationEdit ?? practice.durationMinutes;
-  const dateText = formatLongLocalDate(start.date);
-  const timeText = formatWallClock(start.time);
-  // Named when the practice's clock is not the device's, now or at its start.
-  const otherZone = isOtherTimeZone(timeZone, practice.startsAt) || isOtherTimeZone(timeZone);
+  const dateText = start ? formatLongLocalDate(start.date) : '';
+  const timeText = start ? formatWallClock(start.time) : '';
+  // Named when the practice's clock is not the device's: at its start, now,
+  // or on the date picked.
+  const otherZone =
+    isOtherTimeZone(timeZone, practice.startsAt) ||
+    isOtherTimeZone(timeZone) ||
+    (!!start && isOtherTimeZone(timeZone, pickerDateFor(start.date)));
 
   const handleSave = async () => {
     const patch = changedDetails(initial, details);
@@ -187,9 +193,15 @@ export default function EditPracticeScreen() {
         }
       } else {
         const data: UpdatePracticeInput = { ...patch };
-        if (startMoved) {
-          // The API's one-off window, by calendar day, before a round trip.
-          const windowError = validateStartDate(pickerDateFor(start.date), false);
+        if (start && startMoved) {
+          // The API's one-off window, by calendar day in the practice's zone,
+          // before a round trip.
+          const today = wallClockIn(new Date(), timeZone);
+          const windowError = validateStartDate(
+            pickerDateFor(start.date),
+            false,
+            today ? pickerDateFor(today.date) : new Date()
+          );
           if (windowError) {
             Alert.alert(t('common.error'), windowError);
             return;
@@ -217,6 +229,7 @@ export default function EditPracticeScreen() {
 
   // The picker's Date only carries the field being picked (see pickerDateFor).
   const onPicked = (value: Date) => {
+    if (!start) return;
     setStartEdit(
       picker === 'time' ? { date: start.date, time: toLocalTimeKey(value) } : { date: toLocalDateKey(value), time: start.time }
     );
@@ -266,21 +279,29 @@ export default function EditPracticeScreen() {
 
           {!seriesScope ? (
             <Card variant="default" style={styles.section}>
-              <PickerRow
-                icon="calendar"
-                text={dateText}
-                accessibilityLabel={t('practices.form.dateA11y', { date: dateText })}
-                onPress={() => openPicker('date')}
-                testID="practice-date-button"
-              />
-              <PickerRow
-                icon="time"
-                text={timeText}
-                accessibilityLabel={t('practices.form.startTimeA11y', { time: timeText })}
-                onPress={() => openPicker('time')}
-                testID="practice-time-button"
-              />
-              {otherZone ? (
+              {start ? (
+                <>
+                  <PickerRow
+                    icon="calendar"
+                    text={dateText}
+                    accessibilityLabel={t('practices.form.dateA11y', { date: dateText })}
+                    onPress={() => openPicker('date')}
+                    testID="practice-date-button"
+                  />
+                  <PickerRow
+                    icon="time"
+                    text={timeText}
+                    accessibilityLabel={t('practices.form.startTimeA11y', { time: timeText })}
+                    onPress={() => openPicker('time')}
+                    testID="practice-time-button"
+                  />
+                </>
+              ) : (
+                <ThemedText variant="footnote" color="textSecondary" testID="practice-edit-zone-unknown">
+                  {t('practices.form.zoneUnknown', { zone: timeZone })}
+                </ThemedText>
+              )}
+              {start && otherZone ? (
                 <ThemedText variant="footnote" color="textSecondary" testID="practice-edit-zone">
                   {t('practices.form.practiceZoneNote', { zone: formatTimeZoneLabel(timeZone) })}
                 </ThemedText>
@@ -308,9 +329,9 @@ export default function EditPracticeScreen() {
       </KeyboardAvoidingView>
 
       <DateTimePickerSheet
-        visible={picker !== null}
+        visible={picker !== null && !!start}
         mode={picker ?? 'date'}
-        value={picker === 'time' ? pickerTimeFor(start.time) : pickerDateFor(start.date)}
+        value={start ? (picker === 'time' ? pickerTimeFor(start.time) : pickerDateFor(start.date)) : new Date()}
         title={picker === 'time' ? t('practices.form.startTime') : t('practices.form.date')}
         onConfirm={onPicked}
         onCancel={() => setPicker(null)}

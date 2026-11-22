@@ -136,10 +136,11 @@ export interface WallClock {
  * the starting point of the practice edit form (#1051). This only reads a
  * clock: one instant has exactly one reading in every zone. The reverse (a
  * reading to an instant, which a daylight-saving gap or repeated hour makes
- * ambiguous) is the server's job, never the app's. A zone the runtime does
- * not know reads the device clock.
+ * ambiguous) is the server's job, never the app's. `null` for a zone the
+ * runtime does not know: reading the device clock instead would show (and
+ * send back) another zone's time as the practice's.
  */
-export function wallClockIn(value: Date | string, timeZone: string): WallClock {
+export function wallClockIn(value: Date | string, timeZone: string): WallClock | null {
   const instant = toDate(value);
   const options: Intl.DateTimeFormatOptions = {
     hourCycle: 'h23',
@@ -153,7 +154,7 @@ export function wallClockIn(value: Date | string, timeZone: string): WallClock {
   try {
     parts = new Intl.DateTimeFormat('en-US', { ...options, timeZone }).formatToParts(instant);
   } catch {
-    parts = new Intl.DateTimeFormat('en-US', options).formatToParts(instant);
+    return null;
   }
   const field = (type: Intl.DateTimeFormatPartTypes): string => parts.find((p) => p.type === type)?.value ?? '00';
   // Some engines write midnight as "24" even with h23.
@@ -188,7 +189,7 @@ export function formatTimeZoneLabel(timeZone: string): string {
       timeZoneName: 'longGeneric',
     } as Intl.DateTimeFormatOptions).formatToParts(new Date());
     const name = parts.find((p) => p.type === 'timeZoneName')?.value;
-    if (name && !/^(GMT|UTC)[+-−]/.test(name)) return name;
+    if (name && !/^(GMT|UTC)[+\-−]/.test(name)) return name;
   } catch {
     // fall through to the IANA name
   }

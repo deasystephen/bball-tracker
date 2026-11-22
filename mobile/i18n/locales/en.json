@@ -1093,7 +1093,8 @@
       "timeZoneNote": "Times are in your time zone ({{zone}}).",
       "submitOne": "Schedule practice",
       "submitSeries": "Schedule practices",
-      "practiceZoneNote": "Date and time are in the practice's time zone, {{zone}}."
+      "practiceZoneNote": "Date and time are in the practice's time zone, {{zone}}.",
+      "zoneUnknown": "This device doesn't know the practice's time zone ({{zone}}), so its date and time can't be changed here. Update the app or the device, or edit it from another device."
     },
     "errors": {
       "weekdaysRequired": "Pick at least one day",

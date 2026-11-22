@@ -347,16 +347,15 @@ describe('wall clock in a practice zone (#1051)', () => {
     expect(wallClockIn('2027-03-11T23:00:00Z', 'America/New_York')).toEqual({ date: '2027-03-11', time: '18:00' });
     expect(wallClockIn('2027-03-16T22:00:00Z', 'America/New_York')).toEqual({ date: '2027-03-16', time: '18:00' });
     // Both copies of the repeated hour read 01:30.
-    expect(wallClockIn('2027-11-07T05:30:00Z', 'America/New_York').time).toBe('01:30');
-    expect(wallClockIn('2027-11-07T06:30:00Z', 'America/New_York').time).toBe('01:30');
+    expect(wallClockIn('2027-11-07T05:30:00Z', 'America/New_York')?.time).toBe('01:30');
+    expect(wallClockIn('2027-11-07T06:30:00Z', 'America/New_York')?.time).toBe('01:30');
     // Another day than UTC's.
     expect(wallClockIn('2027-01-05T23:30:00Z', 'Asia/Tokyo')).toEqual({ date: '2027-01-06', time: '08:30' });
     expect(wallClockIn('2027-01-05T00:00:00Z', 'UTC')).toEqual({ date: '2027-01-05', time: '00:00' });
   });
 
-  it('reads the device clock for a zone the runtime does not know', () => {
-    const at = new Date(2027, 0, 5, 18, 7);
-    expect(wallClockIn(at, 'Not/AZone')).toEqual({ date: '2027-01-05', time: '18:07' });
+  it('reads nothing for a zone the runtime does not know (never the device clock)', () => {
+    expect(wallClockIn(new Date(2027, 0, 5, 18, 7), 'Not/AZone')).toBeNull();
   });
 
   it('formats a wall date on its own day in every device zone', () => {

@@ -273,8 +273,11 @@ unchanged.
   `Date` only carries the field being picked (`practice-schedule.ts#pickerDateFor`, device-local
   noon, and `pickerTimeFor`, a fixed mid-January day when no zone changes its clocks, so every
   HH:MM exists on it). A change goes out as `startDate` + `startTime`; the API turns it into an
-  instant with its daylight-saving rule (above). When the practice's clock is not the device's (at
-  its start or now), a note names the zone with a name that holds all year (`formatTimeZoneLabel`:
+  instant with its daylight-saving rule (above). A zone the device's runtime does not know (newer
+  zone data on the server) offers no date or time, with a note saying so, rather than showing the
+  device's clock as the practice's; the other fields still save. The client's start-window check
+  counts days from today in the practice's zone. When the practice's clock is not the device's (at
+  its start, now, or on the date picked), a note names the zone with a name that holds all year (`formatTimeZoneLabel`:
   "Eastern Time", or the IANA name where the runtime has no generic names). The app never turns a
   wall time into an instant: the earlier build did that on the device and three review rounds
   found daylight-saving bugs in it (#1049). Before #1051 the date and time were editable only when
