@@ -397,8 +397,10 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
   - The player-email field appears only after **Yes**; the form will not submit
     until the age question is answered. (5) **No** hides and clears the player
     email, requires a valid parent email and shows the "Players under 13 don't
-    get their own login" hint; the player is rostered "Not invited" and only the
-    parent is emailed. The answer is not sent to the API.
+    get their own login" hint; the player is rostered "Parent invited" (#1082;
+    "Parent connected" once the parent accepts) and only the parent is emailed.
+    The row menu then reads "Parents & guardians", not "Invite a parent". The
+    answer is not sent to the API.
   - Maestro: `.maestro/roster-management.yaml`, `.maestro/roster-invite-status.yaml`.
 - **Notes:** Per `POST /api/v1/teams/:teamId/players` (unified endpoint; the
   old managed-players route and the create-and-invite arm were removed in #418).

@@ -157,8 +157,9 @@ appId: com.bballtracker.mobile
     id: "add-player-submit"
 - scrollUntilVisible:
     element:
-      text: "E2E Under13 Player status: Not invited"
+      text: "E2E Under13 Player status: Parent invited"
     direction: DOWN
     timeout: 10000
-# No player email went out: the row is a roster-only managed player
-- assertVisible: "E2E Under13 Player status: Not invited"
+# No player email went out, but the parent's invitation did: the chip says so
+# instead of "Not invited" (#1082).
+- assertVisible: "E2E Under13 Player status: Parent invited"

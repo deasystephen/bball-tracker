@@ -655,7 +655,10 @@
       "active": "Active",
       "invited": "Invited",
       "inviteExpired": "Invite expired",
-      "notInvited": "Not invited"
+      "notInvited": "Not invited",
+      "parentInvited": "Parent invited",
+      "parentInviteExpired": "Parent invite expired",
+      "parentConnected": "Parent connected"
     },
     "emailIssue": {
       "bounced": "Email bounced",

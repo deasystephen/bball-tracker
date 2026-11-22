@@ -50,7 +50,19 @@ eng-review amendments recorded there).
   callers without `canManageRoster` (same rule as member emails). Chip derivation: Active =
   `player.isManaged === false` (claimed via login) **or** latest invitation ACCEPTED (web-link
   accepters never clear `isManaged`); Invited = PENDING unexpired; Invite expired = PENDING past
-  `expiresAt` (client-computed); Not invited = everything else. Existing-account pending invites
+  `expiresAt` (client-computed); Not invited = everything else. **The guardian path has its own
+  three states (#1082):** a child under 13 has no invitation of their own, so without them every
+  child added with a parent email read "Not invited" although the parent's email had gone out.
+  The same payload carries, for roster managers only, `guardianInvitations` (PENDING
+  `GuardianInvitation` rows of rostered players: `id`, `playerId`, `status`, `expiresAt`,
+  `createdAt`; never the invited address or the token) and `guardianLinkedPlayerIds` (players
+  with at least one `Guardian` row). Both are read on the member's player in the same query
+  (`ROSTER_PLAYER_SELECT`) and lifted out in `getTeamById`, so no player object carries them for
+  any caller. With no invitation of the player's own: a linked parent = Parent connected; a live
+  PENDING guardian invitation = Parent invited; only lapsed ones = Parent invite expired. The
+  player's own invitation wins when there is one. In those three states the row menu's "Invite a
+  parent" reads "Parents & guardians" (same screen, which holds Resend), and "Send invitation"
+  is still offered when the player has an address. Existing-account pending invites
   (case 3, no member row) render client-side from `GET /invitations?teamId=`, deduped against
   `members[]` by `playerId`.
 - **Resend = supersede:** `POST /teams/:id/invitations { playerId, supersede: true }` expires the

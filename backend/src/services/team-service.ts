@@ -107,6 +107,18 @@ const ROSTER_PLAYER_SELECT = {
   ...USER_SUMMARY_WITH_EMAIL_SELECT,
   emailSuppressedAt: true,
   emailSuppressedReason: true,
+  // The guardian path's invite state (#1082): a child under 13 has no
+  // invitation of their own, the parent has one. Read here so the roster chip
+  // can say "Parent invited"; `getTeamById` lifts both out of the player
+  // object into `guardianInvitations` / `guardianLinkedPlayerIds`, for roster
+  // managers only. Never select `token` or `invitedEmail`.
+  guardiansAsChild: { select: { id: true }, take: 1 },
+  guardianInvitationsAsChild: {
+    where: { status: 'PENDING' },
+    select: { id: true, status: true, expiresAt: true, createdAt: true },
+    orderBy: { createdAt: 'desc' as const },
+    take: 5,
+  },
 } satisfies Prisma.UserSelect;
 
 const TEAM_DETAIL_INCLUDE = {
@@ -223,6 +235,17 @@ export type TeamWithRelations = Prisma.TeamGetPayload<{ include: typeof TEAM_INC
 export type TeamDetail = Prisma.TeamGetPayload<{ include: typeof TEAM_DETAIL_INCLUDE }>;
 type TeamDetailMember = TeamDetail['members'][number];
 type RosterManagerOnlyField = 'email' | 'emailSuppressedAt' | 'emailSuppressedReason';
+/** Read with the roster player, returned at the top level of the payload, never on the player. */
+type GuardianStateField = 'guardiansAsChild' | 'guardianInvitationsAsChild';
+
+/** One pending parent/guardian invitation for a rostered player (#1082). No token, no address. */
+export interface RosterGuardianInvitation {
+  id: string;
+  playerId: string;
+  status: 'PENDING';
+  expiresAt: Date;
+  createdAt: Date;
+}
 const ROSTER_MANAGER_ONLY_FIELDS: readonly RosterManagerOnlyField[] = ['email', 'emailSuppressedAt', 'emailSuppressedReason'];
 
 /**
@@ -248,6 +271,13 @@ export function omitRosterManagerFields<T extends { email: string | null }>(
  */
 export type TeamDetailView = Omit<TeamDetail, 'members'> & {
   /**
+   * Pending parent/guardian invitations for rostered players, newest first per
+   * player (#1082). Roster managers only; empty for everyone else.
+   */
+  guardianInvitations: RosterGuardianInvitation[];
+  /** Rostered players with at least one linked parent/guardian. Roster managers only. */
+  guardianLinkedPlayerIds: string[];
+  /**
    * Whether this row is its lineage's latest team-season (#461,
    * `latestTeamSeasonId`): only that row may start the next season, so the
    * client offers "Start next season" only when this is true. Present only
@@ -257,7 +287,7 @@ export type TeamDetailView = Omit<TeamDetail, 'members'> & {
   isLatestInLineage?: boolean;
   members: Array<
     Omit<TeamDetailMember, 'player'> & {
-      player: Omit<TeamDetailMember['player'], RosterManagerOnlyField> &
+      player: Omit<TeamDetailMember['player'], RosterManagerOnlyField | GuardianStateField> &
         Partial<Pick<TeamDetailMember['player'], RosterManagerOnlyField>>;
     }
   >;
@@ -614,6 +644,27 @@ export class TeamService {
     const latest = managesStaff
       ? { isLatestInLineage: (await latestTeamSeasonId(prisma, team.lineageId)) === team.id }
       : {};
+    // The guardian state is read on each player and returned beside
+    // `invitations`, so no player object carries it for any caller (#1082).
+    const guardianInvitations: RosterGuardianInvitation[] = [];
+    const guardianLinkedPlayerIds: string[] = [];
+    const members = team.members.map(({ player, ...member }) => {
+      const { guardiansAsChild, guardianInvitationsAsChild, ...rosterPlayer } = player;
+      if (guardiansAsChild.length > 0) {
+        guardianLinkedPlayerIds.push(member.playerId);
+      }
+      for (const row of guardianInvitationsAsChild) {
+        guardianInvitations.push({
+          id: row.id,
+          playerId: member.playerId,
+          status: 'PENDING',
+          expiresAt: row.expiresAt,
+          createdAt: row.createdAt,
+        });
+      }
+      return { ...member, player: rosterPlayer };
+    });
+
     if (permissions.canManageRoster) {
       // Per the unification spec, the payload carries invite statuses for
       // ROSTERED players only; case-3 (existing-account, not-yet-member)
@@ -622,7 +673,10 @@ export class TeamService {
       return {
         ...team,
         ...latest,
+        members,
         invitations: team.invitations.filter((inv) => memberIds.has(inv.playerId)),
+        guardianInvitations,
+        guardianLinkedPlayerIds,
       };
     }
 
@@ -630,7 +684,9 @@ export class TeamService {
       ...team,
       ...latest,
       invitations: [],
-      members: team.members.map(({ player, ...member }) => ({
+      guardianInvitations: [],
+      guardianLinkedPlayerIds: [],
+      members: members.map(({ player, ...member }) => ({
         ...member,
         player: omitRosterManagerFields(player),
       })),

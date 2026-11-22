@@ -137,6 +137,7 @@ const MENU_LABELS = [
   'Send invitation',
   'Cancel invitation',
   'Invite a parent',
+  'Parents & guardians',
   'Edit jersey & position',
   'Remove player',
 ];
@@ -209,6 +210,42 @@ describe('ManagePlayersScreen — roster status and actions', () => {
         await i18n.changeLanguage('en');
       });
     }
+  });
+
+  it('a child added with a parent email reads Parent invited, and its menu no longer offers a first invite (#1082)', () => {
+    mockTeam = {
+      ...baseTeam(),
+      members: [
+        makeMember('c-invited', 'Gus ParentInvited', true),
+        makeMember('c-expired', 'Hal ParentExpired', true),
+        makeMember('c-linked', 'Ivy ParentLinked', true),
+        makeMember('c-none', 'Jo NoParent', true),
+      ],
+      invitations: [],
+      guardianInvitations: [
+        { id: 'g-live', playerId: 'c-invited', status: 'PENDING', expiresAt: FUTURE, createdAt: PAST },
+        { id: 'g-old', playerId: 'c-expired', status: 'PENDING', expiresAt: PAST, createdAt: PAST },
+      ],
+      guardianLinkedPlayerIds: ['c-linked'],
+    };
+    const screen = render(<ManagePlayersScreen />);
+
+    expect(screen.getByText('Parent invited')).toBeTruthy();
+    expect(screen.getByText('Parent invite expired')).toBeTruthy();
+    expect(screen.getByText('Parent connected')).toBeTruthy();
+    expect(screen.getAllByText('Not invited')).toHaveLength(1);
+
+    // Invited, expired and linked all open the parents list (it holds Resend);
+    // none reads as if no parent had been invited.
+    for (const name of ['Gus ParentInvited', 'Hal ParentExpired', 'Ivy ParentLinked']) {
+      openMenu(screen, name);
+      expect(visibleMenuItems(screen)).toEqual(['Parents & guardians', 'Edit jersey & position', 'Remove player']);
+      closeMenu(screen);
+    }
+
+    // No parent at all: the first invite is still offered.
+    openMenu(screen, 'Jo NoParent');
+    expect(visibleMenuItems(screen)).toEqual(['Invite a parent', 'Edit jersey & position', 'Remove player']);
   });
 
   it('menu contents are contextual to the chip status', () => {

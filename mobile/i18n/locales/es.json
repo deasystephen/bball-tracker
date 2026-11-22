@@ -655,7 +655,10 @@
       "active": "Activo",
       "invited": "Invitado",
       "inviteExpired": "Invitación vencida",
-      "notInvited": "Sin invitar"
+      "notInvited": "Sin invitar",
+      "parentInvited": "Padre o tutor invitado",
+      "parentInviteExpired": "Invitación del padre o tutor vencida",
+      "parentConnected": "Padre o tutor vinculado"
     },
     "emailIssue": {
       "bounced": "Correo rebotado",
