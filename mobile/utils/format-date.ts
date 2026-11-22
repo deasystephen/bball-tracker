@@ -125,6 +125,76 @@ export function formatZoneName(value: Date | string, timeZone: string): string {
   }
 }
 
+/** A wall-clock reading: local date "YYYY-MM-DD" and local time "HH:MM". */
+export interface WallClock {
+  date: string;
+  time: string;
+}
+
+/**
+ * What the wall clock in `timeZone` reads at `value` ("2030-03-12", "18:00"),
+ * the starting point of the practice edit form (#1051). This only reads a
+ * clock: one instant has exactly one reading in every zone. The reverse (a
+ * reading to an instant, which a daylight-saving gap or repeated hour makes
+ * ambiguous) is the server's job, never the app's. A zone the runtime does
+ * not know reads the device clock.
+ */
+export function wallClockIn(value: Date | string, timeZone: string): WallClock {
+  const instant = toDate(value);
+  const options: Intl.DateTimeFormatOptions = {
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  };
+  let parts: Intl.DateTimeFormatPart[];
+  try {
+    parts = new Intl.DateTimeFormat('en-US', { ...options, timeZone }).formatToParts(instant);
+  } catch {
+    parts = new Intl.DateTimeFormat('en-US', options).formatToParts(instant);
+  }
+  const field = (type: Intl.DateTimeFormatPartTypes): string => parts.find((p) => p.type === type)?.value ?? '00';
+  // Some engines write midnight as "24" even with h23.
+  const hour = field('hour') === '24' ? '00' : field('hour');
+  return {
+    date: `${field('year').padStart(4, '0')}-${field('month')}-${field('day')}`,
+    time: `${hour}:${field('minute')}`,
+  };
+}
+
+/**
+ * A local calendar date "YYYY-MM-DD" (no zone) as a long date, e.g. "Tuesday,
+ * March 12, 2030" (the practice edit form, #1051). Formatted as that day at
+ * UTC noon in UTC, so no device zone can move it to another day.
+ */
+export function formatLongLocalDate(key: string): string {
+  const [year, month, day] = key.split('-').map((part) => Number(part));
+  return formatLongDate(new Date(Date.UTC(year, month - 1, day, 12)), { timeZone: 'UTC' });
+}
+
+/**
+ * A zone's name that holds all year, e.g. "Eastern Time" / "hora del este"
+ * (`longGeneric`), for a date and time that may fall on either side of a
+ * daylight-saving change (the practice edit form, #1051). A runtime without
+ * generic names, or one that only offers an offset ("GMT-5"), gets the IANA
+ * name with spaces ("America/New York").
+ */
+export function formatTimeZoneLabel(timeZone: string): string {
+  try {
+    const parts = new Intl.DateTimeFormat(deviceLocale(), {
+      timeZone,
+      timeZoneName: 'longGeneric',
+    } as Intl.DateTimeFormatOptions).formatToParts(new Date());
+    const name = parts.find((p) => p.type === 'timeZoneName')?.value;
+    if (name && !/^(GMT|UTC)[+-−]/.test(name)) return name;
+  } catch {
+    // fall through to the IANA name
+  }
+  return timeZone.replace(/_/g, ' ');
+}
+
 /** Short game date, e.g. "Sat, Oct 3" / "Sáb, 3 oct" (GameCard). Starts its label, so capitalized. */
 export function formatShortDate(value: Date | string, options: ZoneOption = {}): string {
   const locale = deviceLocale();

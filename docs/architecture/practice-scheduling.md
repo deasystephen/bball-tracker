@@ -251,8 +251,8 @@ unchanged.
   practices**, **Delete this practice** (a standalone practice gets Edit / Cancel / Delete
   practice). Edit opens `app/practices/[id]/edit.tsx?scope=one|series`, which sends only the
   changed fields; "all future" starts from the series' own fields (`GET /practice-series/:id`),
-  offers no date or time and says to cancel and recreate for that. A new start is sent without a
-  zone, so the session keeps its own. Cancel one asks for an optional reason inline; cancel series
+  offers no date or time and says to cancel and recreate for that. A new start is sent as local
+  `startDate` + `startTime` without a zone (#1051), so the API places it in the session's own zone. Cancel one asks for an optional reason inline; cancel series
   and delete confirm in a second `ActionMenu` that says what goes (upcoming sessions and their
   answers; past ones stay), then return to the schedule. A session of a cancelled series offers
   Cancel (while still scheduled) and Delete, never an edit (the API refuses edits to history, and
@@ -265,14 +265,22 @@ unchanged.
   `timezone` (`formatShortDate` / `formatLongDate` / `formatClockTime` take `{ timeZone }`); when it
   is not the device zone, the zone's short name follows the range ("6:00 PM – 7:30 PM EST"), so a
   traveller sees the coach's wall time and knows it is not theirs. An unknown zone name falls back
-  to the device zone instead of throwing. The recurrence line names the zone the same way. The edit
-  form changes the date and time only when the device's clock shows the practice's own wall time
-  (`isOtherTimeZone` false at its start): the pickers then edit the device-local start, as on the
-  create form. Otherwise it shows the time in the practice's zone and says to cancel and reschedule
-  (or edit from a device in that zone); a new start that lands on a day the two zones disagree
-  (daylight saving) is refused rather than saved an hour off. Converting wall times between zones
-  on the device was tried during review and kept meeting gaps and repeated hours, so it is not
-  done; a traveling coach who must move a practice is the case this leaves out.
+  to the device zone instead of throwing. The recurrence line names the zone the same way.
+  **The edit form works in the practice's wall time from any device zone (#1051).** It starts from
+  what the practice's clock reads at its start (`format-date.ts#wallClockIn`, instant to wall
+  clock, which is never ambiguous), shows that date and time (`formatLongLocalDate`,
+  `formatWallClock`), and the `DateTimePickerSheet` pickers edit them as plain fields: the picker's
+  `Date` only carries the field being picked (`practice-schedule.ts#pickerDateFor`, device-local
+  noon, and `pickerTimeFor`, a fixed mid-January day when no zone changes its clocks, so every
+  HH:MM exists on it). A change goes out as `startDate` + `startTime`; the API turns it into an
+  instant with its daylight-saving rule (above). When the practice's clock is not the device's (at
+  its start or now), a note names the zone with a name that holds all year (`formatTimeZoneLabel`:
+  "Eastern Time", or the IANA name where the runtime has no generic names). The app never turns a
+  wall time into an instant: the earlier build did that on the device and three review rounds
+  found daylight-saving bugs in it (#1049). Before #1051 the date and time were editable only when
+  the device showed the practice's own wall time; **the mobile change must not reach devices by
+  OTA before the backend that accepts `startDate` + `startTime` is deployed** (an older API answers
+  400 to the new body).
 - **Hooks** (`hooks/usePractices.ts`, keys `hooks/query-keys.ts#practiceKeys`): every schedule
   mutation invalidates `practiceKeys.all`; an availability answer only that practice's detail and
   answers (list rows carry none); delete and series cancel mark the per-session queries (detail,
@@ -286,9 +294,11 @@ unchanged.
   opens each team's schedule); a series overview screen; editing a series' days or times (the API
   does not support it); notifications (#332).
 - **Tests**: `__tests__/app/practices.test.tsx` (schedule merge and gating, guardian answers for two
-  children, coach menu and both cancels, create bodies, both edit scopes, Spanish),
+  children, coach menu and both cancels, create bodies, both edit scopes, Spanish, and a practice in
+  a zone that is not the device's moved across a daylight-saving change and sent as wall time; the
+  suite passes under any `TZ`),
   `__tests__/hooks/usePractices.runtime.test.tsx`, `__tests__/utils/practice-schedule.test.ts` (zones,
-  DST, merge, validation), the way-back cases in `__tests__/app/error-state-way-back.test.tsx`.
+  DST, merge, validation, `wallClockIn` and the picker carriers), the way-back cases in `__tests__/app/error-state-way-back.test.tsx`.
   Maestro `.maestro/practice-schedule.yaml` (create a weekly series of three, cancel one); the seed
   removes practices titled with `FLOW_CREATED_PRACTICE_TITLES`. E2E: D.11–D.13 in
   `docs/testing/e2e-test-plan-v2.0.md`.

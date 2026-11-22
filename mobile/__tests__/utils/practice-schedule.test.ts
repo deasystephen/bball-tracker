@@ -10,6 +10,8 @@ import {
   toLocalDateKey,
   toLocalTimeKey,
   combineDateAndTime,
+  pickerDateFor,
+  pickerTimeFor,
   calendarDaysBetween,
   validateRecurrence,
   daysToOccurrence,
@@ -24,6 +26,9 @@ import {
   formatWeekdayName,
   formatZoneName,
   isOtherTimeZone,
+  formatLongLocalDate,
+  formatTimeZoneLabel,
+  wallClockIn,
 } from '../../utils/format-date';
 import { i18n } from '../../i18n';
 import type { Game } from '../../types/game';
@@ -217,6 +222,14 @@ describe('local date keys', () => {
     expect(toLocalTimeKey(combined)).toBe('18:30');
   });
 
+  it('carries a wall date and a wall time through the pickers unchanged (#1051)', () => {
+    expect(toLocalDateKey(pickerDateFor('2027-03-14'))).toBe('2027-03-14');
+    // 02:30 is skipped on 2027-03-14 in the US; the time carrier never sits on that day.
+    expect(toLocalTimeKey(pickerTimeFor('02:30'))).toBe('02:30');
+    expect(toLocalTimeKey(pickerTimeFor('00:00'))).toBe('00:00');
+    expect(toLocalTimeKey(pickerTimeFor('23:59'))).toBe('23:59');
+  });
+
   it('counts calendar days', () => {
     expect(calendarDaysBetween(new Date(2027, 0, 1, 23), new Date(2027, 0, 2, 1))).toBe(1);
     expect(calendarDaysBetween(new Date(2027, 0, 2), new Date(2027, 0, 1))).toBe(-1);
@@ -326,5 +339,33 @@ describe('practiceRespondents', () => {
 
   it('a coach who is neither gets nobody', () => {
     expect(practiceRespondents({ id: 'coach' }, team)).toEqual([]);
+  });
+});
+
+describe('wall clock in a practice zone (#1051)', () => {
+  it('reads what the zone\'s clock shows at an instant, on both sides of a change', () => {
+    expect(wallClockIn('2027-03-11T23:00:00Z', 'America/New_York')).toEqual({ date: '2027-03-11', time: '18:00' });
+    expect(wallClockIn('2027-03-16T22:00:00Z', 'America/New_York')).toEqual({ date: '2027-03-16', time: '18:00' });
+    // Both copies of the repeated hour read 01:30.
+    expect(wallClockIn('2027-11-07T05:30:00Z', 'America/New_York').time).toBe('01:30');
+    expect(wallClockIn('2027-11-07T06:30:00Z', 'America/New_York').time).toBe('01:30');
+    // Another day than UTC's.
+    expect(wallClockIn('2027-01-05T23:30:00Z', 'Asia/Tokyo')).toEqual({ date: '2027-01-06', time: '08:30' });
+    expect(wallClockIn('2027-01-05T00:00:00Z', 'UTC')).toEqual({ date: '2027-01-05', time: '00:00' });
+  });
+
+  it('reads the device clock for a zone the runtime does not know', () => {
+    const at = new Date(2027, 0, 5, 18, 7);
+    expect(wallClockIn(at, 'Not/AZone')).toEqual({ date: '2027-01-05', time: '18:07' });
+  });
+
+  it('formats a wall date on its own day in every device zone', () => {
+    expect(formatLongLocalDate('2027-03-16')).toBe('Tuesday, March 16, 2027');
+  });
+
+  it('names a zone without a season, or falls back to its IANA name', () => {
+    const label = formatTimeZoneLabel('America/New_York');
+    expect(label === 'Eastern Time' || label === 'America/New York').toBe(true);
+    expect(formatTimeZoneLabel('Not/A_Zone')).toBe('Not/A Zone');
   });
 });

@@ -14,7 +14,14 @@ import PracticeDetailScreen from '../../app/practices/[id]/index';
 import CreatePracticeScreen from '../../app/practices/create';
 import EditPracticeScreen from '../../app/practices/[id]/edit';
 import { useAuthStore } from '../../store/auth-store';
-import { deviceTimeZone } from '../../utils/format-date';
+import {
+  deviceTimeZone,
+  formatLongLocalDate,
+  formatTimeZoneLabel,
+  isOtherTimeZone,
+  wallClockIn,
+} from '../../utils/format-date';
+import { pickerDateFor, pickerTimeFor, toLocalDateKey, toLocalTimeKey } from '../../utils/practice-schedule';
 import { i18n } from '../../i18n';
 import type { Practice, PracticeAvailability, PracticeSeries } from '../../types/practice';
 import type { Game } from '../../types/game';
@@ -617,30 +624,117 @@ describe('edit practice', () => {
     expect(mockUpdateOne).toHaveBeenCalledWith({ practiceId: 'p1', data: { location: 'Gym B', durationMinutes: 60 } });
   });
 
-  it('edits the date and time when the device shows the practice zone\'s time', async () => {
+  it('sends a new date as the practice\'s own wall date, with no instant and no zone', async () => {
     mockParams = { id: 'p1', scope: 'one' };
     mockPractice = practice({ timezone: deviceTimeZone() ?? 'UTC' });
     const view = render(<EditPracticeScreen />);
+    // The date picker opens on the practice's day; a week later is picked.
     const sheet = view.UNSAFE_getByProps({ mode: 'date' });
-    // Same time of day, a week later.
-    const later = new Date(new Date(mockPractice.startsAt).getTime() + 7 * 86_400_000);
+    const wall = wallClockIn(mockPractice.startsAt, mockPractice.timezone);
+    const later = pickerDateFor(wall.date);
+    later.setDate(later.getDate() + 7);
     await act(async () => {
       sheet.props.onConfirm(later);
     });
     await act(async () => {
       fireEvent.press(view.getByTestId('practice-edit-save'));
     });
-    const sent = mockUpdateOne.mock.calls[0][0].data.startsAt as string;
-    expect(new Date(sent).getTime() - new Date(mockPractice.startsAt).getTime()).toBeGreaterThan(6 * 86_400_000);
+    expect(mockUpdateOne).toHaveBeenCalledWith({
+      practiceId: 'p1',
+      data: { startDate: toLocalDateKey(later), startTime: wall.time },
+    });
+    // The device's zone is the practice's: nothing to name.
+    expect(view.queryByTestId('practice-edit-zone')).toBeNull();
   });
 
-  it('shows a practice in another zone at its own time and does not offer to move it', () => {
-    mockParams = { id: 'p1', scope: 'one' };
-    const other = deviceTimeZone() === 'Asia/Tokyo' ? 'Europe/Paris' : 'Asia/Tokyo';
-    mockPractice = practice({ timezone: other, startsAt: other === 'Asia/Tokyo' ? '2026-12-01T09:00:00Z' : '2026-12-01T17:00:00Z' });
-    const view = render(<EditPracticeScreen />);
-    expect(view.queryByTestId('practice-date-button')).toBeNull();
-    expect(view.getByTestId('practice-edit-no-time').props.children).toMatch(/at 6:00\sPM .*cancel it and schedule a new one/);
+  describe('a practice in another zone, moved across a daylight-saving change (#1051)', () => {
+    // A practice zone whose clock is not the device's on these dates: New York
+    // (clocks go forward 2027-03-14) unless the device shows its time, else
+    // London (2027-03-28). Each case moves 18:00 local from before the change
+    // to after it, where the zone's offset differs.
+    const NEW_YORK = { zone: 'America/New_York', stored: '2027-03-11T23:00:00Z', to: '2027-03-16' };
+    const LONDON = { zone: 'Europe/London', stored: '2027-03-25T18:00:00Z', to: '2027-03-30' };
+    const otherZone = () =>
+      isOtherTimeZone(NEW_YORK.zone, NEW_YORK.stored) && isOtherTimeZone(NEW_YORK.zone, '2027-03-16T22:00:00Z')
+        ? NEW_YORK
+        : LONDON;
+
+    beforeEach(() => {
+      // Only the clock is pinned, inside the API's window; timers stay real.
+      jest.useFakeTimers({
+        now: new Date('2027-02-01T12:00:00Z'),
+        doNotFake: [
+          'setTimeout',
+          'clearTimeout',
+          'setInterval',
+          'clearInterval',
+          'setImmediate',
+          'clearImmediate',
+          'nextTick',
+          'queueMicrotask',
+        ],
+      });
+    });
+    afterEach(() => jest.useRealTimers());
+
+    it('shows and edits the practice\'s wall time, names its zone, and sends local date and time', async () => {
+      const zoneCase = otherZone();
+      mockParams = { id: 'p1', scope: 'one' };
+      mockPractice = practice({ timezone: zoneCase.zone, startsAt: zoneCase.stored });
+      const view = render(<EditPracticeScreen />);
+
+      // 18:00 in the practice's zone, whatever the device's clock says.
+      expect(view.getByLabelText(/^Start time: 6:00\sPM$/)).toBeTruthy();
+      expect(view.getByTestId('practice-edit-zone').props.children).toBe(
+        `Date and time are in the practice's time zone, ${formatTimeZoneLabel(zoneCase.zone)}.`
+      );
+
+      // Move it past the change, and to 19:30.
+      await act(async () => {
+        view.UNSAFE_getByProps({ mode: 'date' }).props.onConfirm(pickerDateFor(zoneCase.to));
+      });
+      await act(async () => {
+        fireEvent.press(view.getByTestId('practice-time-button'));
+      });
+      await act(async () => {
+        view.UNSAFE_getByProps({ mode: 'time' }).props.onConfirm(pickerTimeFor('19:30'));
+      });
+      expect(view.getByLabelText(/^Start time: 7:30\sPM$/)).toBeTruthy();
+      expect(view.getByLabelText(`Date: ${formatLongLocalDate(zoneCase.to)}`)).toBeTruthy();
+
+      await act(async () => {
+        fireEvent.press(view.getByTestId('practice-edit-save'));
+      });
+      // Wall time only: the API places it in the practice's zone with that day's offset.
+      expect(mockUpdateOne).toHaveBeenCalledWith({
+        practiceId: 'p1',
+        data: { startDate: zoneCase.to, startTime: '19:30' },
+      });
+    });
+
+    it('opens the time picker on the practice\'s wall time, not the device\'s', async () => {
+      const zoneCase = otherZone();
+      mockParams = { id: 'p1', scope: 'one' };
+      mockPractice = practice({ timezone: zoneCase.zone, startsAt: zoneCase.stored });
+      const view = render(<EditPracticeScreen />);
+      await act(async () => {
+        fireEvent.press(view.getByTestId('practice-time-button'));
+      });
+      const value = view.UNSAFE_getByProps({ mode: 'time' }).props.value as Date;
+      expect(toLocalTimeKey(value)).toBe('18:00');
+    });
+
+    it('sends no start when only the notes change', async () => {
+      const zoneCase = otherZone();
+      mockParams = { id: 'p1', scope: 'one' };
+      mockPractice = practice({ timezone: zoneCase.zone, startsAt: zoneCase.stored });
+      const view = render(<EditPracticeScreen />);
+      fireEvent.changeText(view.getByTestId('practice-notes-input'), 'Bring water');
+      await act(async () => {
+        fireEvent.press(view.getByTestId('practice-edit-save'));
+      });
+      expect(mockUpdateOne).toHaveBeenCalledWith({ practiceId: 'p1', data: { notes: 'Bring water' } });
+    });
   });
 
   it('refuses up front to edit a practice that is cancelled', () => {
