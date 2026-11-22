@@ -535,7 +535,9 @@ export class StaffInvitationService {
     userId: string,
     found?: StaffInvitationSummary
   ): Promise<AcceptStaffInvitationResult> {
-    const invitation = found ?? (await this.requireInvitedUser(invitationId, userId));
+    // `found` is trusted only as the dispatch's row for this id (#1038).
+    const invitation =
+      found && found.id === invitationId ? found : await this.requireInvitedUser(invitationId, userId);
     return this.accept(invitation, userId);
   }
 
@@ -550,7 +552,9 @@ export class StaffInvitationService {
     userId: string,
     found?: StaffInvitationSummary
   ): Promise<DeclinedStaffInvitation> {
-    const invitation = found ?? (await this.requireInvitedUser(invitationId, userId));
+    // `found` is trusted only as the dispatch's row for this id (#1038).
+    const invitation =
+      found && found.id === invitationId ? found : await this.requireInvitedUser(invitationId, userId);
     if (invitation.status !== 'PENDING') {
       throw new BadRequestError(`Cannot reject invitation with status: ${invitation.status}`);
     }

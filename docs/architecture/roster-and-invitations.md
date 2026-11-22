@@ -307,7 +307,9 @@ for every address match and the address stored trimmed and lower-cased; the shar
     removing a league admin row (`LeagueService.removeLeagueAdmin`, #1038) does the same on every
     team of that league, in the removal's transaction and behind the former admin's `User` row lock,
     which a staff invite takes on its inviter, so an invite in flight is either cancelled or refused,
-    and a head coach of one of those teams keeps that team's invitations); refuses
+    and a head coach of one of those teams keeps that team's invitations; an accept already past its
+    inviter re-check when the removal commits can still land, as one that committed just before it
+    would); refuses
     an invitation whose team-season is no longer its lineage's latest (the staff row would land on
     last season's team; a season rollover moves the team's PENDING staff invitations onto the new
     team-season, and cancels the ones whose sender cannot manage the new team-season's staff, so

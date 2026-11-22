@@ -1605,6 +1605,12 @@ export class TeamService {
           if (!(await lockTeamRow(tx, teamId))) {
             throw new NotFoundError('Team not found');
           }
+          // The requester's right again behind the team lock, as the staff
+          // invite does: a head coach removed or demoted while this request
+          // was in flight (that change holds the same lock) adds nobody.
+          if (!(await canManageStaff(requestingUserId, teamId, tx))) {
+            throw new ForbiddenError('You do not have permission to manage team staff');
+          }
           const staffNow = await tx.teamStaff.findUnique({
             where: { teamId_userId: { teamId, userId: user.id } },
             select: { id: true },

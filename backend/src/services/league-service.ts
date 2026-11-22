@@ -489,11 +489,14 @@ export class LeagueService {
     // One transaction (#1038): remove the row, then cancel the PENDING staff
     // invitations the former admin sent on this league's teams wherever they
     // can no longer manage staff (a head coach there keeps theirs), as staff
-    // removal and demotion do. Accept re-checks the inviter anyway; this keeps
-    // the pending lists honest. The former admin's `User` row is locked first:
-    // a staff invite locks its inviter's row before its own `canManageStaff`
-    // re-check and insert, so an invite in flight either commits first (its
-    // row is cancelled here) or re-checks after this commit and is refused.
+    // removal and demotion do; this keeps the pending lists honest, and an
+    // accept that starts after this commit refuses the row anyway. An accept
+    // already past its inviter re-check when this commits can still land,
+    // like one that committed just before the removal. The former admin's
+    // `User` row is locked first: a staff invite locks its inviter's row
+    // before its own `canManageStaff` re-check and insert, so an invite in
+    // flight either commits first (its row is cancelled here) or re-checks
+    // after this commit and is refused.
     const cancelledStaffInvitations = await prisma.$transaction(async (tx) => {
       await lockUsers(tx, [adminUserId]);
       // 404 rather than a Prisma P2025 → 500 when no such row

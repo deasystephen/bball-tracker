@@ -1357,6 +1357,21 @@ describe('GuardianService', () => {
       expect(mockPrisma.user.findUnique).not.toHaveBeenCalled();
     });
 
+    it('rejectInvitation ignores a found row for another id and runs the addressee check (#1038)', async () => {
+      (mockPrisma.guardianInvitation.findUnique as jest.Mock).mockResolvedValue(invitationRow());
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({ email: 'someone-else@test.com' });
+
+      await expect(
+        GuardianService.rejectInvitation(
+          'inv-1',
+          'parent-1',
+          invitationRow({ id: 'inv-other' }) as unknown as Parameters<typeof GuardianService.rejectInvitation>[2]
+        )
+      ).rejects.toMatchObject({ statusCode: 403 });
+      expect(mockPrisma.guardianInvitation.findUnique).toHaveBeenCalled();
+      expect(mockPrisma.guardianInvitation.update).not.toHaveBeenCalled();
+    });
+
     it('acceptInvitation with the row the route already found does not read it again (#1038)', async () => {
       (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(null);
 

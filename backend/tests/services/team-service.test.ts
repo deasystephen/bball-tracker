@@ -1954,6 +1954,24 @@ describe('TeamService', () => {
         expect(mockPrisma.teamStaff.create).not.toHaveBeenCalled();
       });
 
+      it('answers 403 when the requester lost the right to manage staff before the team lock', async () => {
+        const fixture = given();
+        const base = (mockPrisma.user.findUnique as jest.Mock).getMockImplementation()!;
+        let adminReads = 0;
+        (mockPrisma.user.findUnique as jest.Mock).mockImplementation((args: { where: { id: string } }) => {
+          if (args.where.id === fixture.adminId && ++adminReads > 1) {
+            // Demoted from ADMIN meanwhile; no league admin row, no head coach row.
+            return Promise.resolve({ id: fixture.adminId, role: 'COACH', deletedAt: null });
+          }
+          return base(args);
+        });
+        (mockPrisma.leagueAdmin.findUnique as jest.Mock).mockResolvedValue(null);
+        (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(null);
+
+        await expect(add(fixture)).rejects.toMatchObject({ statusCode: 403 });
+        expect(mockPrisma.teamStaff.create).not.toHaveBeenCalled();
+      });
+
       it('answers the already-staff 400 when a staff row appeared before the lock (an accept that committed first)', async () => {
         const fixture = given();
         (mockPrisma.teamStaff.findUnique as jest.Mock)
