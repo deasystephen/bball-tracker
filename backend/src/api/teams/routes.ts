@@ -25,6 +25,8 @@ import { createInvitationSchema, inviteGuardianSchema } from '../invitations/sch
 import { InvitationService } from '../../services/invitation-service';
 import { GuardianService } from '../../services/guardian-service';
 import { StaffInvitationService } from '../../services/staff-invitation-service';
+import { JoinLinkService } from '../../services/join-link-service';
+import { createJoinLinkSchema } from '../join/schemas';
 import { omitToken } from '../invitations/serializers';
 import { AnnouncementService } from '../../services/announcement-service';
 import { validateUuidParams } from '../middleware/validate-params';
@@ -423,6 +425,114 @@ router.patch('/:id/players/:playerId', validateUuidParams('id', 'playerId'), asy
     respondWithError(res, error, { log: 'Error updating team member', fallback: 'Failed to update team member' });
   }
 });
+
+// ============================================
+// Join link Routes (#210)
+// ============================================
+
+/**
+ * GET /api/v1/teams/:teamId/join-link
+ * The team's live join link for roster managers (403 otherwise), or
+ * `link: null`. `link.url` carries the bearer token: it is what the coach
+ * shares. It appears on no other response.
+ */
+router.get('/:teamId/join-link', validateUuidParams('teamId'), async (req, res) => {
+  try {
+    const link = await JoinLinkService.getLink(req.params.teamId as string, req.user!.id);
+    res.json({ success: true, link });
+  } catch (error) {
+    respondWithError(res, error, { log: 'Error getting join link', fallback: 'Failed to get join link' });
+  }
+});
+
+/**
+ * POST /api/v1/teams/:teamId/join-link
+ * Create the team's join link; the live one, if any, is revoked in the same
+ * transaction (this is Rotate). Body: { expiresInDays?, maxUses? }.
+ */
+router.post('/:teamId/join-link', validateUuidParams('teamId'), async (req, res) => {
+  try {
+    const validationResult = createJoinLinkSchema.safeParse(req.body ?? {});
+    if (!validationResult.success) {
+      throw new BadRequestError(
+        validationResult.error.issues.map((e: { message: string }) => e.message).join(', ')
+      );
+    }
+    const link = await JoinLinkService.createLink(req.params.teamId as string, validationResult.data, req.user!.id);
+    res.status(201).json({ success: true, link });
+  } catch (error) {
+    respondWithError(res, error, { log: 'Error creating join link', fallback: 'Failed to create join link' });
+  }
+});
+
+/**
+ * POST /api/v1/teams/:teamId/join-link/revoke
+ * Revoke every live join link of the team. Requests already waiting stay.
+ */
+router.post('/:teamId/join-link/revoke', validateUuidParams('teamId'), async (req, res) => {
+  try {
+    const result = await JoinLinkService.revokeLinks(req.params.teamId as string, req.user!.id);
+    res.json({ success: true, ...result });
+  } catch (error) {
+    respondWithError(res, error, { log: 'Error revoking join link', fallback: 'Failed to revoke join link' });
+  }
+});
+
+/**
+ * GET /api/v1/teams/:teamId/join-requests
+ * Pending join requests, oldest first. Roster managers only (403 otherwise).
+ */
+router.get('/:teamId/join-requests', validateUuidParams('teamId'), async (req, res) => {
+  try {
+    const requests = await JoinLinkService.listRequests(req.params.teamId as string, req.user!.id);
+    res.json({ success: true, requests });
+  } catch (error) {
+    respondWithError(res, error, { log: 'Error listing join requests', fallback: 'Failed to list join requests' });
+  }
+});
+
+/**
+ * POST /api/v1/teams/:teamId/join-requests/:requestId/approve
+ * Approve a pending request: this is where the roster is written (the
+ * requester as a member, or a managed child plus the guardian link).
+ */
+router.post(
+  '/:teamId/join-requests/:requestId/approve',
+  validateUuidParams('teamId', 'requestId'),
+  async (req, res) => {
+    try {
+      const result = await JoinLinkService.approveRequest(
+        req.params.teamId as string,
+        req.params.requestId as string,
+        req.user!.id
+      );
+      res.json({ success: true, ...result });
+    } catch (error) {
+      respondWithError(res, error, { log: 'Error approving join request', fallback: 'Failed to approve join request' });
+    }
+  }
+);
+
+/**
+ * POST /api/v1/teams/:teamId/join-requests/:requestId/decline
+ * Decline a pending request. Nothing is written to the roster.
+ */
+router.post(
+  '/:teamId/join-requests/:requestId/decline',
+  validateUuidParams('teamId', 'requestId'),
+  async (req, res) => {
+    try {
+      const request = await JoinLinkService.declineRequest(
+        req.params.teamId as string,
+        req.params.requestId as string,
+        req.user!.id
+      );
+      res.json({ success: true, request });
+    } catch (error) {
+      respondWithError(res, error, { log: 'Error declining join request', fallback: 'Failed to decline join request' });
+    }
+  }
+);
 
 // ============================================
 // Staff Routes (role matrix B2.3 / B2.7)

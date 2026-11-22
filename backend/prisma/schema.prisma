@@ -79,6 +79,13 @@ enum InvitationStatus {
   CANCELLED
 }
 
+// Who a join request (TeamJoinRequest, #210) is for: the account holder
+// themself, or a child the account holder is the parent/guardian of.
+enum JoinRequestKind {
+  SELF
+  CHILD
+}
+
 enum SubscriptionTier {
   FREE
   PREMIUM
@@ -143,21 +150,21 @@ model User {
   updatedAt             DateTime                @updatedAt
 
   // Relations
-  managedBy                  User?                @relation("ManagedPlayers", fields: [managedById], references: [id])
-  managedPlayers             User[]               @relation("ManagedPlayers")
+  managedBy                  User?                  @relation("ManagedPlayers", fields: [managedById], references: [id])
+  managedPlayers             User[]                 @relation("ManagedPlayers")
   teamMembers                TeamMember[]
   teamStaff                  TeamStaff[]
   gameEvents                 GameEvent[]
   refreshTokens              RefreshToken[]
-  sentInvitations            TeamInvitation[]     @relation("SentInvitations")
-  receivedInvitations        TeamInvitation[]     @relation("PlayerInvitations")
+  sentInvitations            TeamInvitation[]       @relation("SentInvitations")
+  receivedInvitations        TeamInvitation[]       @relation("PlayerInvitations")
   leagueAdmins               LeagueAdmin[]
   personalLeague             League?
-  guardiansAsParent          Guardian[]           @relation("GuardianParent")
-  guardiansAsChild           Guardian[]           @relation("GuardianChild")
-  guardianInvitationsAsChild GuardianInvitation[] @relation("GuardianInvitationChild")
-  sentGuardianInvitations    GuardianInvitation[] @relation("GuardianInvitationInviter")
-  sentStaffInvitations       StaffInvitation[]    @relation("StaffInvitationInviter")
+  guardiansAsParent          Guardian[]             @relation("GuardianParent")
+  guardiansAsChild           Guardian[]             @relation("GuardianChild")
+  guardianInvitationsAsChild GuardianInvitation[]   @relation("GuardianInvitationChild")
+  sentGuardianInvitations    GuardianInvitation[]   @relation("GuardianInvitationInviter")
+  sentStaffInvitations       StaffInvitation[]      @relation("StaffInvitationInviter")
   playerStats                PlayerStats[]
   gameRsvps                  GameRsvp[]
   pushTokens                 PushToken[]
@@ -165,6 +172,8 @@ model User {
   announcementReplies        AnnouncementReply[]
   calendarFeedTokens         CalendarFeedToken[]
   practiceAvailability       PracticeAvailability[]
+  createdJoinLinks           TeamJoinLink[]         @relation("JoinLinkCreator")
+  joinRequests               TeamJoinRequest[]      @relation("JoinRequester")
 
   @@index([email])
   @@index([role])
@@ -317,6 +326,8 @@ model Team {
   invitations         TeamInvitation[]
   guardianInvitations GuardianInvitation[]
   staffInvitations    StaffInvitation[]
+  joinLinks           TeamJoinLink[]
+  joinRequests        TeamJoinRequest[]
   teamStats           TeamStats[]
   announcements       Announcement[]
   calendarFeedTokens  CalendarFeedToken[]
@@ -505,6 +516,69 @@ model StaffInvitation {
 // =============================================================================
 // GAMES & EVENTS
 // =============================================================================
+
+/// A reusable, revocable link a coach shares so families add themselves
+/// (#210). Unlike the three invitation kinds it names nobody: anyone holding
+/// it may ASK to join, and a roster manager approves each request
+/// (TeamJoinRequest). `token` is a bearer secret: read it only through
+/// `JOIN_LINK_MANAGER_SELECT` (roster managers, who share it) and never on a
+/// team payload or a log line. At most one live link per team: creating one
+/// revokes the others behind the team row lock.
+model TeamJoinLink {
+  id          String    @id @default(uuid())
+  teamId      String
+  token       String    @unique
+  /// Null once the creating account is deleted (account-service purge).
+  createdById String?
+  expiresAt   DateTime
+  /// Cap on the join requests the link accepts; null = no cap.
+  maxUses     Int?
+  /// Join requests created through the link (approved or not).
+  useCount    Int       @default(0)
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  team      Team              @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  createdBy User?             @relation("JoinLinkCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  requests  TeamJoinRequest[]
+
+  @@index([teamId])
+}
+
+/// A signed-in adult's request to join a team through a TeamJoinLink (#210),
+/// pending until a roster manager approves or declines it. Approval writes the
+/// roster: SELF adds the requester as a TeamMember; CHILD creates a managed
+/// roster record named `childName` plus the Guardian link to the requester
+/// (children are roster records, never logins). `status` reuses
+/// InvitationStatus: ACCEPTED = approved, REJECTED = declined, EXPIRED =
+/// nobody decided it within JOIN_REQUEST_TTL_DAYS (lazy; CANCELLED is unused).
+/// Account deletion and the under-age un-claim delete the requester's rows
+/// outright.
+model TeamJoinRequest {
+  id           String                @id @default(uuid())
+  teamId       String
+  linkId       String
+  requesterId  String
+  kind         JoinRequestKind
+  /// CHILD only: the name the parent typed. Cleared when the request is
+  /// decided (approval copies it onto the roster record).
+  childName    String?
+  /// CHILD only.
+  relationship GuardianRelationship?
+  status       InvitationStatus      @default(PENDING)
+  decidedAt    DateTime?
+  createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @updatedAt
+
+  team      Team         @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  link      TeamJoinLink @relation(fields: [linkId], references: [id], onDelete: Cascade)
+  requester User         @relation("JoinRequester", fields: [requesterId], references: [id], onDelete: Cascade)
+
+  @@index([teamId, status])
+  @@index([requesterId])
+  @@index([linkId])
+}
 
 model Game {
   id        String     @id @default(uuid())

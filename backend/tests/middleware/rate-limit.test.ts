@@ -176,6 +176,15 @@ describe('skipGlobalApiLimit (#718)', () => {
     expect(skipGlobalApiLimit(req('GET', '/invitations/by-token/abcDEF_123-xyz'))).toBe(true);
   });
 
+  it('skips the public join link preview (#210), and only its GET', () => {
+    expect(skipGlobalApiLimit(req('GET', '/join/abcDEF_123-xyz'))).toBe(true);
+    expect(skipGlobalApiLimit(req('GET', '/join/abcDEF_123-xyz/'))).toBe(true);
+    expect(skipGlobalApiLimit(req('POST', '/join/abcDEF_123-xyz'))).toBe(false);
+    expect(skipGlobalApiLimit(req('GET', '/join'))).toBe(false);
+    expect(skipGlobalApiLimit(req('GET', '/teams/t1/join-link'))).toBe(false);
+    expect(skipGlobalApiLimit(req('GET', '/teams/t1/join-requests'))).toBe(false);
+  });
+
   it('does not skip the accept POST, other methods on the lookup, or any other route', () => {
     expect(skipGlobalApiLimit(req('POST', '/invitations/by-token/abc/accept'))).toBe(false);
     expect(skipGlobalApiLimit(req('GET', '/invitations/by-token/abc/accept'))).toBe(false);

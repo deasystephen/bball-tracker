@@ -125,6 +125,12 @@ Removing the last guardian never deletes the child.
   on the upgrade; now they serialise; the `PARENT` promotion is `updateMany({ where: { id,
   deletedAt: null } })` and zero rows aborts the transaction, so no `Guardian` row ever points at a
   tombstone.
+- **A join request's approval links a guardian without an invitation (#210).** When a parent asks
+  to add their child through a team join link and a roster manager approves, the child's managed
+  record is created with the `Guardian` link to that parent in the same transaction (`isPrimary`,
+  being the record's first link), and the parent's role follows the same derived rule through the
+  shared `GuardianService.promoteBareAccountToParent`. No `GuardianInvitation` row exists for it.
+  Detail: `roster-and-invitations.md`, Team join links.
 - **Other guardian routes.** `GET …/guardians` → `{ guardians: [{ id, userId, name, deletedAt, email?, relationship,
   isPrimary, createdAt }], pendingInvitations }` (roster managers or the child's guardians; `email` only for
   roster managers; each pending row carries `canResend`, see Resend above). `DELETE …/guardians/:guardianUserId` (roster manager, or the guardian removing themself).

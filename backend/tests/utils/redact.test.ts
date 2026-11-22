@@ -69,6 +69,23 @@ describe('redactPath', () => {
     );
     expect(redactPath('/invite/0123456789abcdef')).toBe(`/invite/${REDACTED}`);
   });
+  it('masks team join link tokens (#210): the API route and the web page', () => {
+    expect(redactPath('/api/v1/join/0123456789abcdef')).toBe(`/api/v1/join/${REDACTED}`);
+    expect(redactPath('/join/0123456789abcdef')).toBe(`/join/${REDACTED}`);
+    expect(redactUrl('https://hooplings.com/join/0123456789abcdef?src=web')).toBe(
+      `https://hooplings.com/join/${REDACTED}?src=web`
+    );
+    // Express routes case-insensitively, so the parent segment is matched that way too.
+    expect(redactPath('/api/v1/JOIN/0123456789abcdef')).toBe(`/api/v1/JOIN/${REDACTED}`);
+    expect(redactPath('/api/v1/invitations/By-Token/0123456789abcdef')).toBe(
+      `/api/v1/invitations/By-Token/${REDACTED}`
+    );
+    // The team-scoped management routes carry ids, not the token.
+    expect(redactPath('/api/v1/teams/t1/join-link/revoke')).toBe('/api/v1/teams/t1/join-link/revoke');
+    expect(redactPath('/api/v1/teams/t1/join-requests/0123456789abcdef/approve')).toBe(
+      '/api/v1/teams/t1/join-requests/0123456789abcdef/approve'
+    );
+  });
   it('does not mask known sub-resources or short segments', () => {
     expect(redactPath('/api/v1/teams/t1/calendar/subscribe')).toBe('/api/v1/teams/t1/calendar/subscribe');
     expect(redactPath('/api/v1/teams/t1/calendar/revoke')).toBe('/api/v1/teams/t1/calendar/revoke');

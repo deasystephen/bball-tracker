@@ -31,6 +31,7 @@
  *   │    PENDING team invitations → CANCELLED,                     │
  *   │    PENDING guardian + staff invitations → EXPIRED,           │
  *   │    every Guardian/StaffInvitation.invitedEmail → sentinel,   │
+ *   │    my join requests deleted, my join links un-owned (#210),  │
  *   │    personal league → neutral name (deleted when empty),      │
  *   │    managedById = me → null                                   │
  *   │ 4  count what still points at the row (USER_REFERENCE_SELECT) │
@@ -116,6 +117,8 @@ export const USER_REFERENCE_COUNT_SELECT = {
   announcementReplies: true,
   calendarFeedTokens: true,
   practiceAvailability: true,
+  createdJoinLinks: true,
+  joinRequests: true,
 } satisfies Prisma.UserCountOutputTypeSelect;
 
 /** The erasure check's select: the list-relation counts plus every one-to-one relation that points at the row. */
@@ -291,6 +294,11 @@ export class AccountService {
         where: { invitedById: userId, status: 'PENDING' },
         data: { status: 'CANCELLED' },
       });
+
+      // A join link (#210) outlives its creator: every request through it
+      // is approved by a current roster manager, so it grants nothing by
+      // itself. Un-own it so it does not keep the row as a tombstone.
+      await tx.teamJoinLink.updateMany({ where: { createdById: userId }, data: { createdById: null } });
 
       // D16: the personal league carries the coach's name.
       const personal = await tx.league.findUnique({
@@ -637,6 +645,8 @@ export class AccountService {
       sentGuardianInvitations,
       staffInvitations,
       sentStaffInvitations,
+      joinRequests,
+      createdJoinLinks,
       gameRsvps,
       practiceAvailability,
       gameEvents,
@@ -661,6 +671,8 @@ export class AccountService {
       prisma.guardianInvitation.findMany({ where: { invitedById: userId }, select: SENT_GUARDIAN_INVITATION_SELECT }),
       staffInvitationsQuery,
       prisma.staffInvitation.findMany({ where: { invitedById: userId }, select: SENT_STAFF_INVITATION_SELECT }),
+      prisma.teamJoinRequest.findMany({ where: { requesterId: userId }, select: JOIN_REQUEST_EXPORT_SELECT }),
+      prisma.teamJoinLink.findMany({ where: { createdById: userId }, select: CREATED_JOIN_LINK_EXPORT_SELECT }),
       prisma.gameRsvp.findMany({ where: { userId } }),
       prisma.practiceAvailability.findMany({ where: { userId } }),
       prisma.gameEvent.findMany({ where: { playerId: userId }, orderBy: { createdAt: 'asc' } }),
@@ -687,6 +699,8 @@ export class AccountService {
       sentGuardianInvitations,
       staffInvitations,
       sentStaffInvitations,
+      joinRequests,
+      createdJoinLinks,
       gameRsvps,
       practiceAvailability,
       gameEvents,
@@ -1353,6 +1367,9 @@ async function purgeLoginBindings(tx: Prisma.TransactionClient, userId: string):
     where: { playerId: userId, recipientHash: { not: null } },
     data: { recipientHash: null },
   });
+  // Join requests (#210) are the account's own asks, a pending one carrying a
+  // child's name it typed: none survive the login, whatever their status.
+  await tx.teamJoinRequest.deleteMany({ where: { requesterId: userId } });
 }
 
 /**
@@ -1472,6 +1489,29 @@ const SENT_STAFF_INVITATION_SELECT = {
   createdAt: true,
 } satisfies Prisma.StaffInvitationSelect;
 
+/** A join request the account sent (#210); `childName` is present only while it is pending. */
+const JOIN_REQUEST_EXPORT_SELECT = {
+  id: true,
+  teamId: true,
+  kind: true,
+  childName: true,
+  relationship: true,
+  status: true,
+  createdAt: true,
+  decidedAt: true,
+} satisfies Prisma.TeamJoinRequestSelect;
+
+/** A team join link the account created (#210). Never the token: it is the team's secret, not the person's data. */
+const CREATED_JOIN_LINK_EXPORT_SELECT = {
+  id: true,
+  teamId: true,
+  expiresAt: true,
+  maxUses: true,
+  useCount: true,
+  revokedAt: true,
+  createdAt: true,
+} satisfies Prisma.TeamJoinLinkSelect;
+
 /** The other side of a guardian link, in the shared user shape (#813). */
 const GUARDIAN_CHILD_EXPORT_INCLUDE = { child: { select: USER_SUMMARY_SELECT } } satisfies Prisma.GuardianInclude;
 const GUARDIAN_PARENT_EXPORT_INCLUDE = { parent: { select: USER_SUMMARY_SELECT } } satisfies Prisma.GuardianInclude;
@@ -1493,6 +1533,10 @@ export interface UserDataExport {
   /** Staff invitations sent to the account's address (#460). */
   staffInvitations: Prisma.StaffInvitationGetPayload<{ select: typeof STAFF_INVITATION_EXPORT_SELECT }>[];
   sentStaffInvitations: Prisma.StaffInvitationGetPayload<{ select: typeof SENT_STAFF_INVITATION_SELECT }>[];
+  /** Join requests the account sent through a team join link (#210). */
+  joinRequests: Prisma.TeamJoinRequestGetPayload<{ select: typeof JOIN_REQUEST_EXPORT_SELECT }>[];
+  /** Team join links the account created (#210), without their tokens. */
+  createdJoinLinks: Prisma.TeamJoinLinkGetPayload<{ select: typeof CREATED_JOIN_LINK_EXPORT_SELECT }>[];
   gameRsvps: Prisma.GameRsvpGetPayload<Record<string, never>>[];
   practiceAvailability: Prisma.PracticeAvailabilityGetPayload<Record<string, never>>[];
   gameEvents: Prisma.GameEventGetPayload<Record<string, never>>[];

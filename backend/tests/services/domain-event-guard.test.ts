@@ -48,6 +48,8 @@ const ALLOWED: Record<string, string> = {
     'derives Game.homeScore inside createEvent/deleteEvent, which log `Game event created` / `deleted`',
   'guardian-service.ts#promoteNextPrimary':
     'runs inside guardian unlink and account deletion, which log `Guardian unlinked` / the deletion',
+  'guardian-service.ts#promoteBareAccountToParent':
+    'derived PARENT role inside guardian accept and join-request approval, which log `Guardian linked` / `Join request approved`',
   'guardian-service.ts#findOrCreateParent':
     'provisions the invited adult for inviteGuardian (plain and Resend), which logs `Guardian invitation sent` with parentId',
   'team-service.ts#cancelSentStaffInvitations':

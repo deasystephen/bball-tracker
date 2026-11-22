@@ -149,6 +149,22 @@ export const mockPrisma = {
     updateMany: jest.fn(),
     deleteMany: jest.fn(),
   },
+  teamJoinLink: {
+    findUnique: jest.fn(),
+    findFirst: jest.fn(),
+    findMany: jest.fn(),
+    create: jest.fn(),
+    updateMany: jest.fn(),
+  },
+  teamJoinRequest: {
+    count: jest.fn(),
+    findFirst: jest.fn(),
+    findUniqueOrThrow: jest.fn(),
+    findMany: jest.fn(),
+    create: jest.fn(),
+    updateMany: jest.fn(),
+    deleteMany: jest.fn(),
+  },
   guardianInvitation: {
     findUnique: jest.fn(),
     findUniqueOrThrow: jest.fn(),

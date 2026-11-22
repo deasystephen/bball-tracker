@@ -179,6 +179,12 @@ describe('AccountService.deleteAccount', () => {
     }
     expect(mockPrisma.guardian.deleteMany).toHaveBeenCalledWith({ where: { parentId: USER_ID } });
     expect(mockPrisma.guardian.deleteMany).toHaveBeenCalledWith({ where: { childId: USER_ID } });
+    // Join links (#210): the account's own requests go, links it created are un-owned.
+    expect(mockPrisma.teamJoinRequest.deleteMany).toHaveBeenCalledWith({ where: { requesterId: USER_ID } });
+    expect(mockPrisma.teamJoinLink.updateMany).toHaveBeenCalledWith({
+      where: { createdById: USER_ID },
+      data: { createdById: null },
+    });
     expect(mockPrisma.teamInvitation.updateMany).toHaveBeenCalledWith({
       where: { playerId: USER_ID, status: 'PENDING' },
       data: { status: 'CANCELLED' },
@@ -577,7 +583,7 @@ describe('AccountService.exportUserData', () => {
     for (const model of [
       'teamMember', 'teamStaff', 'leagueAdmin', 'guardian', 'teamInvitation', 'guardianInvitation',
       'gameRsvp', 'gameEvent', 'playerStats', 'pushToken', 'calendarFeedToken', 'announcement', 'announcementReply',
-      'practiceAvailability',
+      'practiceAvailability', 'teamJoinRequest', 'teamJoinLink',
     ] as const) {
       (mockPrisma[model].findMany as jest.Mock).mockResolvedValue([]);
     }
@@ -590,7 +596,7 @@ describe('AccountService.exportUserData', () => {
         'announcementReplies', 'announcements', 'calendarFeedTokens', 'exportedAt', 'gameEvents', 'gameRsvps',
         'guardianInvitations', 'guardiansAsChild', 'guardiansAsParent', 'leagueAdmins', 'personalLeague', 'playerStats',
         'pushTokens', 'receivedInvitations', 'sentGuardianInvitations', 'sentInvitations', 'sentStaffInvitations', 'staffInvitations',
-        'teamMembers', 'teamStaff', 'user', 'practiceAvailability',
+        'teamMembers', 'teamStaff', 'user', 'practiceAvailability', 'joinRequests', 'createdJoinLinks',
       ].sort()
     );
     expect(data.user).not.toHaveProperty('workosUserId');

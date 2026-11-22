@@ -287,6 +287,14 @@ export default function PrivacyPolicyPage() {
             “Deleted user”, so that everyone else’s statistics stay correct.
           </li>
           <li>
+            <strong>Requests to join a team.</strong> When you ask to join a team through a team’s join link, we
+            keep the request (your account and, when you ask for your child, the child’s name and your relationship
+            to them) until a coach approves or declines it. When a coach approves, the name becomes the child’s
+            roster record; when a coach declines, the name is removed from the request. A request no coach has
+            answered lapses <strong>30 days</strong> after it was sent, and the name is removed from it the next
+            time the team’s list of requests is opened or you ask again. Deleting your account deletes your requests.
+          </li>
+          <li>
             Automated database backups keep the information as it was before the deletion for up to{' '}
             <strong>7 days</strong>. Backups are not edited. Snapshots of the database taken by hand before major
             maintenance are kept until we delete them.{' '}

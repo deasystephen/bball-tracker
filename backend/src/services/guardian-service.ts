@@ -970,6 +970,30 @@ export class GuardianService {
     }
   }
 
+  /**
+   * The derived-role rule for an account whose role is PLAYER and that just
+   * became a guardian: with no team memberships and no staff rows it becomes
+   * PARENT. Shared by the guardian accept and a join request's approval
+   * (#210); the caller has checked the role is PLAYER. Guarded on
+   * `deletedAt IS NULL` (#643): zero rows aborts the caller's transaction, so
+   * the Guardian row it just wrote is rolled back with it.
+   */
+  static async promoteBareAccountToParent(tx: Prisma.TransactionClient, parentId: string): Promise<void> {
+    const [memberships, staffRows] = await Promise.all([
+      tx.teamMember.count({ where: { playerId: parentId } }),
+      tx.teamStaff.count({ where: { userId: parentId } }),
+    ]);
+    if (memberships === 0 && staffRows === 0) {
+      const promoted = await tx.user.updateMany({
+        where: { id: parentId, deletedAt: null },
+        data: { role: 'PARENT' },
+      });
+      if (promoted.count === 0) {
+        throw new NotFoundError('Account not found');
+      }
+    }
+  }
+
   private static async accept(
     invitation: Prisma.GuardianInvitationGetPayload<object>,
     verifiedParentId?: string
@@ -1044,21 +1068,7 @@ export class GuardianService {
       // Role is derived: only a bare PLAYER account (no team memberships, no
       // staff rows) becomes PARENT. A coach who is also a parent stays COACH.
       if (parent.role === 'PLAYER') {
-        const [memberships, staffRows] = await Promise.all([
-          tx.teamMember.count({ where: { playerId: parentId } }),
-          tx.teamStaff.count({ where: { userId: parentId } }),
-        ]);
-        if (memberships === 0 && staffRows === 0) {
-          // Guarded on `deletedAt IS NULL` (#643); zero rows aborts the
-          // transaction, so the Guardian row above is rolled back with it.
-          const promoted = await tx.user.updateMany({
-            where: { id: parentId, deletedAt: null },
-            data: { role: 'PARENT' },
-          });
-          if (promoted.count === 0) {
-            throw new NotFoundError('Account not found');
-          }
-        }
+        await GuardianService.promoteBareAccountToParent(tx, parentId);
       }
 
       return {
