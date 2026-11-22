@@ -403,6 +403,12 @@ const ROLLOVER_SOURCE_SELECT = {
   },
 } satisfies Prisma.TeamSelect;
 
+/** The order that makes a lineage's first team-season its latest (#461); shared so every reader agrees. */
+export const LATEST_TEAM_SEASON_ORDER = [
+  { createdAt: 'desc' },
+  { id: 'desc' },
+] satisfies Prisma.TeamOrderByWithRelationInput[];
+
 /**
  * The id of the LATEST team-season of a lineage (#461): its most recently
  * created `Team` row (`createdAt` desc, then `id` desc so the answer is
@@ -420,7 +426,7 @@ export async function latestTeamSeasonId(
 ): Promise<string | null> {
   const row = await db.team.findFirst({
     where: { lineageId },
-    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    orderBy: LATEST_TEAM_SEASON_ORDER,
     select: { id: true },
   });
   return row?.id ?? null;
@@ -1479,24 +1485,27 @@ export class TeamService {
 
 
   /**
-   * Run after a staff row is removed or re-roled, inside that transaction:
-   * when the user can no longer manage the team's staff (`canManageStaff`,
-   * read through the transaction), the PENDING staff invitations they sent on
-   * it are cancelled (#460). Accept re-checks the inviter anyway; this keeps
-   * the pending lists honest. An admin who still manages staff keeps theirs.
+   * Run after a staff row is removed or re-roled, or a league admin row is
+   * removed (#1038), inside that transaction: when the user can no longer
+   * manage the team's staff (`canManageStaff`, read through the transaction),
+   * the PENDING staff invitations they sent on it are cancelled (#460).
+   * Accept re-checks the inviter anyway; this keeps the pending lists honest.
+   * A user who still manages staff (head coach, other admin row) keeps theirs.
+   * Returns how many were cancelled.
    */
-  private static async cancelSentStaffInvitations(
+  static async cancelSentStaffInvitations(
     tx: Prisma.TransactionClient,
     teamId: string,
     staffUserId: string
-  ): Promise<void> {
+  ): Promise<number> {
     if (await canManageStaff(staffUserId, teamId, tx)) {
-      return;
+      return 0;
     }
-    await tx.staffInvitation.updateMany({
+    const { count } = await tx.staffInvitation.updateMany({
       where: { teamId, invitedById: staffUserId, status: 'PENDING' },
       data: { status: 'CANCELLED' },
     });
+    return count;
   }
 
   /** Find the team's default role row for a role type (e.g. HEAD_COACH). */
@@ -1567,20 +1576,62 @@ export class TeamService {
       throw new BadRequestError('User is already a staff member of this team');
     }
 
-    // Add staff member; a lost race on @@unique([teamId, userId]) answers the
-    // pre-check's 400 (#727). The index is one role per user per team (#463),
-    // so a concurrent add with a different role is refused too. The retired
-    // [teamId, userId, roleId] name is accepted as well, for a database still
-    // carrying it (the #463 migration not yet applied, or applied part-way).
+    // The write (#1038), under the `User` row locks of the target AND the
+    // requester (one sorted statement, `lockUsers`), then the team lock:
+    // account deletion's user-then-team order, which a staff accept follows
+    // too. Every check is repeated behind those locks, the requester's right
+    // first so a caller who lost it learns nothing about the target:
+    //  - the requester's `canManageStaff`: a head coach removed or demoted
+    //    meanwhile (that change holds the team lock) or a league admin row
+    //    removed meanwhile (`removeLeagueAdmin` holds the former admin's user
+    //    lock) adds nobody;
+    //  - the target: a deletion that committed meanwhile is a 404; Add
+    //    Player's case-2 adoption takes the target's user lock before it marks
+    //    a row managed, so either it committed first and the managed record is
+    //    refused, or it waits and then sees this staff row and re-branches to
+    //    case 3;
+    //  - the staff row: the team lock serialises with a staff accept, so the
+    //    second of the two sees the other's row.
+    // A lost race on @@unique([teamId, userId]) still answers the pre-check's
+    // 400 (#727); the index is one role per user per team (#463), and the
+    // retired [teamId, userId, roleId] name is accepted for a database still
+    // carrying it.
     const teamStaff = await createOrConflict(
       () =>
-        prisma.teamStaff.create({
-          data: {
-            teamId,
-            userId: user.id,
-            roleId: role.id,
-          },
-          include: TEAM_STAFF_INCLUDE,
+        prisma.$transaction(async (tx) => {
+          const locked = await lockUsers(tx, [user.id, requestingUserId]);
+          if (!(await lockTeamRow(tx, teamId))) {
+            throw new NotFoundError('Team not found');
+          }
+          if (!(await canManageStaff(requestingUserId, teamId, tx))) {
+            throw new ForbiddenError('You do not have permission to manage team staff');
+          }
+          const target = locked.find((row) => row.id === user.id);
+          if (!target || target.deletedAt !== null) {
+            throw new StaffTargetNotFoundError();
+          }
+          const fresh = await tx.user.findUnique({
+            where: { id: user.id },
+            select: { workosUserId: true, isManaged: true },
+          });
+          if (fresh && fresh.workosUserId === null && fresh.isManaged) {
+            throw new StaffTargetNeedsInvitationError();
+          }
+          const staffNow = await tx.teamStaff.findUnique({
+            where: { teamId_userId: { teamId, userId: user.id } },
+            select: { id: true },
+          });
+          if (staffNow) {
+            throw new BadRequestError('User is already a staff member of this team');
+          }
+          return tx.teamStaff.create({
+            data: {
+              teamId,
+              userId: user.id,
+              roleId: role.id,
+            },
+            include: TEAM_STAFF_INCLUDE,
+          });
         }),
       'User is already a staff member of this team',
       { anyOf: ['TeamStaff_teamId_userId_key', 'TeamStaff_teamId_userId_roleId_key'] }

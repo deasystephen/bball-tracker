@@ -35,10 +35,10 @@ jest.mock('../../src/api/auth/middleware', () => ({
   }),
 }));
 
-import { Prisma } from '@prisma/client';
 import request from 'supertest';
 import { app, httpServer } from '../../src/index';
 import { mockPrisma } from '../setup';
+import { USER_REFERENCE_COUNT_SELECT } from '../../src/services/account-service';
 
 const ADMIN_ID = 'a1b2c3d4-e5f6-4890-a234-567890abcdef';
 const PLAYER_ID = 'b2c3d4e5-f6a7-4901-a345-67890abcdef0';
@@ -46,8 +46,20 @@ const BUCKET = process.env.S3_AVATARS_BUCKET || 'bball-tracker-avatars-dev';
 const AVATAR_KEY = 'avatars/c3d4e5f6-a7b8-4012-a456-7890abcdef01/0b9f6f1e-2c4e-4c51-9d0a-1f3c5e7a9b2d.jpg';
 const AVATAR_URL = `https://${BUCKET}.s3.amazonaws.com/${AVATAR_KEY}`;
 
-/** The admin caller, then an un-rostered, event-less player holding `profilePictureUrl`. */
-function mockDeletablePlayer(profilePictureUrl: string | null): void {
+/** Reference counts for the delete transaction's read (#1047): zero unless overridden. */
+function refs(counts: Record<string, number> = {}): { _count: Record<string, number>; personalLeague: null } {
+  return {
+    _count: { ...Object.fromEntries(Object.keys(USER_REFERENCE_COUNT_SELECT).map((key) => [key, 0])), ...counts },
+    personalLeague: null,
+  };
+}
+
+/**
+ * The admin caller, then an un-rostered, event-less player holding
+ * `profilePictureUrl`, then the delete transaction's locked row and its
+ * reference counts (`counts`, all zero by default).
+ */
+function mockDeletablePlayer(profilePictureUrl: string | null, counts: Record<string, number> = {}): void {
   (mockPrisma.user.findUnique as jest.Mock)
     .mockResolvedValueOnce({ id: ADMIN_ID, role: 'ADMIN', deletedAt: null })
     .mockResolvedValueOnce({
@@ -58,8 +70,13 @@ function mockDeletablePlayer(profilePictureUrl: string | null): void {
       profilePictureUrl,
       teamMembers: [],
       gameEvents: [],
-    });
-  (mockPrisma.user.delete as jest.Mock).mockResolvedValueOnce({ profilePictureUrl });
+    })
+    .mockResolvedValueOnce(refs(counts));
+  (mockPrisma.$queryRaw as jest.Mock).mockResolvedValueOnce([{ workosUserId: null, deletedAt: null }]);
+  // A refused delete never reaches the write; queueing it would leak into the next test.
+  if (Object.values(counts).every((count) => count === 0)) {
+    (mockPrisma.user.delete as jest.Mock).mockResolvedValueOnce({ profilePictureUrl });
+  }
 }
 
 describe('DELETE /api/v1/players/:id through the real PlayerService (#725)', () => {
@@ -75,7 +92,7 @@ describe('DELETE /api/v1/players/:id through the real PlayerService (#725)', () 
     expect(response.status).toBe(200);
     expect(response.body).toEqual({ success: true, message: 'Player deleted successfully' });
     expect(mockPrisma.user.delete).toHaveBeenCalledWith({
-      where: { id: PLAYER_ID, deletedAt: null, AND: [{ workosUserId: null }] },
+      where: { id: PLAYER_ID, deletedAt: null },
       select: { profilePictureUrl: true },
     });
     expect(mockS3Send).toHaveBeenCalledTimes(1);
@@ -120,7 +137,7 @@ describe('DELETE /api/v1/players/:id on a claimed account (#1034)', () => {
     expect(mockS3Send).not.toHaveBeenCalled();
   });
 
-  it('answers 403 claimed_account when the row is claimed after the read (the guarded delete matches nothing)', async () => {
+  it('answers 403 claimed_account when the row is claimed after the read (the locked row has a login)', async () => {
     (mockPrisma.user.findUnique as jest.Mock)
       .mockResolvedValueOnce({ id: ADMIN_ID, role: 'ADMIN', deletedAt: null })
       .mockResolvedValueOnce({
@@ -131,19 +148,35 @@ describe('DELETE /api/v1/players/:id on a claimed account (#1034)', () => {
         profilePictureUrl: null,
         teamMembers: [],
         gameEvents: [],
-      })
-      .mockResolvedValueOnce({ deletedAt: null, workosUserId: 'user_01RACE' });
-    (mockPrisma.user.delete as jest.Mock).mockRejectedValueOnce(
-      new Prisma.PrismaClientKnownRequestError('Record not found', { code: 'P2025', clientVersion: 'test' })
-    );
+      });
+    (mockPrisma.$queryRaw as jest.Mock).mockResolvedValueOnce([{ deletedAt: null, workosUserId: 'user_01RACE' }]);
 
     const response = await request(app).delete(`/api/v1/players/${PLAYER_ID}`);
 
     expect(response.status).toBe(403);
     expect(response.body.code).toBe('claimed_account');
-    expect(mockPrisma.user.delete).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: PLAYER_ID, deletedAt: null, AND: [{ workosUserId: null }] } })
-    );
+    expect(mockPrisma.user.delete).not.toHaveBeenCalled();
+  });
+});
+
+describe('DELETE /api/v1/players/:id on a record something references (#1047)', () => {
+  beforeEach(() => {
+    deleteObjectCalls.length = 0;
+  });
+
+  it('answers 409 player_has_records naming the relations, and deletes nothing, S3 included', async () => {
+    mockDeletablePlayer(AVATAR_URL, { guardiansAsChild: 1, gameRsvps: 3 });
+
+    const response = await request(app).delete(`/api/v1/players/${PLAYER_ID}`);
+
+    expect(response.status).toBe(409);
+    expect(response.body).toEqual({
+      error: expect.stringContaining('guardian'),
+      code: 'player_has_records',
+      relations: ['guardiansAsChild', 'gameRsvps'],
+    });
+    expect(mockPrisma.user.delete).not.toHaveBeenCalled();
+    expect(mockS3Send).not.toHaveBeenCalled();
   });
 });
 

@@ -10,6 +10,10 @@ import { findOrCreateSeason, SEASON_NAME_TAKEN_MESSAGE } from './season-service'
 import { isSystemAdmin, isLeagueAdmin, getReadableLeagueIds, canReadLeague } from '../utils/permissions';
 import { logger } from '../utils/logger';
 import { USER_SUMMARY_SELECT, USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
+import { lockUsers } from '../utils/user-row-lock';
+import { lockTeamRows } from '../utils/team-row-lock';
+import { lockLeagueRow } from '../utils/league-row-lock';
+import { TeamService } from './team-service';
 
 /**
  * `League.personalOwnerId` marks a coach's auto-provisioned personal container
@@ -484,16 +488,49 @@ export class LeagueService {
       throw new ForbiddenError('Only system administrators can remove league admins');
     }
 
-    // Delete admin (404 rather than a Prisma P2025 → 500 when no such row)
-    const { count } = await prisma.leagueAdmin.deleteMany({
-      where: { leagueId, userId: adminUserId },
+    // One transaction (#1038): remove the row, then cancel the PENDING staff
+    // invitations the former admin sent on this league's teams wherever they
+    // can no longer manage staff (a head coach there keeps theirs), as staff
+    // removal and demotion do; this keeps the pending lists honest, and an
+    // accept that starts after this commit refuses the row anyway. An accept
+    // already past its inviter re-check when this commits can still land,
+    // like one that committed just before the removal. The former admin's
+    // `User` row is locked first: a staff invite locks its inviter's row
+    // before its own `canManageStaff` re-check and insert, so an invite in
+    // flight either commits first (its row is cancelled here) or re-checks
+    // after this commit and is refused. Then the league row (`lockLeagueRow`,
+    // the season rollover's User → League → Team order): a rollover onto one
+    // of this league's teams holds it, so the set of teams read next cannot
+    // move. Those teams are locked in ONE sorted statement (`lockTeamRows`,
+    // the global id order account deletion relies on) before each
+    // `canManageStaff` read: staff removal and demotion hold the team lock,
+    // so a concurrent removal of the same person's head-coach row is seen by
+    // whichever of the two runs second, and that one cancels.
+    const cancelledStaffInvitations = await prisma.$transaction(async (tx) => {
+      await lockUsers(tx, [adminUserId]);
+      // 404 rather than a Prisma P2025 → 500 when no such row
+      const { count } = await tx.leagueAdmin.deleteMany({
+        where: { leagueId, userId: adminUserId },
+      });
+      if (count === 0) {
+        throw new NotFoundError('League admin not found');
+      }
+      await lockLeagueRow(tx, leagueId);
+      const sent = await tx.staffInvitation.findMany({
+        where: { invitedById: adminUserId, status: 'PENDING', team: { season: { leagueId } } },
+        select: { teamId: true },
+        distinct: ['teamId'],
+      });
+      const teamIds = sent.map((row) => row.teamId);
+      await lockTeamRows(tx, teamIds);
+      let cancelled = 0;
+      for (const teamId of teamIds) {
+        cancelled += await TeamService.cancelSentStaffInvitations(tx, teamId, adminUserId);
+      }
+      return cancelled;
     });
 
-    if (count === 0) {
-      throw new NotFoundError('League admin not found');
-    }
-
-    logger.info('League admin removed', { leagueId, adminUserId, userId });
+    logger.info('League admin removed', { leagueId, adminUserId, userId, cancelledStaffInvitations });
 
     return { success: true };
   }

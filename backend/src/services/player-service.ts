@@ -15,7 +15,9 @@ import {
   ForbiddenError,
   ConflictError,
   ClaimedAccountError,
+  PlayerHasRecordsError,
 } from '../utils/errors';
+import { USER_REFERENCE_SELECT, referencingRelations } from './account-service';
 import {
   assertOwnUploadUrl,
   avatarUploadKey,
@@ -568,7 +570,7 @@ export class PlayerService {
     // through AccountService, never as a roster record (#1034). `workosUserId`
     // is the claim; an unclaimed row (a managed record, an Add Player
     // pre-provision, or one the age screen un-claimed) has none and stays
-    // deletable. The delete below re-checks it in the write.
+    // deletable. The delete below re-checks it on the locked row.
     if (player.workosUserId !== null) {
       throw new ClaimedAccountError();
     }
@@ -587,28 +589,45 @@ export class PlayerService {
       );
     }
 
-    // Guarded like every User write (#643): a deletion that tombstoned the
-    // row after the unlocked read above matches nothing (P2025, a 404).
-    // The avatar URL comes from the deleted row itself, not the unlocked read
-    // above, so an avatar replaced in between is the one cleaned up.
+    // The hard delete cascades through every relation on `User`, so it runs
+    // only on a row nothing references (#1047): the rule account deletion uses
+    // to erase instead of tombstone (#529, `isUnreferenced`). Anything else
+    // (guardian links, guardian or team invitations, RSVPs, practice answers,
+    // stats) is a 409 naming the relations; those rows leave only through
+    // `AccountService.deleteAccount` and its retention rules.
+    //
+    // FOR UPDATE on the row first, as `deleteAccount` does: every insert that
+    // would reference it takes a key-share lock on it, so nothing can start
+    // pointing at the row between the count and the delete. The claim and
+    // tombstone checks are repeated on the locked row (#1034, #643).
     let deleted: Prisma.UserGetPayload<{ select: typeof DELETED_PLAYER_SELECT }>;
     try {
-      deleted = await prisma.user.delete({
-        // `workosUserId: null` goes through AND: the unique-where type only takes a string there.
-        where: { id: playerId, deletedAt: null, AND: [{ workosUserId: null }] },
-        select: DELETED_PLAYER_SELECT,
-      });
-    } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
-        // Nothing matched: tombstoned (404) or claimed since the read (#1034).
-        const now = await prisma.user.findUnique({
-          where: { id: playerId },
-          select: { deletedAt: true, workosUserId: true },
-        });
-        if (now && !now.deletedAt && now.workosUserId !== null) {
+      deleted = await prisma.$transaction(async (tx) => {
+        const locked = await tx.$queryRaw<Array<{ workosUserId: string | null; deletedAt: Date | null }>>`
+          SELECT "workosUserId", "deletedAt" FROM "User" WHERE "id" = ${playerId} FOR UPDATE`;
+        const row = locked[0];
+        if (!row || row.deletedAt !== null) {
+          throw new NotFoundError('Player not found');
+        }
+        if (row.workosUserId !== null) {
           throw new ClaimedAccountError();
         }
-      }
+        const refs = await tx.user.findUnique({ where: { id: playerId }, select: USER_REFERENCE_SELECT });
+        if (!refs) {
+          throw new NotFoundError('Player not found');
+        }
+        const kept = referencingRelations(refs);
+        if (kept.length > 0) {
+          throw new PlayerHasRecordsError(kept);
+        }
+        // Guarded like every User write (#643); under the lock above the guard
+        // is a formality. The avatar URL comes from the deleted row itself.
+        return tx.user.delete({
+          where: { id: playerId, deletedAt: null },
+          select: DELETED_PLAYER_SELECT,
+        });
+      });
+    } catch (error) {
       throw PlayerService.mapWriteError(error);
     }
 
