@@ -74,7 +74,7 @@ function mockDeletablePlayer(profilePictureUrl: string | null, counts: Record<st
     .mockResolvedValueOnce(refs(counts));
   (mockPrisma.$queryRaw as jest.Mock).mockResolvedValueOnce([{ workosUserId: null, deletedAt: null }]);
   // A refused delete never reaches the write; queueing it would leak into the next test.
-  if (Object.keys(counts).length === 0) {
+  if (Object.values(counts).every((count) => count === 0)) {
     (mockPrisma.user.delete as jest.Mock).mockResolvedValueOnce({ profilePictureUrl });
   }
 }

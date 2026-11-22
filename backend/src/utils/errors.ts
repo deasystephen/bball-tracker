@@ -348,7 +348,7 @@ export class PlayerHasRecordsError extends DetailedError<{ relations: string[] }
     super(
       'player_has_records',
       { relations },
-      'This player has records that deleting the roster entry would erase (guardian links, invitations, RSVPs, practice answers or stats), so it is kept. A guardian deletes a managed child from the app; an operator uses the data-subject-request script.',
+      'This player has records that deleting the roster entry would erase (see relations: guardian links, invitations, RSVPs, practice answers or stats), so it is kept. Such a record is removed only through account deletion, which keeps what other people rely on: by a linked guardian for a managed child, otherwise by an operator.',
       409
     );
     Object.setPrototypeOf(this, PlayerHasRecordsError.prototype);
