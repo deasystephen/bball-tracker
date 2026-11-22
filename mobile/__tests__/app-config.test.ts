@@ -150,8 +150,17 @@ describe('app.config.js', () => {
       readFileSync(join(__dirname, '../../web/public/.well-known/apple-app-site-association'), 'utf8')
     ) as { applinks: { details: { components: { '/': string }[] }[] } };
     const iosPaths = aasa.applinks.details.flatMap((d) => d.components.map((c) => c['/']));
-    expect(iosPaths).toEqual(['/invite/*']);
-    expect(iosPaths.map((p) => p.replace(/\*$/, '.*'))).toEqual([filter.data[0].pathPattern]);
+    // '/join/*' (team join links, #210) is in the AASA, a web file, but not yet
+    // in the Android manifest: `intentFilters` is native config, so it moves
+    // only with the next binary (the OTA drift guard would refuse it here).
+    // Until then an https join link opens the web page on Android, whose
+    // "Open in App" uses the custom scheme. Remove the entry from this list
+    // in the build that adds the filter.
+    const ANDROID_WAITS_FOR_NEXT_BINARY = ['/join/*'];
+    expect(iosPaths).toEqual(['/invite/*', '/join/*']);
+    expect(
+      iosPaths.filter((p) => !ANDROID_WAITS_FOR_NEXT_BINARY.includes(p)).map((p) => p.replace(/\*$/, '.*'))
+    ).toEqual([filter.data[0].pathPattern]);
   });
 
   // URL scheme rename (#504); the pre-rename scheme overlap ended with #513,

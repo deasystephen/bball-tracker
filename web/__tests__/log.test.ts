@@ -66,6 +66,9 @@ describe('lib/log (#966)', () => {
       ['the lookup URL in an undici error', `Failed to parse URL from https://api.hooplings.com/api/v1/invitations/by-token/${TOKEN}`],
       ['the accept URL', `POST https://api.hooplings.com/api/v1/invitations/by-token/${TOKEN}/accept failed`],
       ['the app deep link', `hooplings://invite/${TOKEN}?src=web`],
+      ['a team join page path (#210)', `/join/${TOKEN}`],
+      ['the join lookup URL in an undici error', `Failed to parse URL from https://api.hooplings.com/api/v1/join/${TOKEN}`],
+      ['the join deep link', `hooplings://join/${TOKEN}?src=web`],
       ['a calendar feed URL', `https://api.hooplings.com/api/v1/calendar/${TOKEN}.ics`],
       ['a token query parameter', `https://api.hooplings.com/feed?token=${TOKEN}&x=1`],
       ['an OAuth code', `/auth/callback?code=${TOKEN}&state=${TOKEN}`],
@@ -110,6 +113,7 @@ describe('lib/log (#966)', () => {
   describe('redactText', () => {
     it('keeps route patterns, which carry no value', () => {
       expect(redactText('/invite/[token]')).toBe('/invite/[token]');
+      expect(redactText('/join/[token]')).toBe('/join/[token]');
       expect(redactText('/api/v1/invitations/by-token/[token]/accept')).toBe('/api/v1/invitations/by-token/[token]/accept');
     });
 

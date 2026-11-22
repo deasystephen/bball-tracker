@@ -510,13 +510,68 @@ themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by 
   request through it is approved by a current roster manager). Both relations are in
   `USER_REFERENCE_COUNT_SELECT`. The data-subject export carries `joinRequests` and
   `createdJoinLinks` (never a token).
+- **Mobile.** `hooks/useJoinLink.ts` holds every call. The team screen shows roster managers a
+  **Share join link** button (`team-join-link`; "Join link · N requests" while requests wait, from
+  `useJoinRequests`, which is requested only for them). `app/teams/[id]/join-link.tsx` shows the
+  explanation, the QR code of `link.url` (`components/QrCode`), **Share link** (React Native's
+  `Share`, the system sheet, which has Copy; there is no clipboard module in the binary), **New
+  link** and **Turn off** (each behind a confirm whose button reads differently from the screen's,
+  "Create new link" / "Turn off link"), and the pending requests with Approve and Decline icons
+  (Decline confirms); each request shows who would be added, who asked, and the asker's email on
+  a line of its own. Requests come from other phones and a link can be replaced from another coach's, so
+  `useJoinRequests`, `useJoinLink` and the public `useJoinLinkPreview` never trust their cache
+  (`staleTime: 0`, `refetchOnMount: 'always'`), and this screen polls the link and the requests
+  every 15 s (`JOIN_LINK_POLL_MS`) and has pull-to-refresh. **Whether a link is live is the
+  server's answer, never the device clock's** (a phone whose clock runs ahead must not be offered
+  "Create join link", which revokes the live one). A re-read that fails keeps what is on screen
+  (the QR code, the rows); the full-screen and inline errors show only when nothing was loaded. The URL is never printed as text. A link is created with the server
+  defaults (14 days, no cap); the app has no control for either yet. A caller without
+  `canManageRoster` gets an `ErrorState` and neither query runs.
+  **The QR code** is `utils/qr-path.ts`: `qrcode-generator` (plain JavaScript, no native code, so
+  it ships by OTA and the drift guard does not list it) computes the matrix at error-correction
+  level M, and one `react-native-svg` `<Path>` of horizontal runs draws it, always black on white
+  with a 4-module quiet zone. `__tests__/utils/qr-path.test.ts` compares the path with the
+  library's matrix module by module and checks the three finder patterns.
+  `app/join/[token].tsx` is the deep-link screen (`hooplings://join/<token>`, and the Universal
+  Link `https://hooplings.com/join/<token>` on iOS): the public preview (`/join/` is in
+  `PUBLIC_PATHS`), then for a signed-out visitor "Log In to Continue" with `/join/<token>` stored
+  as the return path (it survives sign-in and the age screen), and for a signed-in one "Who is
+  joining?" with **Me** / **My child** (`SortPills`, nothing preselected), the child's name and
+  `RelationshipChips`. A new request shows "Request sent" (and "Add another child" for a parent);
+  an account already on the team is sent to it. Expired, full and unknown links each have their
+  own screen; only the server's 400 or 404 is the dead-link screen, every other failure is a
+  retry, as on the web page. Sentry's
+  redaction masks the segment after `/join/` (`services/sentry.ts`), in the custom-scheme deep
+  link too (`hooplings://join/<token>`, where `join` sits in the host position; the same fix covers
+  `hooplings://invite/<token>`). Events: `join_link_created`,
+  `join_link_revoked`, `join_request_sent`, `join_request_approved`, `join_request_declined` (ids
+  and enums; never the link, its token or a name). Android App Links for `/join/` need
+  `android.intentFilters`, which is native config: they wait for the next binary; the custom
+  scheme works today.
+- **Web.** `web/app/join/[token]/page.tsx` renders the preview server-side
+  (`lib/join-lookup.ts`, `X-Hooplings-Client: web`) and offers only **Open in App**
+  (`hooplings://join/<token>?src=web`, `lib/open-in-app.ts#openJoinInApp`, the same App Store
+  fallback as the invite page). Nothing can be accepted on the web: asking needs a signed-in
+  adult. A 400/404 is "Join Link Not Found", a 429/5xx/failed fetch "Temporarily Unavailable"
+  (logged as `Join link lookup unavailable`, reason and status only). `lib/log.ts` masks the
+  segment after `/join/`. `public/.well-known/apple-app-site-association` lists `/join/*` next to
+  `/invite/*`, so iOS hands the https link to the app.
+- **Maestro:** `.maestro/join-link.yaml` (a parent asks through the seeded Lakers link, Frank
+  approves, then replaces the link; needs `SEED_MAESTRO_INVITE_TOKEN=true npx prisma db seed`,
+  which writes the fixed `MAESTRO_JOIN_TOKEN` into a local database only). Every seed deletes the
+  Lakers' join links and requests and writes one fresh link. First run and passed on
+  2026-11-22 (iPhone 17 / iOS 26.5 simulator, fresh 1.7.0 Debug build). It scrolls to Gloria in
+  the developer login list and matches `"Frank Vogel, .*"`, because interrupted runs of
+  `test-leftovers.db.test.ts` leave `Frank Vogel <id>` coach rows that the seed keeps by design.
 - Tests: `tests/api/join-links.test.ts` (route → real service → Prisma mock, every gate and
   answer, no token on any body or log line), `tests/schemas/join-link.test.ts`,
   `tests/integration/join-link.db.test.ts` (one live link under concurrent creates, no access
   while pending or after a decline, `maxUses` under concurrency, expired and revoked, the retry
   after the last use, the lapse, an un-claimed requester, both approval kinds, two concurrent
   approvals, deletion). The revoke-against-create race is argued from the shared lock, not
-  reproduced in a test.
+  reproduced in a test. Mobile: `__tests__/hooks/useJoinLink.runtime.test.tsx`,
+  `__tests__/app/join-request.test.tsx`, `__tests__/app/team-join-link.test.tsx`,
+  `__tests__/utils/qr-path.test.ts`. Web: `web/__tests__/join-page.test.tsx`.
 
 ### Mobile roster & invite-status chips (roster/invite unification)
 

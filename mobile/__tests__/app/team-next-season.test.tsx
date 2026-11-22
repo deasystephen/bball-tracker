@@ -56,6 +56,10 @@ jest.mock('../../hooks/useSeasons', () => ({
     return { data, isLoading: false, error: null, refetch: jest.fn() };
   },
 }));
+// The team screen asks for pending join requests (#210); none here.
+jest.mock('../../hooks/useJoinLink', () => ({
+  useJoinRequests: () => ({ data: undefined }),
+}));
 jest.mock('../../hooks/useTeams', () => ({
   ...jest.requireActual('../../hooks/useTeams'),
   useTeam: () => ({ data: mockTeam, isLoading: false, error: null, refetch: jest.fn() }),

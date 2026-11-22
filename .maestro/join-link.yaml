@@ -1,0 +1,213 @@
+appId: com.bballtracker.mobile
+---
+# Team join link (#210; E2E plan D.14): a parent asks to join through the
+# team's link, the coach approves the request, then replaces the link.
+#
+#   1. Signed out, hooplings://join/<token>?src=web shows the team's name and
+#      nothing else, and "Log In to Continue" survives sign-in: after a dev
+#      login as Gloria James the app is back on the join screen.
+#   2. Gloria adds a child ("Maestro Joiner"). The request is sent; nothing is
+#      on the roster yet.
+#   3. Frank Vogel (Lakers head coach) sees the request count on the team
+#      screen, opens the join link screen (QR code and Share), and approves:
+#      the request leaves the list and the player is on the roster.
+#   4. Frank creates a new link. The old link, opened again, is "Join link not
+#      found".
+#
+# Token: the Lakers' seeded join link, with the fixed MAESTRO_JOIN_TOKEN
+# (backend/tests/support/seed-fixtures.ts). It is a live bearer secret, so the
+# seed writes it only when asked, on the command line, against a local
+# database. Seed before this flow with:
+#   cd backend && SEED_MAESTRO_INVITE_TOKEN=true npx prisma db seed
+# A plain `npx prisma db seed` gives the link a random token, and step 1 then
+# shows "Join link not found".
+#
+# MUTATES DATA: adds the managed player "Maestro Joiner" to the Lakers with
+# Gloria as guardian, and replaces the Lakers' join link. The seed removes the
+# flow-created managed players of Frank's and rewrites the team's join link,
+# so re-seed before every run.
+#
+# Needs a dev client that registers `hooplings://` (docs/testing/maestro.md,
+# "openLink").
+- launchApp:
+    clearState: true
+# Dismiss the intro carousel first: with hasOnboarded unset, app/index.tsx
+# replaces to /onboarding shortly after mount and would clobber the deep link.
+- tapOn: "Skip"
+- assertVisible: "Hooplings"
+
+# --- 1. Signed out: the link names the team and asks for a sign-in ----------
+- openLink: "hooplings://join/maestro-fixture-lakers-join-link?src=web"
+# iOS asks "Open in <app>?" for custom-scheme URLs; conditional because the
+# simulator may remember the choice (same handling as invite-deep-link.yaml).
+- runFlow:
+    when:
+      visible: "Open"
+    commands:
+      - tapOn: "Open"
+- extendedWaitUntil:
+    visible: "Join Lakers"
+    timeout: 15000
+- assertNotVisible: "Join link not found"
+- assertVisible: "Ask to join this team. A coach approves each request before anyone is added."
+# No form before there is an identity.
+- assertNotVisible: "Who is joining?"
+
+- tapOn:
+    id: "join-login"
+- assertVisible: "Developer login with test users"
+- tapOn: "Developer login with test users"
+- assertVisible: "Select Test User"
+# Parents come after every coach in the list; a local database with extra
+# coach rows pushes Gloria below the first screen.
+- scrollUntilVisible:
+    element:
+      text: "Gloria James, .*"
+    direction: DOWN
+    timeout: 20000
+    visibilityPercentage: 60
+- tapOn: "Gloria James, .*"
+# postLoginRoute consumes the stored return path (/join/<token>) instead of
+# going Home: wait for the question only the signed-in join screen draws.
+- extendedWaitUntil:
+    visible: "Who is joining?"
+    timeout: 15000
+- assertVisible: "Join Lakers"
+- assertNotVisible: "Your Teams"
+
+# --- 2. A parent adds their child --------------------------------------------
+- tapOn: "Who is joining? My child"
+- assertVisible: "Your child gets a spot on the roster that you manage. Children don't get their own login."
+- tapOn:
+    id: "join-child-name"
+- inputText: "Maestro Joiner"
+# Never hideKeyboard (Maestro 2.11); Enter dismisses it.
+- pressKey: Enter
+- tapOn: "Guardian"
+- tapOn:
+    id: "join-submit"
+- extendedWaitUntil:
+    visible: "Request sent"
+    timeout: 10000
+- assertVisible: "A coach of Lakers will review your request. You'll see the team in the app once it's approved."
+- tapOn: "Done"
+- extendedWaitUntil:
+    visible: "Your Teams"
+    timeout: 10000
+
+# Sign out. A parent's profile is longer than a coach's ("My kids" sits above
+# Account), so logout.yaml's single swipe stops at Settings. Swipe to the end
+# of the screen: the bottom padding there keeps Logout clear of the tab bar,
+# and a swipe at the end is a no-op.
+- tapOn: "Profile tab"
+- assertVisible: "Account"
+- swipe:
+    start: 50%, 60%
+    end: 50%, 20%
+    duration: 500
+- swipe:
+    start: 50%, 60%
+    end: 50%, 20%
+    duration: 500
+- swipe:
+    start: 50%, 60%
+    end: 50%, 20%
+    duration: 500
+- swipe:
+    start: 50%, 60%
+    end: 50%, 20%
+    duration: 500
+- tapOn: "Logout"
+- tapOn:
+    text: "Logout"
+    index: 1
+- assertVisible: "Hooplings"
+
+# --- 3. The coach reviews and approves ---------------------------------------
+- tapOn: "Developer login with test users"
+- assertVisible: "Select Test User"
+# The comma ends the name: "Frank Vogel 1a2b3c4d, …" rows that interrupted
+# real-database test runs leave behind do not match.
+- tapOn: "Frank Vogel, .*"
+- assertVisible: "Your Teams"
+- tapOn: "Teams tab"
+- extendedWaitUntil:
+    visible: "Lakers"
+    timeout: 10000
+- tapOn: "Lakers"
+# The entry button carries the number of requests waiting.
+- scrollUntilVisible:
+    element:
+      id: "team-join-link"
+    direction: DOWN
+    timeout: 10000
+    centerElement: true
+- assertVisible: "Join link · 1 request"
+- tapOn:
+    id: "team-join-link"
+- extendedWaitUntil:
+    visible: "Requests to join"
+    timeout: 10000
+# The seeded link is live: the QR code and Share are there.
+- assertVisible:
+    id: "join-link-qr"
+- assertVisible: "Share link"
+# The request row: who would be added, who asked, and their address, each a
+# text element of its own (the row is not pressable; its buttons are).
+- scrollUntilVisible:
+    element:
+      text: "Approve Maestro Joiner"
+    direction: DOWN
+    timeout: 10000
+    visibilityPercentage: 60
+- assertVisible: "Maestro Joiner"
+- assertVisible: "Added by Gloria James, the player's guardian"
+- assertVisible: "gloria.james@example.com"
+- tapOn: "Approve Maestro Joiner"
+- extendedWaitUntil:
+    visible: "No requests are waiting.*"
+    timeout: 10000
+- assertNotVisible: "Approve Maestro Joiner"
+
+# --- 4. A new link kills the old one -----------------------------------------
+- scrollUntilVisible:
+    element:
+      id: "join-link-rotate"
+    direction: UP
+    timeout: 10000
+    centerElement: true
+- tapOn:
+    id: "join-link-rotate"
+- assertVisible: "Create a new link?"
+# The dialog's button is "Create new link"; the screen's is "New link".
+- tapOn: "Create new link"
+# Only a completed rotation shows this toast (the QR code was on screen before).
+- extendedWaitUntil:
+    visible: "New link created. The old one no longer works."
+    timeout: 10000
+- assertVisible:
+    id: "join-link-qr"
+
+# The player the approval added is on the roster.
+- tapOn: "Go back"
+- scrollUntilVisible:
+    element:
+      text: "Maestro Joiner.*"
+    direction: DOWN
+    timeout: 10000
+    visibilityPercentage: 60
+
+# The link the flow started from no longer exists for its holders.
+- openLink: "hooplings://join/maestro-fixture-lakers-join-link?src=web"
+- runFlow:
+    when:
+      visible: "Open"
+    commands:
+      - tapOn: "Open"
+- extendedWaitUntil:
+    visible: "Join link not found"
+    timeout: 15000
+- assertVisible: "This link is not valid, or the coach replaced it. Ask the coach for the team's current link."
+- assertNotVisible: "Join Lakers"
+- tapOn: "Go Home"
+- assertVisible: "Your Teams"

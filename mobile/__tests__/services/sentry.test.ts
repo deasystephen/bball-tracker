@@ -323,6 +323,13 @@ describe('services/sentry', () => {
       expect(redactUrl('https://app.example.test/invite/abcdef0123456789#x')).toBe(
         'https://app.example.test/invite/[scrubbed]'
       );
+      expect(redactUrl('/join/abcdef0123456789?src=web')).toBe('/join/[scrubbed]?src=web');
+      expect(redactUrl('https://hooplings.com/join/abcdef0123456789')).toBe('https://hooplings.com/join/[scrubbed]');
+      // A deep link has no host: `join` / `invite` is the first path segment.
+      expect(redactUrl('hooplings://join/abcdef0123456789?src=web')).toBe('hooplings://join/[scrubbed]?src=web');
+      expect(redactUrl('hooplings://invite/abcdef0123456789')).toBe('hooplings://invite/[scrubbed]');
+      expect(redactUrl('hooplings://auth/callback?code=SECRET')).toBe('hooplings://auth/callback?code=[scrubbed]');
+      expect(redactUrl('hooplings://teams/t1')).toBe('hooplings://teams/t1');
       expect(redactUrl('')).toBe('');
     });
   });
@@ -428,6 +435,11 @@ describe('services/sentry', () => {
         endpointPattern('https://api.hooplings.com/api/v1/teams/4f1c2a3b-5d6e-4f70-8a9b-0c1d2e3f4a5b/games/42?token=abc')
       ).toBe('/api/v1/teams/:id/games/:id');
       expect(endpointPattern('/invitations/by-token/abcdefghijklmnop')).toBe('/invitations/by-token/[scrubbed]');
+      // Team join links (#210): the token after /join/ never reaches Sentry.
+      expect(endpointPattern('https://api.hooplings.com/api/v1/join/abcdefghijklmnop')).toBe('/api/v1/join/[scrubbed]');
+      expect(endpointPattern('/teams/4f1c2a3b-5d6e-4f70-8a9b-0c1d2e3f4a5b/join-link/revoke')).toBe(
+        '/teams/:id/join-link/revoke'
+      );
       expect(endpointPattern('/auth/callback?code=SECRET&state=S')).toBe('/auth/callback');
       expect(endpointPattern('/players/cm1abcdefghijklmnopqrstu/stats')).toBe('/players/:id/stats');
       expect(endpointPattern('/teams/t1/calendar/subscribe')).toBe('/teams/t1/calendar/subscribe');

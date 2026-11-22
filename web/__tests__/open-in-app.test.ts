@@ -4,7 +4,9 @@ import {
   APP_STORE_URL,
   STORE_FALLBACK_DELAY_MS,
   inviteDeepLink,
+  joinDeepLink,
   openInApp,
+  openJoinInApp,
   type OpenInAppEnv,
 } from '../lib/open-in-app';
 
@@ -49,6 +51,35 @@ describe('openInApp (#510)', () => {
     expect(url.pathname).toBe(`/${TOKEN}`);
     expect(url.host).toBe('invite');
     expect(url.searchParams.get('src')).toBe('web');
+  });
+
+  it('builds hooplings://join/<token>?src=web for a team join link (#210)', () => {
+    expect(joinDeepLink(TOKEN)).toBe(`hooplings://join/${TOKEN}?src=web`);
+    const url = new URL(joinDeepLink(TOKEN));
+    expect(url.host).toBe('join');
+    expect(url.pathname).toBe(`/${TOKEN}`);
+  });
+
+  it('openJoinInApp navigates to the join deep link, with the same App Store fallback', () => {
+    const { env, navigate } = makeEnv(IOS_UA, 5);
+    openJoinInApp(TOKEN, env, true);
+    expect(navigate).toHaveBeenCalledTimes(1);
+    expect(navigate).toHaveBeenCalledWith(`hooplings://join/${TOKEN}?src=web`);
+    vi.advanceTimersByTime(STORE_FALLBACK_DELAY_MS);
+    expect(navigate).toHaveBeenLastCalledWith(APP_STORE_URL);
+  });
+
+  it('openJoinInApp stays put when the app opened, and before the App Store release', () => {
+    const opened = makeEnv(IOS_UA, 5);
+    openJoinInApp(TOKEN, opened.env, true);
+    opened.hide();
+    vi.runAllTimers();
+    expect(opened.navigate).toHaveBeenCalledTimes(1);
+
+    const unreleased = makeEnv(IOS_UA, 5);
+    openJoinInApp(TOKEN, unreleased.env);
+    vi.runAllTimers();
+    expect(unreleased.navigate).toHaveBeenCalledTimes(1);
   });
 
   it('navigates to the deep link immediately', () => {

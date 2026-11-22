@@ -23,6 +23,7 @@ import {
   SortPills,
 } from '../../components';
 import { useTeam, useDeleteTeam, hasTeamPermission, canManageStaff } from '../../hooks/useTeams';
+import { useJoinRequests } from '../../hooks/useJoinLink';
 import { displayName } from '../../utils/display-name';
 import { useTheme } from '../../hooks/useTheme';
 import { useTranslation } from '../../i18n';
@@ -74,6 +75,10 @@ export default function TeamDetailsScreen() {
 
   const canManageTeam = hasTeamPermission(team, user?.id, 'canManageTeam', user?.role, user?.leagueAdminOf);
   const canManageRoster = hasTeamPermission(team, user?.id, 'canManageRoster', user?.role, user?.leagueAdminOf);
+  // Requested only for roster managers (the API answers 403 otherwise); a
+  // failed read just leaves the count off the button.
+  const { data: joinRequests } = useJoinRequests(id, canManageRoster);
+  const pendingJoinRequests = joinRequests?.length ?? 0;
   // Season rollover (#461) is a head-coach action, like a season move: the
   // backend gates it on `canManageStaff`, which an assistant coach fails.
   // Only the lineage's latest team-season continues it (the API answers 409
@@ -317,6 +322,21 @@ export default function TeamDetailsScreen() {
               onPress={() => router.push(`/teams/${id}/players`)}
               variant="primary"
               style={styles.addButton}
+            />
+          )}
+
+          {/* Join link (#210): families add themselves; requests wait for approval. */}
+          {canManageRoster && (
+            <Button
+              title={
+                pendingJoinRequests > 0
+                  ? t('joinLink.openWithRequests', { count: pendingJoinRequests })
+                  : t('joinLink.open')
+              }
+              onPress={() => router.push(`/teams/${id}/join-link`)}
+              variant="outline"
+              style={styles.addButton}
+              testID="team-join-link"
             />
           )}
 

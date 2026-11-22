@@ -50,6 +50,7 @@
     "expo-updates": "~57.0.26",
     "i18next": "^26.5.2",
     "moti": "^0.30.0",
+    "qrcode-generator": "^2.0.4",
     "react": "19.2.3",
     "react-i18next": "^17.1.12",
     "react-native": "0.86.3",

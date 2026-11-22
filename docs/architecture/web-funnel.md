@@ -61,6 +61,19 @@ for `/api/v1/invitations/by-token/[redacted]` (`@statusCode`), and the web serve
   example, report `invite_link_viewed` once per token per app session, or keep `src` in the return
   path), or step 3 double-counts web arrivals.
 
+## Team join links (#210)
+
+The same rule (no analytics in the browser) covers `hooplings.com/join/<token>`. Its steps:
+
+| Step | Where | Query or event |
+| --- | --- | --- |
+| Link opened | API log | `service:bball-tracker-api "Join link viewed"`, grouped by `@client` (`web`, `ios/…`) and `@state` (`active`, `expired`, `full`). Count unique `@linkId` for links rather than views. Link-preview fetchers in a group chat log as `client: web` too, so read it as an upper bound, like step 2 above |
+| Asked to join | API log + Amplitude | `"Join request created"` (`@kind`: `SELF` / `CHILD`); Amplitude `join_request_sent` |
+| Decided | API log + Amplitude | `"Join request approved"` / `"Join request declined"`; Amplitude `join_request_approved` / `join_request_declined` |
+
+`Join link viewed` carries the link's id, never the token or the team's name. The web page's
+"Open in App" marks the deep link `?src=web`; the app's join screen does not report it yet.
+
 ## Datadog saved view (created by hand)
 
 Datadog is not managed from this repository and the session MCP cannot write. To create the view:

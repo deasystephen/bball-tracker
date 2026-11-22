@@ -42,15 +42,37 @@ export function inviteDeepLink(token: string): string {
 }
 
 /**
- * Try the custom-scheme link; if the page never hides within the delay (the app
- * did not open), send an iPhone or iPad to the App Store, once it is released.
- * Android and desktop browsers never redirect: there is no Play listing.
+ * The app's join screen for a team join link (#210), marked `?src=web` like
+ * the invite link. Expo Router hands `src` to the screen as its own param.
  */
+export function joinDeepLink(token: string): string {
+  return `hooplings://join/${token}?src=web`;
+}
+
+/** Open an invitation in the app (`inviteDeepLink`), with the App Store fallback below. */
 export function openInApp(
   token: string,
   env: OpenInAppEnv = browserEnv(),
   appStoreReleased: boolean = APP_STORE_RELEASED,
 ): void {
+  openDeepLink(inviteDeepLink(token), env, appStoreReleased);
+}
+
+/** Open a team join link in the app (`joinDeepLink`), with the same fallback. */
+export function openJoinInApp(
+  token: string,
+  env: OpenInAppEnv = browserEnv(),
+  appStoreReleased: boolean = APP_STORE_RELEASED,
+): void {
+  openDeepLink(joinDeepLink(token), env, appStoreReleased);
+}
+
+/**
+ * Try the custom-scheme link; if the page never hides within the delay (the app
+ * did not open), send an iPhone or iPad to the App Store, once it is released.
+ * Android and desktop browsers never redirect: there is no Play listing.
+ */
+function openDeepLink(deepLink: string, env: OpenInAppEnv, appStoreReleased: boolean): void {
   // iPadOS 13+ Safari sends a Macintosh desktop UA; only touch support tells it apart.
   const isIos =
     /iphone|ipad|ipod/i.test(env.userAgent) || (/macintosh/i.test(env.userAgent) && env.maxTouchPoints > 1);
@@ -61,7 +83,7 @@ export function openInApp(
   };
   env.document.addEventListener('visibilitychange', onHide);
 
-  env.navigate(inviteDeepLink(token));
+  env.navigate(deepLink);
 
   setTimeout(() => {
     env.document.removeEventListener('visibilitychange', onHide);

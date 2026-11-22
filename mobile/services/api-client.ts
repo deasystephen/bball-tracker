@@ -38,6 +38,9 @@ export const PUBLIC_PATHS = [
   ...NO_REFRESH_PATHS,
   '/auth/dev-users',
   '/invitations/by-token/',
+  // The team join link preview (#210). The request to join (POST on the same
+  // path) needs a session; the join screen only sends it when signed in.
+  '/join/',
 ];
 
 const isPublicPath = (url?: string): boolean =>

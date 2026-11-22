@@ -43,6 +43,11 @@ export const AnalyticsEvents = {
   STAFF_REMOVED: 'staff_removed',
   STAFF_INVITED: 'staff_invited',
   STAFF_INVITATION_CANCELLED: 'staff_invitation_cancelled',
+  JOIN_LINK_CREATED: 'join_link_created',
+  JOIN_LINK_REVOKED: 'join_link_revoked',
+  JOIN_REQUEST_SENT: 'join_request_sent',
+  JOIN_REQUEST_APPROVED: 'join_request_approved',
+  JOIN_REQUEST_DECLINED: 'join_request_declined',
   INVITATION_SENT: 'invitation_sent',
   INVITE_LINK_VIEWED: 'invite_link_viewed',
   INVITATION_ACCEPTED: 'invitation_accepted',
@@ -164,6 +169,17 @@ export interface AnalyticsEventProps {
   staff_removed: { team_id: string };
   staff_invited: { team_id: string; invitation_id: string; role_type: string; resend: boolean; email_sent: boolean };
   staff_invitation_cancelled: { team_id: string; invitation_id: string };
+  /** A team join link (#210) was created; creating one replaces the live link. Never the link or its token. */
+  join_link_created: { team_id: string; link_id: string; has_max_uses: boolean };
+  join_link_revoked: { team_id: string };
+  /**
+   * Someone asked to join through a join link: for themself or for a child
+   * (never the child's name), whether a request is now waiting or they were
+   * already on the team, and whether this call created the request.
+   */
+  join_request_sent: { kind: 'self' | 'child'; outcome: 'pending' | 'already_member'; created: boolean };
+  join_request_approved: { team_id: string; request_id: string; kind: 'self' | 'child' };
+  join_request_declined: { team_id: string; request_id: string };
   invitation_sent: { team_id: string; invitation_id: string; resend: boolean; email_sent: boolean | null };
   /**
    * What the invitee saw on `/invite/[token]` (#967), once per token per
