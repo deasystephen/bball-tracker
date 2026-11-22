@@ -484,7 +484,10 @@ themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by 
   `Share`, the system sheet, which has Copy; there is no clipboard module in the binary), **New
   link** and **Turn off** (each behind a confirm whose button reads differently from the screen's,
   "Create new link" / "Turn off link"), and the pending requests with Approve and Decline icons
-  (Decline confirms). The URL is never printed as text. A link is created with the server
+  (Decline confirms); each request shows who would be added, who asked, and the asker's email on
+  a line of its own. Requests come from other phones, so `useJoinRequests` never trusts its cache
+  (`refetchOnMount: 'always'`) and this screen polls it every 15 s and has pull-to-refresh. A link
+  whose `expiresAt` passed while cached is shown as no link (`isJoinLinkExpired`). The URL is never printed as text. A link is created with the server
   defaults (14 days, no cap); the app has no control for either yet. A caller without
   `canManageRoster` gets an `ErrorState` and neither query runs.
   **The QR code** is `utils/qr-path.ts`: `qrcode-generator` (plain JavaScript, no native code, so

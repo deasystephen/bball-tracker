@@ -127,18 +127,22 @@ appId: com.bballtracker.mobile
 - assertVisible:
     id: "join-link-qr"
 - assertVisible: "Share link"
-# The request row: who would be added, and who asked.
+# The request row: who would be added, who asked, and their address, each a
+# text element of its own (the row is not pressable; its buttons are).
 - scrollUntilVisible:
     element:
-      text: "Maestro Joiner, Added by Gloria James, the player's guardian.*"
+      text: "Approve Maestro Joiner"
     direction: DOWN
     timeout: 10000
     visibilityPercentage: 60
+- assertVisible: "Maestro Joiner"
+- assertVisible: "Added by Gloria James, the player's guardian"
+- assertVisible: "gloria.james@example.com"
 - tapOn: "Approve Maestro Joiner"
 - extendedWaitUntil:
     visible: "No requests are waiting.*"
     timeout: 10000
-- assertNotVisible: "Maestro Joiner, Added by Gloria James.*"
+- assertNotVisible: "Approve Maestro Joiner"
 
 # --- 4. A new link kills the old one -----------------------------------------
 - scrollUntilVisible:

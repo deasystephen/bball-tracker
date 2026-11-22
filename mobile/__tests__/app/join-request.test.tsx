@@ -161,6 +161,29 @@ describe('JoinDeepLinkScreen (#210)', () => {
     expect(mockShowToast).toHaveBeenCalledWith("You're already on Hornets", 'success');
   });
 
+  it('a parent whose child is already on the roster is told about the child, not themself', async () => {
+    signedIn(true);
+    mockRequestToJoin.mutateAsync.mockResolvedValueOnce({ status: 'already_member', teamId: 't9', teamName: 'Hornets' });
+    const { getByTestId, getByLabelText } = render(<JoinDeepLinkScreen />);
+
+    fireEvent.press(getByLabelText('Who is joining? My child'));
+    fireEvent.changeText(getByTestId('join-child-name'), 'Riley Park');
+    fireEvent.press(getByTestId('join-submit'));
+
+    await waitFor(() => expect(mockShowToast).toHaveBeenCalledWith('Riley Park is already on Hornets', 'success'));
+  });
+
+  it('a network failure after the preview loaded keeps the form and what was typed (never "not found")', () => {
+    signedIn(true);
+    // TanStack keeps the data and sets the error when a refetch fails.
+    mockError = new AxiosError('Network Error', 'ERR_NETWORK');
+    const { getByTestId, getByText, queryByText } = render(<JoinDeepLinkScreen />);
+
+    expect(getByText('Join Hornets')).toBeTruthy();
+    expect(getByTestId('join-submit')).toBeTruthy();
+    expect(queryByText('Join link not found')).toBeNull();
+  });
+
   it('a refused request shows the error and re-reads the link', async () => {
     signedIn(true);
     mockRequestToJoin.mutateAsync.mockRejectedValueOnce(new Error('boom'));

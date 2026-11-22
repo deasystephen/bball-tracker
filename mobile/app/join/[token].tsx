@@ -77,7 +77,12 @@ export default function JoinDeepLinkScreen() {
         data: joinAs === 'child' ? { kind: 'child', childName: trimmedChildName, relationship } : { kind: 'self' },
       });
       if (result.status === 'already_member') {
-        toast.showToast(t('join.alreadyMember', { team: result.teamName }), 'success');
+        toast.showToast(
+          joinAs === 'child'
+            ? t('join.childAlreadyMember', { name: trimmedChildName, team: result.teamName })
+            : t('join.alreadyMember', { team: result.teamName }),
+          'success'
+        );
         router.replace(`/teams/${result.teamId}`);
         return;
       }
@@ -130,7 +135,10 @@ export default function JoinDeepLinkScreen() {
     );
   }
 
-  if (error || !link) {
+  // Dead only when the server said so (400/404) or nothing ever loaded. A
+  // refetch that failed on the network keeps the preview it already has: the
+  // form stays, with whatever the person typed.
+  if (!link || (error && !isTransientRequestError(error))) {
     return (
       <Notice
         icon="close-circle-outline"

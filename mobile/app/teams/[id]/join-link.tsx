@@ -8,8 +8,8 @@
  * the authority (403).
  */
 
-import React from 'react';
-import { View, StyleSheet, ScrollView, TouchableOpacity, Alert, Share } from 'react-native';
+import React, { useState } from 'react';
+import { View, StyleSheet, ScrollView, TouchableOpacity, Alert, Share, RefreshControl } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -17,7 +17,6 @@ import {
   ThemedView,
   ThemedText,
   Button,
-  ListItem,
   LoadingSpinner,
   ErrorState,
   Card,
@@ -33,6 +32,7 @@ import {
   useJoinRequests,
   useApproveJoinRequest,
   useDeclineJoinRequest,
+  isJoinLinkExpired,
   type JoinRequestRow,
 } from '../../../hooks/useJoinLink';
 import { useTheme } from '../../../hooks/useTheme';
@@ -62,12 +62,33 @@ export default function TeamJoinLinkScreen() {
 
   const { data: team, isLoading: teamLoading, error: teamError, refetch: refetchTeam } = useTeam(id);
   const canManageRoster = hasTeamPermission(team, user?.id, 'canManageRoster', user?.role, user?.leagueAdminOf);
-  const { data: link, isLoading: linkLoading, error: linkError, refetch: refetchLink } = useJoinLink(id, canManageRoster);
+  const {
+    data: fetchedLink,
+    isLoading: linkLoading,
+    error: linkError,
+    refetch: refetchLink,
+  } = useJoinLink(id, canManageRoster);
+  // A link that expired while this screen (or its cache) was open is no link:
+  // the server stopped serving it, and showing its QR code would send families
+  // to "Join link expired".
+  const expiredLink = fetchedLink != null && isJoinLinkExpired(fetchedLink);
+  const link = expiredLink ? null : fetchedLink;
+  // Polled: requests arrive from other phones while the coach shows the code.
   const {
     data: requests,
     error: requestsError,
     refetch: refetchRequests,
-  } = useJoinRequests(id, canManageRoster);
+  } = useJoinRequests(id, canManageRoster, { poll: true });
+  const [refreshing, setRefreshing] = useState(false);
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await Promise.all([refetchLink(), refetchRequests()]);
+    } finally {
+      setRefreshing(false);
+    }
+  };
   const createLink = useCreateJoinLink();
   const revokeLink = useRevokeJoinLink();
   const approve = useApproveJoinRequest();
@@ -120,16 +141,13 @@ export default function TeamJoinLinkScreen() {
   const requestSubject = (row: JoinRequestRow): string =>
     row.kind === 'CHILD' ? row.childName ?? '' : displayName(row.requester);
 
-  const requestDetail = (row: JoinRequestRow): string => {
-    const who =
-      row.kind === 'CHILD'
-        ? t('joinLink.requestChildDetail', {
-            parent: displayName(row.requester),
-            relationship: relationshipNoun(row.relationship ?? 'GUARDIAN'),
-          })
-        : t('joinLink.requestSelfDetail');
-    return [who, row.requester.email].filter(Boolean).join(' · ');
-  };
+  const requestDetail = (row: JoinRequestRow): string =>
+    row.kind === 'CHILD'
+      ? t('joinLink.requestChildDetail', {
+          parent: displayName(row.requester),
+          relationship: relationshipNoun(row.relationship ?? 'GUARDIAN'),
+        })
+      : t('joinLink.requestSelfDetail');
 
   const handleApprove = async (row: JoinRequestRow) => {
     try {
@@ -213,6 +231,9 @@ export default function TeamJoinLinkScreen() {
           styles.scrollContent,
           { paddingHorizontal: padding, paddingBottom: insets.bottom + spacing.xl },
         ]}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={() => void handleRefresh()} tintColor={colors.primary} />
+        }
       >
         <Card variant="elevated" style={styles.linkCard}>
           <ThemedText variant="body" color="textSecondary" style={styles.explain}>
@@ -266,14 +287,21 @@ export default function TeamJoinLinkScreen() {
               </View>
             </>
           ) : (
-            <Button
-              title={t('joinLink.create')}
-              onPress={() => void handleCreate()}
-              loading={createLink.isPending}
-              disabled={createLink.isPending}
-              testID="join-link-create"
-              fullWidth
-            />
+            <>
+              {expiredLink && (
+                <ThemedText variant="caption" color="textSecondary" style={styles.explain}>
+                  {t('joinLink.expired')}
+                </ThemedText>
+              )}
+              <Button
+                title={t('joinLink.create')}
+                onPress={() => void handleCreate()}
+                loading={createLink.isPending}
+                disabled={createLink.isPending}
+                testID="join-link-create"
+                fullWidth
+              />
+            </>
           )}
         </Card>
 
@@ -300,36 +328,46 @@ export default function TeamJoinLinkScreen() {
         ) : (
           requests.map((row) => {
             const subject = requestSubject(row);
+            // Not a ListItem: its subtitle is one line, and the email (how a
+            // coach recognises who is asking) must never be cut off.
             return (
-              <ListItem
+              <View
                 key={row.id}
-                title={subject}
-                subtitle={requestDetail(row)}
-                accessibilityLabel={`${subject}, ${requestDetail(row)}`}
+                style={[styles.requestRow, { borderBottomColor: colors.border }]}
                 testID={`join-request-row-${row.id}`}
-                rightElement={
-                  <View style={styles.rowActions}>
-                    <TouchableOpacity
-                      onPress={() => void handleApprove(row)}
-                      style={styles.rowButton}
-                      accessibilityRole="button"
-                      accessibilityLabel={t('joinLink.approveLabel', { name: subject })}
-                      disabled={deciding}
-                    >
-                      <Ionicons name="checkmark-circle-outline" size={26} color={colors.success} />
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      onPress={() => confirmDecline(row)}
-                      style={styles.rowButton}
-                      accessibilityRole="button"
-                      accessibilityLabel={t('joinLink.declineLabel', { name: subject })}
-                      disabled={deciding}
-                    >
-                      <Ionicons name="close-circle-outline" size={26} color={colors.error} />
-                    </TouchableOpacity>
-                  </View>
-                }
-              />
+              >
+                <View style={styles.requestText}>
+                  <ThemedText variant="body">{subject}</ThemedText>
+                  <ThemedText variant="caption" color="textSecondary">
+                    {requestDetail(row)}
+                  </ThemedText>
+                  {row.requester.email != null && (
+                    <ThemedText variant="caption" color="textSecondary">
+                      {row.requester.email}
+                    </ThemedText>
+                  )}
+                </View>
+                <View style={styles.rowActions}>
+                  <TouchableOpacity
+                    onPress={() => void handleApprove(row)}
+                    style={styles.rowButton}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('joinLink.approveLabel', { name: subject })}
+                    disabled={deciding}
+                  >
+                    <Ionicons name="checkmark-circle-outline" size={26} color={colors.success} />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => confirmDecline(row)}
+                    style={styles.rowButton}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('joinLink.declineLabel', { name: subject })}
+                    disabled={deciding}
+                  >
+                    <Ionicons name="close-circle-outline" size={26} color={colors.error} />
+                  </TouchableOpacity>
+                </View>
+              </View>
             );
           })
         )}
@@ -363,6 +401,14 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   requestsError: { gap: spacing.sm },
+  requestRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    gap: spacing.sm,
+  },
+  requestText: { flex: 1, gap: spacing.xxs },
   rowActions: { flexDirection: 'row', gap: spacing.xs },
   // Approve and decline sit 4pt apart, so they grow to 44pt rather than take
   // hitSlop (overlapping slop would hand one the other's taps).

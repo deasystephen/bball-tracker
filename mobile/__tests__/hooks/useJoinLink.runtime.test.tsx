@@ -17,6 +17,7 @@ import {
   useDeclineJoinRequest,
   useJoinLinkPreview,
   useRequestToJoin,
+  isJoinLinkExpired,
   joinLinkKeys,
   type JoinLink,
   type JoinRequestRow,
@@ -195,6 +196,23 @@ describe('useJoinLink runtime', () => {
       expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: teamKeys.detail('t1') });
       expect(mockedTrack).toHaveBeenCalledWith('join_request_declined', { team_id: 't1', request_id: 'req-1' });
     });
+  });
+
+  it('isJoinLinkExpired compares the expiry with now', () => {
+    const now = new Date('2026-12-06T00:00:00Z');
+    expect(isJoinLinkExpired({ expiresAt: '2026-12-05T23:59:59Z' }, now)).toBe(true);
+    expect(isJoinLinkExpired({ expiresAt: '2026-12-06T00:00:00Z' }, now)).toBe(true);
+    expect(isJoinLinkExpired({ expiresAt: '2026-12-06T00:00:01Z' }, now)).toBe(false);
+  });
+
+  it('useJoinRequests re-reads on every mount, even with a fresh cached list', async () => {
+    mockedGet.mockResolvedValue({ data: { success: true, requests: [request] } });
+    const { wrapper, client } = createQueryWrapper();
+    client.setQueryData(joinLinkKeys.requests('t1'), []);
+    const { result } = renderHook(() => useJoinRequests('t1', true), { wrapper });
+
+    await waitFor(() => expect(result.current.data).toEqual([request]));
+    expect(mockedGet).toHaveBeenCalledWith('/teams/t1/join-requests');
   });
 
   describe('the family side', () => {

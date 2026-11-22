@@ -1160,7 +1160,8 @@
     "declined": "Solicitud rechazada",
     "declineFailed": "No se pudo rechazar la solicitud",
     "newLinkConfirm": "Crear enlace nuevo",
-    "turnOffConfirm": "Desactivar enlace"
+    "turnOffConfirm": "Desactivar enlace",
+    "expired": "Este enlace venció. Crea uno nuevo para compartir."
   },
   "join": {
     "loading": "Cargando enlace para unirse…",
@@ -1187,6 +1188,7 @@
     "notFoundBody": "Este enlace no es válido o el entrenador lo reemplazó. Pídele al entrenador el enlace actual del equipo.",
     "expiredTitle": "El enlace para unirse venció",
     "fullTitle": "El enlace para unirse está lleno",
-    "inactiveBody": "Este enlace para unirse a {{team}} ya no acepta solicitudes. Pídele uno nuevo al entrenador."
+    "inactiveBody": "Este enlace para unirse a {{team}} ya no acepta solicitudes. Pídele uno nuevo al entrenador.",
+    "childAlreadyMember": "{{name}} ya está en {{team}}"
   }
 }

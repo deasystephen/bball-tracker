@@ -25,6 +25,7 @@ let mockLink: JoinLink | null = null;
 let mockRequests: JoinRequestRow[] = [];
 let mockLinkEnabled: boolean | undefined;
 let mockRequestsEnabled: boolean | undefined;
+let mockRequestsPoll: boolean | undefined;
 let mockTeam: Team | undefined;
 
 jest.mock('expo-router', () => ({
@@ -50,8 +51,9 @@ jest.mock('../../hooks/useJoinLink', () => ({
     mockLinkEnabled = enabled;
     return { data: enabled ? mockLink : undefined, isLoading: false, error: null, refetch: jest.fn() };
   },
-  useJoinRequests: (_teamId: string, enabled: boolean) => {
+  useJoinRequests: (_teamId: string, enabled: boolean, options?: { poll?: boolean }) => {
     mockRequestsEnabled = enabled;
+    mockRequestsPoll = options?.poll;
     return { data: enabled ? mockRequests : undefined, error: null, refetch: mockRefetchRequests };
   },
   useCreateJoinLink: () => mockCreate,
@@ -95,7 +97,8 @@ const link: JoinLink = {
   id: 'link-1',
   teamId: 't1',
   url: URL,
-  expiresAt: '2026-12-06T12:00:00Z',
+  // Always in the future, whenever the suite runs.
+  expiresAt: new Date(Date.now() + 14 * 86400000).toISOString(),
   maxUses: null,
   useCount: 3,
   createdAt: '2026-11-22T12:00:00Z',
@@ -253,9 +256,25 @@ describe('TeamJoinLinkScreen (#210)', () => {
 
     expect(getByText('2 waiting')).toBeTruthy();
     expect(getByText('Riley Park')).toBeTruthy();
-    expect(getByText("Added by Pat Park, the player's mother · pat@example.com")).toBeTruthy();
+    expect(getByText("Added by Pat Park, the player's mother")).toBeTruthy();
+    // The address is a line of its own, so a long detail never cuts it off.
+    expect(getByText('pat@example.com')).toBeTruthy();
     expect(getByText('Sam Teen')).toBeTruthy();
-    expect(getByText('Player, joining as themself · sam@example.com')).toBeTruthy();
+    expect(getByText('Player, joining as themself')).toBeTruthy();
+    expect(getByText('sam@example.com')).toBeTruthy();
+    // The list polls while the coach is on this screen.
+    expect(mockRequestsPoll).toBe(true);
+  });
+
+  it('a link that expired while cached is shown as no link, with a way to make a new one', () => {
+    signIn({ id: 'coach-1', role: 'COACH' });
+    mockLink = { ...link, expiresAt: new Date(Date.now() - 60_000).toISOString() };
+    const { getByText, getByTestId, queryByTestId } = render(<TeamJoinLinkScreen />);
+
+    expect(getByText('This link has expired. Create a new one to share.')).toBeTruthy();
+    expect(getByTestId('join-link-create')).toBeTruthy();
+    expect(queryByTestId('join-link-qr')).toBeNull();
+    expect(queryByTestId('join-link-share')).toBeNull();
   });
 
   it('approving adds the player and says who was added', async () => {
@@ -309,7 +328,7 @@ describe('TeamJoinLinkScreen (#210)', () => {
     expect(getByText('Enlace para unirse')).toBeTruthy();
     expect(getByText('Compartir enlace')).toBeTruthy();
     expect(getByLabelText('Código QR para unirse a Lakers')).toBeTruthy();
-    expect(getByText('Agregado por Pat Park, madre del jugador · pat@example.com')).toBeTruthy();
+    expect(getByText('Agregado por Pat Park, madre del jugador')).toBeTruthy();
     expect(getByLabelText('Aprobar a Riley Park')).toBeTruthy();
   });
 });

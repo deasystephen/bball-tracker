@@ -1160,7 +1160,8 @@
     "declined": "Request declined",
     "declineFailed": "Couldn't decline the request",
     "newLinkConfirm": "Create new link",
-    "turnOffConfirm": "Turn off link"
+    "turnOffConfirm": "Turn off link",
+    "expired": "This link has expired. Create a new one to share."
   },
   "join": {
     "loading": "Loading join link…",
@@ -1187,6 +1188,7 @@
     "notFoundBody": "This link is not valid, or the coach replaced it. Ask the coach for the team's current link.",
     "expiredTitle": "Join link expired",
     "fullTitle": "Join link is full",
-    "inactiveBody": "This link to join {{team}} no longer takes requests. Ask the coach for a new one."
+    "inactiveBody": "This link to join {{team}} no longer takes requests. Ask the coach for a new one.",
+    "childAlreadyMember": "{{name}} is already on {{team}}"
   }
 }
