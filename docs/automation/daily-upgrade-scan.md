@@ -45,8 +45,10 @@ The two automations merge the same way and deploy differently.
 | **Dependabot** | `GITHUB_TOKEN` (`dependabot-auto-merge.yml`) | No `CI` run starts on `main`, so nothing is deployed. A backend bump waits on `main` and ships with the next deploy |
 | **Claude scan** | the Claude GitHub App's token | `CI` runs on `main`. A pull request that touches `backend/` **deploys to production unattended**, usually between 15:00 and 19:00 UTC. It also carries any Dependabot bump that was waiting |
 
-Web and mobile pull requests deploy nothing in either case: the web app is not deployed from CI
-and mobile ships by OTA, which has its own guard (#562).
+The web site is live since 2026-11-22 (#30), so the same split applies to it: a Claude-scan pull
+request that touches `web/` rolls the web service unattended (`build-and-deploy-web`,
+`docs/deployment/web-app.md`), and a Dependabot web bump waits on `main` for the next web deploy.
+Mobile pull requests deploy nothing: mobile ships by OTA, which has its own guard (#562).
 
 So a security `override` for the backend is in production the same day, and a Dependabot
 backend bump is not in production until somebody deploys. To ship waiting bumps on purpose, start

@@ -150,6 +150,9 @@ links to Google Play (#139).
 
 ## Bring-up (two applies)
 
+Done: apply 2 ran on 2026-11-22 and PR #1063 set `web_enabled = true`. The procedure stays here
+for a rebuild, and for turning the site off and on.
+
 ECS cannot create a service until its family has a registered revision, and the first revision
 comes from the first CI run. So `local.web_enabled` (top of `infra/web.tf`) gates the service, the
 listener rules, the DNS records and the uptime alarm. It is a local in `web.tf`, not a variable, because
