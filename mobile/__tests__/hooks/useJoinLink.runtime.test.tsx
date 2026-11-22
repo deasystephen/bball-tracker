@@ -137,6 +137,7 @@ describe('useJoinLink runtime', () => {
       mockedPost.mockResolvedValueOnce({ data: { success: true, revoked: 1 } });
       const { wrapper, client } = createQueryWrapper();
       client.setQueryData(joinLinkKeys.link('t1'), link);
+      const cancelSpy = jest.spyOn(client, 'cancelQueries');
       const { result } = renderHook(() => useRevokeJoinLink(), { wrapper });
 
       await act(async () => {
@@ -145,6 +146,8 @@ describe('useJoinLink runtime', () => {
 
       expect(mockedPost).toHaveBeenCalledWith('/teams/t1/join-link/revoke');
       expect(client.getQueryData(joinLinkKeys.link('t1'))).toBeNull();
+      // An in-flight poll is cancelled before the cache is written.
+      expect(cancelSpy).toHaveBeenCalledWith({ queryKey: joinLinkKeys.link('t1') });
       expect(mockedTrack).toHaveBeenCalledWith('join_link_revoked', { team_id: 't1' });
     });
 

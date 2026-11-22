@@ -28,7 +28,7 @@ import { useTheme } from '../../hooks/useTheme';
 import { useGoBack } from '../../hooks/useGoBack';
 import { useQueryErrorState } from '../../hooks/useQueryErrorState';
 import { useJoinLinkPreview, useRequestToJoin, type JoinRequestResult } from '../../hooks/useJoinLink';
-import { getApiErrorMessage, isRateLimitedError, isTransientRequestError } from '../../services/api-client';
+import { getApiErrorMessage, isRateLimitedError } from '../../services/api-client';
 import { useIsAuthenticated } from '../../store/auth-store';
 import { setPendingReturnPath } from '../../utils/return-path';
 import { useTranslation } from '../../i18n';
@@ -47,9 +47,14 @@ export default function JoinDeepLinkScreen() {
   const isAuthenticated = useIsAuthenticated();
 
   const { data: link, isLoading, error, refetch } = useJoinLinkPreview(token);
-  // Only a transient failure is retryable; a 400/404 is the dead-link screen.
-  const transientError = error && isTransientRequestError(error) ? error : null;
-  const loadState = useQueryErrorState({ error: transientError, data: link, refetch }, t('join.loadFailedShort'));
+  // Only the server's 400 or 404 says the link is dead (unknown, or replaced
+  // by the coach), as on the web page. Every other failure (the network, a
+  // 429, a 5xx, a 403 from a proxy, a cancelled request) says nothing about
+  // the link and gets the retry screen.
+  const status = (error as { response?: { status?: number } } | null)?.response?.status;
+  const deadLink = status === 400 || status === 404;
+  const retryableError = error && !deadLink ? error : null;
+  const loadState = useQueryErrorState({ error: retryableError, data: link, refetch }, t('join.loadFailedShort'));
   const requestToJoin = useRequestToJoin();
 
   const [joinAs, setJoinAs] = useState<JoinAs | null>(null);
@@ -135,10 +140,9 @@ export default function JoinDeepLinkScreen() {
     );
   }
 
-  // Dead only when the server said so (400/404) or nothing ever loaded. A
-  // refetch that failed on the network keeps the preview it already has: the
-  // form stays, with whatever the person typed.
-  if (!link || (error && !isTransientRequestError(error))) {
+  // Dead when the server said so. A re-read that failed some other way keeps
+  // the preview it already has: the form stays, with whatever was typed.
+  if (deadLink || !link) {
     return (
       <Notice
         icon="close-circle-outline"

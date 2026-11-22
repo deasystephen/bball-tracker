@@ -234,6 +234,20 @@ describe('JoinDeepLinkScreen (#210)', () => {
     expect(queryByText('Join link not found')).toBeNull();
   });
 
+  it.each([
+    ['a 403 from a proxy', new AxiosError('Forbidden', 'ERR_BAD_REQUEST', undefined, undefined, { status: 403 } as never)],
+    ['a cancelled request', new AxiosError('canceled', 'ERR_CANCELED')],
+    ['an error that is not an HTTP answer', new Error('boom')],
+  ])('%s is a retry screen too: only a 400 or 404 says the link is dead', (_label, failure) => {
+    signedIn(true);
+    mockPreview = undefined;
+    mockError = failure;
+    const { getByText, queryByText } = render(<JoinDeepLinkScreen />);
+
+    expect(getByText("We couldn't load this join link. Check your connection and try again.")).toBeTruthy();
+    expect(queryByText('Join link not found')).toBeNull();
+  });
+
   it('renders in Spanish', async () => {
     signedIn(true);
     await i18n.changeLanguage('es');

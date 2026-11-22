@@ -103,12 +103,15 @@ export function useCreateJoinLink() {
       );
       return response.data.link;
     },
-    onSuccess: (link, variables) => {
+    onSuccess: async (link, variables) => {
       trackEvent(AnalyticsEvents.JOIN_LINK_CREATED, {
         team_id: variables.teamId,
         link_id: link.id,
         has_max_uses: link.maxUses != null,
       });
+      // The screen polls this query: a read that started before the create
+      // must not land after it and put the replaced link back on screen.
+      await queryClient.cancelQueries({ queryKey: joinLinkKeys.link(variables.teamId) });
       queryClient.setQueryData(joinLinkKeys.link(variables.teamId), link);
     },
   });
@@ -122,8 +125,10 @@ export function useRevokeJoinLink() {
     mutationFn: async ({ teamId }: { teamId: string }) => {
       await apiClient.post(`/teams/${teamId}/join-link/revoke`);
     },
-    onSuccess: (_, variables) => {
+    onSuccess: async (_, variables) => {
       trackEvent(AnalyticsEvents.JOIN_LINK_REVOKED, { team_id: variables.teamId });
+      // As in create: an in-flight poll must not bring the revoked link back.
+      await queryClient.cancelQueries({ queryKey: joinLinkKeys.link(variables.teamId) });
       queryClient.setQueryData(joinLinkKeys.link(variables.teamId), null);
     },
   });
@@ -168,10 +173,12 @@ export function useApproveJoinRequest() {
         request_id: variables.request.id,
         kind: variables.request.kind === 'CHILD' ? 'child' : 'self',
       });
-      queryClient.invalidateQueries({ queryKey: joinLinkKeys.requests(variables.teamId) });
       // The roster changed.
       queryClient.invalidateQueries({ queryKey: teamKeys.detail(variables.teamId) });
       queryClient.invalidateQueries({ queryKey: teamKeys.lists() });
+      // Returned, so the mutation stays pending (and the row's buttons stay
+      // disabled) until the decided row has left the list.
+      return queryClient.invalidateQueries({ queryKey: joinLinkKeys.requests(variables.teamId) });
     },
   });
 }
@@ -189,7 +196,8 @@ export function useDeclineJoinRequest() {
         team_id: variables.teamId,
         request_id: variables.requestId,
       });
-      queryClient.invalidateQueries({ queryKey: joinLinkKeys.requests(variables.teamId) });
+      // Returned: pending until the declined row has left the list.
+      return queryClient.invalidateQueries({ queryKey: joinLinkKeys.requests(variables.teamId) });
     },
   });
 }

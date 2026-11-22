@@ -506,7 +506,8 @@ themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by 
   joining?" with **Me** / **My child** (`SortPills`, nothing preselected), the child's name and
   `RelationshipChips`. A new request shows "Request sent" (and "Add another child" for a parent);
   an account already on the team is sent to it. Expired, full and unknown links each have their
-  own screen; a network failure, 429 or 5xx is a retry, never the dead-link screen. Sentry's
+  own screen; only the server's 400 or 404 is the dead-link screen, every other failure is a
+  retry, as on the web page. Sentry's
   redaction masks the segment after `/join/` (`services/sentry.ts`), in the custom-scheme deep
   link too (`hooplings://join/<token>`, where `join` sits in the host position; the same fix covers
   `hooplings://invite/<token>`). Events: `join_link_created`,
