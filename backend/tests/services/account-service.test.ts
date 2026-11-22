@@ -573,7 +573,7 @@ describe('AccountService.exportUserData', () => {
     for (const model of [
       'teamMember', 'teamStaff', 'leagueAdmin', 'guardian', 'teamInvitation', 'guardianInvitation',
       'gameRsvp', 'gameEvent', 'playerStats', 'pushToken', 'calendarFeedToken', 'announcement', 'announcementReply',
-      'practiceAvailability', 'teamJoinRequest',
+      'practiceAvailability', 'teamJoinRequest', 'teamJoinLink',
     ] as const) {
       (mockPrisma[model].findMany as jest.Mock).mockResolvedValue([]);
     }
@@ -586,7 +586,7 @@ describe('AccountService.exportUserData', () => {
         'announcementReplies', 'announcements', 'calendarFeedTokens', 'exportedAt', 'gameEvents', 'gameRsvps',
         'guardianInvitations', 'guardiansAsChild', 'guardiansAsParent', 'leagueAdmins', 'personalLeague', 'playerStats',
         'pushTokens', 'receivedInvitations', 'sentGuardianInvitations', 'sentInvitations', 'sentStaffInvitations', 'staffInvitations',
-        'teamMembers', 'teamStaff', 'user', 'practiceAvailability', 'joinRequests',
+        'teamMembers', 'teamStaff', 'user', 'practiceAvailability', 'joinRequests', 'createdJoinLinks',
       ].sort()
     );
     expect(data.user).not.toHaveProperty('workosUserId');

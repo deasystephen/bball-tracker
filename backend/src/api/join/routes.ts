@@ -17,11 +17,7 @@ import { BadRequestError } from '../../utils/errors';
 import { respondWithError } from '../../utils/respond-with-error';
 import { logger } from '../../utils/logger';
 import { isValidInvitationTokenFormat } from '../../utils/invitation-token';
-import {
-  joinLinkLookupIpRateLimit,
-  joinLinkTokenRateLimit,
-  joinRequestRateLimit,
-} from '../middleware/rate-limit';
+import { joinLinkLookupIpRateLimit, joinRequestRateLimit } from '../middleware/rate-limit';
 import { joinRequestSchema } from './schemas';
 
 const router = Router();
@@ -36,13 +32,14 @@ const JOIN_LINK_NOT_FOUND = 'Join link not found';
  * No roster, no coach, no counts. A revoked link is a 404.
  *
  * Like the invitation lookup it is exempt from the global IP limit (the web
- * page fetches it server-side from one egress IP) and has a per-token budget
- * plus a loose per-IP ceiling of its own.
+ * page fetches it server-side from one egress IP) and has a loose per-IP
+ * ceiling of its own. No per-token budget: the link is shared with a whole
+ * team, and one holder must not be able to spend it for everyone.
  *
  * A successful lookup logs `Join link viewed` (link id, state, client), never
  * the token or the team's name.
  */
-router.get('/:token', joinLinkLookupIpRateLimit, joinLinkTokenRateLimit, async (req, res) => {
+router.get('/:token', joinLinkLookupIpRateLimit, async (req, res) => {
   const { token } = req.params;
   if (!isValidInvitationTokenFormat(token as string)) {
     res.status(400).json({ error: 'Invalid token format' });
@@ -73,7 +70,8 @@ router.get('/:token', joinLinkLookupIpRateLimit, joinLinkTokenRateLimit, async (
  *
  * 201 `{ status: 'pending', created: true, … }` for a new request; 200 for a
  * request that already existed or `{ status: 'already_member' }` (nothing
- * written). 404 unknown or revoked link, 410 `join_link_inactive` (expired or
+ * written), whatever has happened to the link since. A new request needs a
+ * live link: 404 unknown or revoked, 410 `join_link_inactive` (expired or
  * full). The roster is not touched until a coach approves.
  */
 router.post('/:token', authenticate, joinRequestRateLimit, async (req, res) => {

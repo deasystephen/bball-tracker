@@ -25,7 +25,7 @@
  * Detail: docs/architecture/roster-and-invitations.md, Team join links.
  */
 
-import { GuardianRelationship, JoinRequestKind, Prisma } from '@prisma/client';
+import { JoinRequestKind, Prisma } from '@prisma/client';
 import { randomBytes } from 'crypto';
 import prisma from '../models';
 import { BadRequestError, ForbiddenError, JoinLinkInactiveError, NotFoundError } from '../utils/errors';
@@ -48,6 +48,15 @@ export const JOIN_LINK_DEFAULT_EXPIRES_DAYS = 14;
  * account cannot fill the coach's list.
  */
 export const MAX_PENDING_JOIN_REQUESTS_PER_ACCOUNT = 6;
+
+/**
+ * A request nobody decides lapses: after this many days it is flipped to
+ * EXPIRED and its `childName` cleared, lazily, the next time the team's list
+ * is read or the requester asks again (nothing in this API is scheduled). So
+ * a family is never stuck at the pending cap, and a typed child's name does
+ * not wait on a coach forever.
+ */
+export const JOIN_REQUEST_TTL_DAYS = 30;
 
 const JOIN_LINK_NOT_FOUND = 'Join link not found';
 const JOIN_REQUEST_NOT_FOUND = 'Join request not found';
@@ -92,6 +101,28 @@ const JOIN_REQUEST_SELECT = {
   createdAt: true,
 } satisfies Prisma.TeamJoinRequestSelect;
 
+/** The requester's own pending rows, with the name the dedupe compares. Never returned as is. */
+const JOIN_REQUEST_DEDUPE_SELECT = {
+  ...JOIN_REQUEST_SELECT,
+  childName: true,
+} satisfies Prisma.TeamJoinRequestSelect;
+
+/** What a decision reads of the request before it locks anything. */
+const JOIN_REQUEST_DECISION_SELECT = {
+  id: true,
+  requesterId: true,
+  kind: true,
+  childName: true,
+  relationship: true,
+  status: true,
+  createdAt: true,
+} satisfies Prisma.TeamJoinRequestSelect;
+
+/** The names of the children an account guards, for the already-on-the-roster check. */
+const GUARDED_CHILD_NAME_SELECT = {
+  child: { select: { name: true, deletedAt: true } },
+} satisfies Prisma.GuardianSelect;
+
 /** A pending request as the team's roster managers list it. */
 export const JOIN_REQUEST_LIST_SELECT = {
   ...JOIN_REQUEST_SELECT,
@@ -106,6 +137,7 @@ type JoinLinkManagerRow = Prisma.TeamJoinLinkGetPayload<{ select: typeof JOIN_LI
 type JoinLinkPublicRow = Prisma.TeamJoinLinkGetPayload<{ select: typeof JOIN_LINK_PUBLIC_SELECT }>;
 export type JoinRequestSummary = Prisma.TeamJoinRequestGetPayload<{ select: typeof JOIN_REQUEST_SELECT }>;
 export type JoinRequestListItem = Prisma.TeamJoinRequestGetPayload<{ select: typeof JOIN_REQUEST_LIST_SELECT }>;
+type JoinRequestDecisionRow = Prisma.TeamJoinRequestGetPayload<{ select: typeof JOIN_REQUEST_DECISION_SELECT }>;
 
 /** The team's live link for a roster manager. `url` carries the token; there is no separate token field. */
 export interface JoinLinkView {
@@ -152,6 +184,11 @@ function linkState(row: Pick<JoinLinkPublicRow, 'expiresAt' | 'maxUses' | 'useCo
     return 'full';
   }
   return 'active';
+}
+
+/** The moment before which a PENDING request has lapsed. */
+function staleBefore(now: Date = new Date()): Date {
+  return new Date(now.getTime() - JOIN_REQUEST_TTL_DAYS * 24 * 60 * 60 * 1000);
 }
 
 /** Names compared the way a coach reads them: trimmed, inner whitespace collapsed, case ignored. */
@@ -244,21 +281,48 @@ export class JoinLinkService {
    */
   static async revokeLinks(teamId: string, userId: string): Promise<{ revoked: number }> {
     await this.requireRosterManager(teamId, userId);
-    const { count } = await prisma.teamJoinLink.updateMany({
-      where: { teamId, revokedAt: null },
-      data: { revokedAt: new Date() },
+    // Behind the team row lock `createLink` holds: a revoke that races a
+    // create waits for it and then revokes the link it inserted, instead of
+    // answering "revoked" while a link it never saw stays live.
+    const count = await prisma.$transaction(async (tx) => {
+      if (!(await lockTeamRow(tx, teamId))) {
+        throw new NotFoundError('Team not found');
+      }
+      const revoked = await tx.teamJoinLink.updateMany({
+        where: { teamId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      return revoked.count;
     });
     logger.info('Join link revoked', { teamId, userId, revokedCount: count });
     return { revoked: count };
   }
 
-  /** The link behind a token, or 404; a revoked link reads as unknown. */
-  private static async findLiveLink(token: string): Promise<JoinLinkPublicRow> {
+  /** The link behind a token, revoked or not; 404 when there is none. */
+  private static async findLink(token: string): Promise<JoinLinkPublicRow> {
     const link = await prisma.teamJoinLink.findUnique({ where: { token }, select: JOIN_LINK_PUBLIC_SELECT });
-    if (!link || link.revokedAt !== null) {
+    if (!link) {
       throw new NotFoundError(JOIN_LINK_NOT_FOUND);
     }
     return link;
+  }
+
+  /**
+   * Lazy expiry of requests nobody decided within `JOIN_REQUEST_TTL_DAYS`:
+   * EXPIRED, and the typed child's name cleared. Runs where pending requests
+   * are read (the team's list, the requester's next ask).
+   */
+  private static async expireStaleRequests(
+    db: Prisma.TransactionClient,
+    where: Pick<Prisma.TeamJoinRequestWhereInput, 'teamId' | 'requesterId'>
+  ): Promise<void> {
+    const { count } = await db.teamJoinRequest.updateMany({
+      where: { ...where, status: 'PENDING', createdAt: { lt: staleBefore() } },
+      data: { status: 'EXPIRED', decidedAt: new Date(), childName: null },
+    });
+    if (count > 0) {
+      logger.info('Join requests expired', { teamId: where.teamId, expiredCount: count });
+    }
   }
 
   /**
@@ -267,17 +331,27 @@ export class JoinLinkService {
    * counts. `linkId` is for the caller's log line, never for the response.
    */
   static async previewByToken(token: string): Promise<JoinLinkPreview & { linkId: string }> {
-    const link = await this.findLiveLink(token);
+    const link = await this.findLink(token);
+    // A revoked link reads as unknown: a rotated link tells its holder nothing.
+    if (link.revokedAt !== null) {
+      throw new NotFoundError(JOIN_LINK_NOT_FOUND);
+    }
     return { linkId: link.id, teamName: link.team.name, state: linkState(link, new Date()) };
   }
 
   /**
-   * A signed-in account asks to join through the link. Idempotent: an
-   * account (or a child it guards, matched by name) already on the roster
-   * answers `already_member` and writes nothing; a request already waiting is
-   * returned as it is. Otherwise one transaction, behind the requester's
-   * `User` row lock (so a double tap creates one request and account deletion
-   * never leaves a request behind):
+   * A signed-in account asks to join through the link. One transaction,
+   * behind the requester's `User` row lock (so a double tap creates one
+   * request and account deletion or an un-claim never leaves a request
+   * behind; an account that is no longer a login is refused).
+   *
+   * Idempotent, and the idempotent answers come BEFORE the link's state is
+   * judged: an account (or a child it guards, matched by name) already on the
+   * roster answers `already_member` and writes nothing, and a request already
+   * waiting is returned as it is, even when the link has since filled,
+   * expired or been rotated. A retry after a lost response is therefore never
+   * told to ask the coach for a new link. Only a NEW request needs a live
+   * link (404 revoked, 410 expired or full), then:
    *  - the per-account pending cap;
    *  - one use of the link, taken by a single conditional UPDATE (not
    *    revoked, not expired, under `maxUses`), so the cap holds under
@@ -286,25 +360,29 @@ export class JoinLinkService {
    * Nothing is added to the roster here; a roster manager decides.
    */
   static async requestToJoin(token: string, data: JoinRequestInput, userId: string): Promise<JoinRequestResult> {
-    const link = await this.findLiveLink(token);
-    const state = linkState(link, new Date());
-    if (state !== 'active') {
-      throw new JoinLinkInactiveError(state);
-    }
+    const link = await this.findLink(token);
     const teamId = link.teamId;
     const teamName = link.team.name;
     const kind: JoinRequestKind = data.kind === 'child' ? 'CHILD' : 'SELF';
     const childName = data.kind === 'child' ? data.childName : null;
 
     const result = await prisma.$transaction(async (tx): Promise<JoinRequestResult> => {
-      const [requester] = await lockUsers(tx, [userId]);
-      if (!requester || requester.deletedAt !== null) {
+      await lockUsers(tx, [userId]);
+      // Read after the lock: deleted, or un-claimed back into a managed roster
+      // record (the under-age branch, the operator conversion), the account is
+      // no longer a login and its requests were purged with it.
+      const requester = await tx.user.findFirst({
+        where: { id: userId, deletedAt: null, isManaged: false },
+        select: { id: true },
+      });
+      if (!requester) {
         throw new NotFoundError('Account not found');
       }
 
+      await this.expireStaleRequests(tx, { teamId, requesterId: userId });
       const pending = await tx.teamJoinRequest.findMany({
         where: { teamId, requesterId: userId, status: 'PENDING' },
-        select: { ...JOIN_REQUEST_SELECT, childName: true },
+        select: JOIN_REQUEST_DEDUPE_SELECT,
         orderBy: { createdAt: 'asc' },
       });
 
@@ -321,7 +399,7 @@ export class JoinLinkService {
         // name in code (a handful of rows; no pattern match in SQL).
         const guarded = await tx.guardian.findMany({
           where: { parentId: userId, child: { deletedAt: null, teamMembers: { some: { teamId } } } },
-          select: { child: { select: { name: true, deletedAt: true } } },
+          select: GUARDED_CHILD_NAME_SELECT,
         });
         if (guarded.some((row) => sameName(row.child.name, childName))) {
           return { status: 'already_member', teamId, teamName };
@@ -338,6 +416,15 @@ export class JoinLinkService {
           teamName,
           request: { id: existing.id, kind: existing.kind, status: existing.status, createdAt: existing.createdAt },
         };
+      }
+
+      // From here on a NEW request would be written, which needs a live link.
+      if (link.revokedAt !== null) {
+        throw new NotFoundError(JOIN_LINK_NOT_FOUND);
+      }
+      const state = linkState(link, new Date());
+      if (state !== 'active') {
+        throw new JoinLinkInactiveError(state);
       }
       if (pending.length >= MAX_PENDING_JOIN_REQUESTS_PER_ACCOUNT) {
         throw new BadRequestError(
@@ -385,7 +472,7 @@ export class JoinLinkService {
         requesterId: userId,
         kind,
       });
-      await this.notifyRosterManagers(teamId, teamName);
+      await this.notifyRosterManagers(teamId, teamName, userId);
     }
 
     return result;
@@ -393,13 +480,14 @@ export class JoinLinkService {
 
   /**
    * Best-effort push to the team's roster managers: a request is waiting. No
-   * name in the push (lock screens); the app lists the requests. A failed
-   * push never fails the request.
+   * name in the push (lock screens); the app lists the requests. The
+   * requester is left out (a coach adding their own child is not told that
+   * "someone" asked). A failed push never fails the request.
    */
-  private static async notifyRosterManagers(teamId: string, teamName: string): Promise<void> {
+  private static async notifyRosterManagers(teamId: string, teamName: string, requesterId: string): Promise<void> {
     try {
       const managers = await prisma.teamStaff.findMany({
-        where: { teamId, role: { canManageRoster: true } },
+        where: { teamId, role: { canManageRoster: true }, userId: { not: requesterId } },
         select: { userId: true },
       });
       if (managers.length === 0) {
@@ -421,12 +509,23 @@ export class JoinLinkService {
     }
   }
 
-  /** Best-effort push to the requester once a coach approved. */
-  private static async notifyRequester(requesterId: string, teamId: string, teamName: string): Promise<void> {
+  /**
+   * Best-effort push to the requester once a coach approved. A parent is told
+   * their child was added (no name: lock screens), never that they joined.
+   */
+  private static async notifyRequester(
+    requesterId: string,
+    teamId: string,
+    teamName: string,
+    kind: JoinRequestKind
+  ): Promise<void> {
     try {
       await NotificationService.sendToUsers([requesterId], {
         title: 'Request approved',
-        body: `You have been added to ${teamName}.`,
+        body:
+          kind === 'CHILD'
+            ? `Your child has been added to ${teamName}.`
+            : `You have been added to ${teamName}.`,
         data: { type: 'join_request_approved', teamId },
       });
     } catch (err: unknown) {
@@ -440,6 +539,7 @@ export class JoinLinkService {
   /** The team's pending join requests, oldest first, for roster managers only. */
   static async listRequests(teamId: string, userId: string): Promise<JoinRequestListItem[]> {
     await this.requireRosterManager(teamId, userId);
+    await this.expireStaleRequests(prisma, { teamId });
     return prisma.teamJoinRequest.findMany({
       where: { teamId, status: 'PENDING' },
       select: JOIN_REQUEST_LIST_SELECT,
@@ -457,20 +557,22 @@ export class JoinLinkService {
     requestId: string,
     userId: string,
     verb: 'approve' | 'decline'
-  ): Promise<{
-    team: { id: string; name: string };
-    request: { id: string; requesterId: string; kind: JoinRequestKind; childName: string | null; relationship: GuardianRelationship | null };
-  }> {
+  ): Promise<{ team: { id: string; name: string }; request: JoinRequestDecisionRow }> {
     const team = await this.requireRosterManager(teamId, userId);
     const request = await prisma.teamJoinRequest.findFirst({
       where: { id: requestId, teamId },
-      select: { id: true, requesterId: true, kind: true, childName: true, relationship: true, status: true },
+      select: JOIN_REQUEST_DECISION_SELECT,
     });
     if (!request) {
       throw new NotFoundError(JOIN_REQUEST_NOT_FOUND);
     }
     if (request.status !== 'PENDING') {
       throw new BadRequestError(`Cannot ${verb} a join request with status: ${request.status}`);
+    }
+    if (request.createdAt < staleBefore()) {
+      // Lapsed but not yet flipped (nobody read the list since): the same
+      // answer the list's lazy expiry would have produced.
+      throw new BadRequestError(`Cannot ${verb} a join request with status: EXPIRED`);
     }
     return { team, request };
   }
@@ -479,9 +581,10 @@ export class JoinLinkService {
    * A roster manager approves a request: the roster is written here, in one
    * transaction.
    *  - Locks the requester and the approver (`lockUsers`, one id-ordered
-   *    statement): a deleted account never gets a membership or a guardian
-   *    link (its requests were removed with it), and a deleted approver never
-   *    becomes a child's `managedById`.
+   *    statement): a requester deleted or un-claimed into a managed record
+   *    never gets a membership or a guardian link (its requests were removed
+   *    with the login), and a deleted approver never becomes a child's
+   *    `managedById`.
    *  - Flips PENDING → ACCEPTED guarded on the status (the loser of two
    *    approvals, or of an approve racing a decline, gets 400) and clears
    *    `childName`: the name now lives on the roster record.
@@ -497,11 +600,17 @@ export class JoinLinkService {
 
     const result = await prisma.$transaction(async (tx): Promise<ApproveJoinRequestResult> => {
       const locked = await lockUsers(tx, [requesterId, userId]);
-      const live = (id: string): boolean => locked.some((row) => row.id === id && row.deletedAt === null);
-      if (!live(userId)) {
+      if (!locked.some((row) => row.id === userId && row.deletedAt === null)) {
         throw new NotFoundError('Account not found');
       }
-      if (!live(requesterId)) {
+      // Read after the lock, like the request: a requester deleted or
+      // un-claimed into a managed record meanwhile is no longer a login, and
+      // gets no membership and no guardian link.
+      const requester = await tx.user.findFirst({
+        where: { id: requesterId, deletedAt: null, isManaged: false },
+        select: { role: true },
+      });
+      if (!requester) {
         throw new BadRequestError('The account that sent this request no longer exists');
       }
 
@@ -544,8 +653,7 @@ export class JoinLinkService {
         data: { parentId: requesterId, childId: child.id, relationship: request.relationship, isPrimary: true },
         select: { id: true },
       });
-      const parent = await tx.user.findFirst({ where: { id: requesterId, deletedAt: null }, select: { role: true } });
-      if (parent?.role === 'PLAYER') {
+      if (requester.role === 'PLAYER') {
         await GuardianService.promoteBareAccountToParent(tx, requesterId);
       }
       return { request: updated, playerId: child.id };
@@ -559,7 +667,7 @@ export class JoinLinkService {
       kind: request.kind,
       userId,
     });
-    await this.notifyRequester(requesterId, teamId, team.name);
+    await this.notifyRequester(requesterId, teamId, team.name, request.kind);
 
     return result;
   }

@@ -634,6 +634,7 @@ export class AccountService {
       staffInvitations,
       sentStaffInvitations,
       joinRequests,
+      createdJoinLinks,
       gameRsvps,
       practiceAvailability,
       gameEvents,
@@ -659,6 +660,7 @@ export class AccountService {
       staffInvitationsQuery,
       prisma.staffInvitation.findMany({ where: { invitedById: userId }, select: SENT_STAFF_INVITATION_SELECT }),
       prisma.teamJoinRequest.findMany({ where: { requesterId: userId }, select: JOIN_REQUEST_EXPORT_SELECT }),
+      prisma.teamJoinLink.findMany({ where: { createdById: userId }, select: CREATED_JOIN_LINK_EXPORT_SELECT }),
       prisma.gameRsvp.findMany({ where: { userId } }),
       prisma.practiceAvailability.findMany({ where: { userId } }),
       prisma.gameEvent.findMany({ where: { playerId: userId }, orderBy: { createdAt: 'asc' } }),
@@ -686,6 +688,7 @@ export class AccountService {
       staffInvitations,
       sentStaffInvitations,
       joinRequests,
+      createdJoinLinks,
       gameRsvps,
       practiceAvailability,
       gameEvents,
@@ -1486,6 +1489,17 @@ const JOIN_REQUEST_EXPORT_SELECT = {
   decidedAt: true,
 } satisfies Prisma.TeamJoinRequestSelect;
 
+/** A team join link the account created (#210). Never the token: it is the team's secret, not the person's data. */
+const CREATED_JOIN_LINK_EXPORT_SELECT = {
+  id: true,
+  teamId: true,
+  expiresAt: true,
+  maxUses: true,
+  useCount: true,
+  revokedAt: true,
+  createdAt: true,
+} satisfies Prisma.TeamJoinLinkSelect;
+
 /** The other side of a guardian link, in the shared user shape (#813). */
 const GUARDIAN_CHILD_EXPORT_INCLUDE = { child: { select: USER_SUMMARY_SELECT } } satisfies Prisma.GuardianInclude;
 const GUARDIAN_PARENT_EXPORT_INCLUDE = { parent: { select: USER_SUMMARY_SELECT } } satisfies Prisma.GuardianInclude;
@@ -1509,6 +1523,8 @@ export interface UserDataExport {
   sentStaffInvitations: Prisma.StaffInvitationGetPayload<{ select: typeof SENT_STAFF_INVITATION_SELECT }>[];
   /** Join requests the account sent through a team join link (#210). */
   joinRequests: Prisma.TeamJoinRequestGetPayload<{ select: typeof JOIN_REQUEST_EXPORT_SELECT }>[];
+  /** Team join links the account created (#210), without their tokens. */
+  createdJoinLinks: Prisma.TeamJoinLinkGetPayload<{ select: typeof CREATED_JOIN_LINK_EXPORT_SELECT }>[];
   gameRsvps: Prisma.GameRsvpGetPayload<Record<string, never>>[];
   practiceAvailability: Prisma.PracticeAvailabilityGetPayload<Record<string, never>>[];
   gameEvents: Prisma.GameEventGetPayload<Record<string, never>>[];

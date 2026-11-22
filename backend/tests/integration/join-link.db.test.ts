@@ -9,7 +9,12 @@
  *    cannot read the team (`canAccessTeam`) while it is pending or after a
  *    decline;
  *  - the conditional use-count UPDATE holds `maxUses` under concurrency;
- *  - an expired link is refused (410) and a revoked one reads as unknown (404);
+ *  - an expired link is refused (410) and a revoked one reads as unknown (404),
+ *    but a retry by an account whose request already exists is answered with
+ *    that request whatever happened to the link since;
+ *  - a request nobody decides lapses after JOIN_REQUEST_TTL_DAYS and frees
+ *    the requester's cap; an account un-claimed into a managed record can
+ *    neither ask nor be approved;
  *  - approval writes the roster: SELF adds the member; CHILD creates a managed
  *    record with no login, its membership and the primary guardian link, and
  *    makes a bare PLAYER a PARENT; two concurrent approvals write it once;
@@ -20,7 +25,7 @@
  */
 jest.unmock('../../src/models');
 import prisma from '../../src/models';
-import { JoinLinkService, type JoinLinkView } from '../../src/services/join-link-service';
+import { JOIN_REQUEST_TTL_DAYS, JoinLinkService, type JoinLinkView } from '../../src/services/join-link-service';
 import { AccountService } from '../../src/services/account-service';
 import { NotificationService } from '../../src/services/notification-service';
 import { canAccessTeam } from '../../src/utils/permissions';
@@ -187,6 +192,97 @@ describe('JoinLinkService (real Postgres, #210)', () => {
     expect(await prisma.teamJoinRequest.count({ where: { teamId: club.teamId } })).toBe(0);
   });
 
+  it('a retry after the last use was taken returns the existing request, not "link full"', async () => {
+    const { org: club, coachId } = await team('retry');
+    const link = await JoinLinkService.createLink(club.teamId, { maxUses: 1 }, coachId);
+    const first = await adult('first');
+    const second = await adult('second');
+
+    const created = await JoinLinkService.requestToJoin(tokenOf(link), { kind: 'self' }, first);
+    expect(created).toMatchObject({ status: 'pending', created: true });
+
+    // The response was lost and the client retries: the link is full now.
+    await expect(JoinLinkService.requestToJoin(tokenOf(link), { kind: 'self' }, first)).resolves.toMatchObject({
+      status: 'pending',
+      created: false,
+    });
+    // Someone new is refused, and so is a NEW request (a child) by the first account.
+    await expect(JoinLinkService.requestToJoin(tokenOf(link), { kind: 'self' }, second)).rejects.toMatchObject({
+      statusCode: 410,
+      details: { reason: 'full' },
+    });
+    await expect(
+      JoinLinkService.requestToJoin(
+        tokenOf(link),
+        { kind: 'child', childName: `Extra-${fx.run}`, relationship: 'OTHER' },
+        first
+      )
+    ).rejects.toMatchObject({ statusCode: 410 });
+
+    // Rotated: the old token is dead for everyone else, the retry still resolves.
+    await JoinLinkService.createLink(club.teamId, {}, coachId);
+    await expect(JoinLinkService.requestToJoin(tokenOf(link), { kind: 'self' }, first)).resolves.toMatchObject({
+      status: 'pending',
+      created: false,
+    });
+    await expect(JoinLinkService.requestToJoin(tokenOf(link), { kind: 'self' }, second)).rejects.toBeInstanceOf(
+      NotFoundError
+    );
+    expect(await prisma.teamJoinRequest.count({ where: { teamId: club.teamId } })).toBe(1);
+  });
+
+  it('a request nobody decides lapses: the name is cleared and the requester may ask again', async () => {
+    const { org: club, coachId } = await team('stale');
+    const link = await JoinLinkService.createLink(club.teamId, {}, coachId);
+    const parentId = await adult('waiting');
+    const childName = `Waiting-${fx.run}`;
+    const asked = await JoinLinkService.requestToJoin(
+      tokenOf(link),
+      { kind: 'child', childName, relationship: 'FATHER' },
+      parentId
+    );
+    if (asked.status !== 'pending') throw new Error('expected a pending request');
+    const old = new Date(Date.now() - (JOIN_REQUEST_TTL_DAYS + 1) * 24 * 60 * 60 * 1000);
+    await prisma.teamJoinRequest.update({ where: { id: asked.request.id }, data: { createdAt: old } });
+
+    // Not flipped yet, already undecidable.
+    await expect(JoinLinkService.approveRequest(club.teamId, asked.request.id, coachId)).rejects.toBeInstanceOf(
+      BadRequestError
+    );
+    expect(await JoinLinkService.listRequests(club.teamId, coachId)).toEqual([]);
+    expect(await prisma.teamJoinRequest.findUniqueOrThrow({ where: { id: asked.request.id } })).toMatchObject({
+      status: 'EXPIRED',
+      childName: null,
+    });
+    expect(await prisma.user.count({ where: { name: childName } })).toBe(0);
+
+    // The same ask is a new request now.
+    await expect(
+      JoinLinkService.requestToJoin(tokenOf(link), { kind: 'child', childName, relationship: 'FATHER' }, parentId)
+    ).resolves.toMatchObject({ status: 'pending', created: true });
+  });
+
+  it('an account un-claimed into a managed record can neither ask nor be approved', async () => {
+    const { org: club, coachId } = await team('unclaimed');
+    const link = await JoinLinkService.createLink(club.teamId, {}, coachId);
+    const accountId = await adult('young');
+    await JoinLinkService.requestToJoin(tokenOf(link), { kind: 'self' }, accountId);
+    const [pending] = await JoinLinkService.listRequests(club.teamId, coachId);
+
+    // What the un-claim leaves on the row (its purge of the requests is
+    // covered below; here the request is left in place on purpose, as a
+    // request that slipped in behind the purge would be).
+    await prisma.user.update({ where: { id: accountId }, data: { isManaged: true, managedById: coachId } });
+
+    await expect(JoinLinkService.approveRequest(club.teamId, pending.id, coachId)).rejects.toBeInstanceOf(
+      BadRequestError
+    );
+    expect(await prisma.teamMember.count({ where: { teamId: club.teamId, playerId: accountId } })).toBe(0);
+    await expect(
+      JoinLinkService.requestToJoin(tokenOf(link), { kind: 'child', childName: `No-${fx.run}`, relationship: 'OTHER' }, accountId)
+    ).rejects.toBeInstanceOf(NotFoundError);
+  });
+
   it('approving a SELF request adds the member once; a second approval is refused', async () => {
     const { org: club, coachId } = await team('self');
     const link = await JoinLinkService.createLink(club.teamId, {}, coachId);
@@ -346,6 +442,11 @@ describe('JoinLinkService (real Postgres, #210)', () => {
     const assistantId = await fx.user(`assistant${counter}`, 'COACH');
     await fx.staff(assistantId, club);
     const link = await JoinLinkService.createLink(club.teamId, {}, assistantId);
+
+    // The export lists the link the coach created, never its token.
+    const exported = await AccountService.exportUserData(assistantId);
+    expect(exported.createdJoinLinks).toEqual([expect.objectContaining({ id: link.id, teamId: club.teamId })]);
+    expect(JSON.stringify(exported)).not.toContain(tokenOf(link));
 
     await AccountService.deleteAccount(assistantId, { actorId: assistantId, mode: 'self' });
 

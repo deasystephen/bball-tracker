@@ -91,6 +91,13 @@ on `deletedAt IS NULL`, so a request that raced the deletion cannot re-identify 
   who has its URL (the bucket is public-read; URLs are unguessable). On account deletion the current photo is deleted. A photo someone
   uploaded for a child or player they manage stays while that profile shows it. Mechanism:
   `docs/architecture/backend-services.md#avatar-uploads-servicesupload-servicets-apiuploads`.
+- **Join requests (#210).** A request to join a team through a join link holds the requester's
+  account id and, for a child, the name and relationship the parent typed. The name is cleared
+  when a coach approves (it is then the roster record's name) or declines, and when the request
+  lapses, 30 days after it was sent; the lapse is applied the next time the team's request list is
+  read or the requester asks again, not by a timer. Deleting the account deletes its requests.
+  The privacy policy does not mention join requests yet; it must before the feature is offered to
+  families.
 - RDS automated backups retain the pre-deletion data for up to **7 days**
   (`backup_retention_period` in `infra/rds.tf`); they are not edited. **Manual snapshots**
   (taken before risky migrations and major upgrades, `docs/runbooks/rds-backup-restore.md`) have
@@ -219,7 +226,8 @@ on `deletedAt IS NULL`, so a request that raced the deletion cannot re-identify 
    `guardiansAsParent`, `guardiansAsChild`, `receivedInvitations`, `sentInvitations`,
    `guardianInvitations`, `sentGuardianInvitations`, `staffInvitations`, `sentStaffInvitations`,
    `joinRequests` (requests sent through a team join link, #210; a pending one carries the child's
-   name the account typed), `gameRsvps`, `practiceAvailability`, `gameEvents`, `playerStats`,
+   name the account typed), `createdJoinLinks` (links the account created, without their tokens),
+   `gameRsvps`, `practiceAvailability`, `gameEvents`, `playerStats`,
    `pushTokens`, `calendarFeedTokens`, `announcements`, `announcementReplies`
    (`AccountService.exportUserData`; the integration test asserts this list).
 4. **Delete:**

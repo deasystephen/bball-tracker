@@ -551,9 +551,10 @@ model TeamJoinLink {
 /// roster: SELF adds the requester as a TeamMember; CHILD creates a managed
 /// roster record named `childName` plus the Guardian link to the requester
 /// (children are roster records, never logins). `status` reuses
-/// InvitationStatus: ACCEPTED = approved, REJECTED = declined (EXPIRED and
-/// CANCELLED are unused). Account deletion and the under-age un-claim delete
-/// the requester's rows outright.
+/// InvitationStatus: ACCEPTED = approved, REJECTED = declined, EXPIRED =
+/// nobody decided it within JOIN_REQUEST_TTL_DAYS (lazy; CANCELLED is unused).
+/// Account deletion and the under-age un-claim delete the requester's rows
+/// outright.
 model TeamJoinRequest {
   id           String                @id @default(uuid())
   teamId       String
