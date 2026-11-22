@@ -35,6 +35,7 @@ import {
 } from '../utils/permissions';
 import { isForeignKeyViolation } from '../utils/prisma-errors';
 import { USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
+import { parseLocalDate, parseLocalTime, zonedTimeToUtc } from '../utils/zoned-time';
 import { logger } from '../utils/logger';
 import { toRsvpSummary, toRsvpView, type EmailProjected, type RsvpSummary } from './rsvp-service';
 
@@ -89,6 +90,23 @@ export function changedFields(
     if (field === 'startsAt') return new Date(next as string).getTime() !== stored.startsAt.getTime();
     return next !== stored[field];
   });
+}
+
+/**
+ * The edit with a local `startDate` + `startTime` turned into a `startsAt`
+ * instant (#1051). The wall time is read in `timezone` when the request sends
+ * one, else in the session's own stored zone (a series occurrence carries its
+ * series' zone, a one-off the zone it was created with), so the device's zone
+ * never enters the arithmetic. `zonedTimeToUtc` applies the series rule: a
+ * time in a spring-forward gap moves forward by the jump, a repeated time
+ * takes the earlier instant. An edit without the local form passes through.
+ */
+export function resolveLocalStart(data: UpdatePracticeInput, storedTimeZone: string): UpdatePracticeInput {
+  const { startDate, startTime, ...rest } = data;
+  if (startDate === undefined || startTime === undefined) return data;
+  const { hour, minute } = parseLocalTime(startTime);
+  const zone = data.timezone ?? storedTimeZone;
+  return { ...rest, startsAt: zonedTimeToUtc(parseLocalDate(startDate), hour, minute, zone).toISOString() };
 }
 
 /** The team and series context every session payload carries. */
@@ -352,16 +370,18 @@ export class PracticeService {
         throw new BadRequestError('A cancelled practice cannot be edited');
       }
 
+      // The local form is read in the zone of the row just locked.
+      const edit = resolveLocalStart(data, locked.timezone);
       // Range-check startsAt only when it moves: a full-form save of an old
       // session sends its unchanged start back.
-      const changed = changedFields(locked, data);
+      const changed = changedFields(locked, edit);
       if (changed.includes('startsAt')) {
-        assertPracticeStartInRange(new Date(data.startsAt as string));
+        assertPracticeStartInRange(new Date(edit.startsAt as string));
       }
       // A descriptive field set back to the series' own value follows the
       // series again; anything else edited stays overridden.
       const backToSeries = seriesDefaults
-        ? SERIES_DEFAULT_FIELDS.filter((field) => data[field] !== undefined && data[field] === seriesDefaults[field])
+        ? SERIES_DEFAULT_FIELDS.filter((field) => edit[field] !== undefined && edit[field] === seriesDefaults[field])
         : [];
       const overrides = [...new Set([...locked.exceptionFields, ...changed])]
         .filter((field) => !(backToSeries as string[]).includes(field))
@@ -369,13 +389,13 @@ export class PracticeService {
       return tx.practiceSession.update({
         where: { id: sessionId },
         data: {
-          ...(data.type !== undefined ? { type: data.type } : {}),
-          ...(data.title !== undefined ? { title: data.title } : {}),
-          ...(data.location !== undefined ? { location: data.location } : {}),
-          ...(data.notes !== undefined ? { notes: data.notes } : {}),
-          ...(data.startsAt !== undefined ? { startsAt: new Date(data.startsAt) } : {}),
-          ...(data.durationMinutes !== undefined ? { durationMinutes: data.durationMinutes } : {}),
-          ...(data.timezone !== undefined ? { timezone: data.timezone } : {}),
+          ...(edit.type !== undefined ? { type: edit.type } : {}),
+          ...(edit.title !== undefined ? { title: edit.title } : {}),
+          ...(edit.location !== undefined ? { location: edit.location } : {}),
+          ...(edit.notes !== undefined ? { notes: edit.notes } : {}),
+          ...(edit.startsAt !== undefined ? { startsAt: new Date(edit.startsAt) } : {}),
+          ...(edit.durationMinutes !== undefined ? { durationMinutes: edit.durationMinutes } : {}),
+          ...(edit.timezone !== undefined ? { timezone: edit.timezone } : {}),
           // A save that changed nothing leaves the occurrence following its series.
           ...(session.seriesId ? { isException: overrides.length > 0, exceptionFields: overrides } : {}),
         },

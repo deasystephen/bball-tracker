@@ -53,9 +53,15 @@ Saturday and the next Sunday are one weekend; counted from the week of the first
 after `startDate`, so "every other Monday" from a Sunday starts the next day), stops at `endDate` or `occurrenceCount`, and turns each local date plus
 `startTime` into a UTC instant with `utils/zoned-time.ts#zonedTimeToUtc`, using the zone's offset on
 that day. "Tuesdays at 18:00 New York" is 22:00Z in October and 23:00Z in November.
-`zoned-time.ts` uses `Intl.DateTimeFormat` (Node's ICU zone data); no date library. A time that
-does not exist (inside the spring-forward hour) moves forward by the jump; a time that happens twice
-takes the first.
+`zoned-time.ts` uses `Intl.DateTimeFormat` (Node's ICU zone data); no date library.
+
+**The daylight-saving rule** (`zonedTimeToUtc`, the one place it lives; series create and the
+local-time form of `PATCH /practices/:id` both use it):
+
+- a time that does not exist (inside the spring-forward hour) **moves forward by the jump**:
+  02:30 on a New York spring-forward night is 03:30 EDT;
+- a time that happens twice (the hour repeated when clocks go back) **takes the earlier instant**:
+  01:30 on a New York fall-back night is 01:30 EDT (05:30Z), not EST (06:30Z).
 
 **Materialization is eager and bounded.** `createSeries` writes the series and every session in one
 `$transaction`. A series must end: `endDate` at most 366 days after `startDate`, or
@@ -77,8 +83,8 @@ on, like games. The coach creates a new series on the new season's team.
 
 | Action | Effect |
 | --- | --- |
-| `PATCH /practices/:id` | Edits one session. On a series occurrence it sets `isException = true` and adds to `exceptionFields` the fields whose value actually changed (a full-form submit that only moves the time pins only `startsAt`; a save that changed nothing leaves `isException` false; a `type`/`title`/`location`/`notes` set back to the series' own value drops out of `exceptionFields` and follows the series again). The `startsAt` window is checked only when the value moves, so an old session can still be saved with its unchanged start. A form loaded before a series-wide edit and saved after it can still pin the old value: there is no version precondition. A `startsAt`/`durationMinutes`/`timezone` override stays once set, even if moved back (the series' per-occurrence time is not compared). A past session of a cancelled series can still be cancelled or deleted one by one (only editing it is refused). `startsAt` must stay within 31 days back and 732 ahead of now (a mistyped year; 732 reaches the last session a series can create), on create too. A cancelled session is not editable (400). |
-| `PATCH /practice-series/:id` | "Edit all future": `type`, `title`, `location`, `notes` on the series and on every session with `startsAt > now` and `status = SCHEDULED`, in one transaction; an exception takes every edited field except the ones in its own `exceptionFields` (a notes-only exception still follows a new location). Dates, times and weekdays are not editable on a series (cancel it and create a new one). 400 on a cancelled series. Answers `{ series, updatedSessions }`. |
+| `PATCH /practices/:id` | Edits one session. On a series occurrence it sets `isException = true` and adds to `exceptionFields` the fields whose value actually changed (a full-form submit that only moves the time pins only `startsAt`; a save that changed nothing leaves `isException` false; a `type`/`title`/`location`/`notes` set back to the series' own value drops out of `exceptionFields` and follows the series again). A new start comes as local wall time (`startDate` "YYYY-MM-DD" + `startTime` "HH:MM", both or neither; #1051) or, for app builds before #1051, as a `startsAt` instant, never both. The local form is read in the `timezone` sent with it, else in the session's own stored `timezone` (a series occurrence carries its series' zone; a standalone practice the zone it was created with, which the create request supplied), with the daylight-saving rule above, after the session row is locked; the device's zone never enters the arithmetic. The `startsAt` window is checked only when the value moves, so an old session can still be saved with its unchanged start. A form loaded before a series-wide edit and saved after it can still pin the old value: there is no version precondition. A `startsAt`/`durationMinutes`/`timezone` override stays once set, even if moved back (the series' per-occurrence time is not compared). A past session of a cancelled series can still be cancelled or deleted one by one (only editing it is refused). `startsAt` must stay within 31 days back and 732 ahead of now (a mistyped year; 732 reaches the last session a series can create), on create too. A cancelled session is not editable (400). |
+| `PATCH /practice-series/:id` | "Edit all future": `type`, `title`, `location`, `notes` on the series and on every session with `startsAt > now` and `status = SCHEDULED`, in one transaction; an exception takes every edited field except the ones in its own `exceptionFields` (a notes-only exception still follows a new location). Dates, times and weekdays are not editable on a series (cancel it and create a new one); #1051 kept it that way, since moving every future session is a re-materialization, not a field copy. 400 on a cancelled series. Answers `{ series, updatedSessions }`. |
 | `POST /practices/:id/cancel` | `status = CANCELLED`, `cancelledAt`, optional `reason`. Status-guarded, so a repeat keeps the first time and reason. The row and its answers stay. |
 | `DELETE /practices/:id` | Deletes the session and its answers. |
 | `DELETE /practice-series/:id` | Cancels the series: stamps `cancelledAt` and deletes every session with `startsAt > now` (exceptions and cancelled ones included; their answers cascade). Sessions that already started stay, still linked, as history. Idempotent: a repeat deletes nothing. Answers `{ series, deletedSessions }`. |
@@ -160,7 +166,7 @@ Deleted sessions (a cancelled series' future) simply leave the feed.
 | POST | `/api/v1/practices` | `{ teamId, startsAt (ISO with Z/offset), durationMinutes 5–720, timezone, type?, title? ≤100, location? ≤200, notes? ≤1000 }` | 201 `{ practice }` |
 | GET | `/api/v1/practices` | `?teamId&status&from&to&limit (1–200, 50)&offset` | `{ practices, total, limit, offset }`, ascending `startsAt`; there is no default `from`, so an "upcoming" view passes `from=<now>` |
 | GET | `/api/v1/practices/:id` | | `{ practice }` incl. `availabilitySummary { yes, no, maybe }` |
-| PATCH | `/api/v1/practices/:id` | any of the create fields but `teamId`; `timezone` only together with `startsAt` (an instant: a new zone alone would move the local time) | `{ practice }`; 400 when the practice is (or was just) cancelled |
+| PATCH | `/api/v1/practices/:id` | any of the create fields but `teamId`, plus `startDate` + `startTime` (local, read in `timezone` or the session's zone) as the alternative to `startsAt`; `timezone` only together with a new start (a new zone alone would move the local time) | `{ practice }`; 400 when the practice is (or was just) cancelled |
 | POST | `/api/v1/practices/:id/cancel` | `{ reason? ≤500 }` | `{ practice }` |
 | DELETE | `/api/v1/practices/:id` | | `{ success, message }` |
 | PUT | `/api/v1/practices/:id/availability` | `{ status, comment? ≤500, playerId? }` | `{ availability }` |
@@ -291,8 +297,9 @@ unchanged.
 
 `tests/utils/practice-recurrence.test.ts` (zones, both DST directions, both hemispheres, the
 skipped and repeated hour, BIWEEKLY, both end conditions, the cap), `tests/schemas/practices.test.ts`,
-`tests/services/practice-service.test.ts` (both services against the Prisma mock, domain events),
-`tests/api/practices.test.ts` (routes with the real services, a FREE coach and a FREE assistant creating, 403/400/404), and the real-database
+`tests/services/practice-service.test.ts` (both services against the Prisma mock, domain events; the
+local-time edit across spring forward, in the gap and in the repeated hour),
+`tests/api/practices.test.ts` (routes with the real services, a FREE coach and a FREE assistant creating, 403/400/404, the local-time edit's gap, repeated hour, zone override and the old instant form), and the real-database
 `tests/integration/practice-schedule.db.test.ts` (a year-long series materialized in Postgres at
 18:00 local on both sides of DST, access through the real predicates for staff, member, guardian and
 outsider, exceptions surviving a series edit, series cancel keeping history, the ICS feed, account
