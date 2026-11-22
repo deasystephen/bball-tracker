@@ -43,6 +43,8 @@ describe('TeamService', () => {
     // Every create now mints a lineage inside the transaction (#462); the
     // pre-lineage tests never stubbed it, so give it a default id.
     (mockPrisma.teamLineage.create as jest.Mock).mockResolvedValue({ id: 'lineage-default' });
+    // cancelSentStaffInvitations reads the cancelled count (#1038).
+    (mockPrisma.staffInvitation.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
   });
 
   describe('createTeam', () => {
@@ -1804,6 +1806,21 @@ describe('TeamService', () => {
   });
 
   describe('addStaffMember', () => {
+    beforeEach(() => {
+      // lockUsers / lockTeamRow (#1038): every row asked for exists and is live.
+      (mockPrisma.$queryRaw as jest.Mock).mockImplementation(async (_sql: unknown, ...values: unknown[]) =>
+        values
+          // Prisma.join(ids) arrives as a Sql object carrying `values`.
+          .flatMap((value) =>
+            value && typeof value === 'object' && 'values' in value ? (value as { values: unknown[] }).values : [value]
+          )
+          .map((id) => ({ id, deletedAt: null }))
+      );
+    });
+    afterEach(() => {
+      (mockPrisma.$queryRaw as jest.Mock).mockReset();
+      (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([{ '?column?': 1 }]);
+    });
     it('adds staff by userId as a head coach and returns the row with user+role', async () => {
       const { team, coach } = createFullTeam();
       const targetUser = createCoach();
@@ -1880,6 +1897,100 @@ describe('TeamService', () => {
       });
       expect(mockPrisma.user.create).not.toHaveBeenCalled();
       expect(result.userId).toBe(targetUser.id);
+    });
+
+    describe('the write runs under the target user lock, then the team lock (#1038)', () => {
+      function given(): { teamId: string; adminId: string; targetId: string } {
+        const { team } = createFullTeam();
+        const admin = createAdmin();
+        const target = createCoach();
+        const role = createTeamRole({ teamId: team.id, type: 'ASSISTANT_COACH' });
+        (mockPrisma.team.findUnique as jest.Mock).mockResolvedValue(team);
+        mockAdminRequester(admin);
+        (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue({ id: target.id, name: target.name });
+        (mockPrisma.teamRole.findFirst as jest.Mock).mockResolvedValue(role);
+        (mockPrisma.teamStaff.findUnique as jest.Mock).mockResolvedValue(null);
+        (mockPrisma.teamStaff.create as jest.Mock).mockResolvedValue({ id: 's', userId: target.id, role });
+        (mockPrisma.pushToken.findMany as jest.Mock).mockResolvedValue([]);
+        return { teamId: team.id, adminId: admin.id, targetId: target.id };
+      }
+      const add = (fixture: ReturnType<typeof given>): Promise<unknown> =>
+        TeamService.addStaffMember(
+          fixture.teamId,
+          { email: 'target@example.test', roleType: 'ASSISTANT_COACH' },
+          fixture.adminId
+        );
+      const sqlOf = (call: unknown[]): string => (call[0] as TemplateStringsArray).join('?');
+
+      it('locks the User row, then the Team row, then creates, all in one transaction', async () => {
+        const fixture = given();
+        await add(fixture);
+        const sql = (mockPrisma.$queryRaw as jest.Mock).mock.calls.map(sqlOf);
+        expect(sql).toHaveLength(2);
+        expect(sql[0]).toContain('FROM "User"');
+        expect(sql[0]).toContain('FOR NO KEY UPDATE');
+        expect(sql[1]).toContain('FROM "Team"');
+        expect((mockPrisma.$queryRaw as jest.Mock).mock.invocationCallOrder[1]).toBeLessThan(
+          (mockPrisma.teamStaff.create as jest.Mock).mock.invocationCallOrder[0]
+        );
+        expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+      });
+
+      it('refuses 400 staff_target_needs_invitation when the row became a managed record before the lock', async () => {
+        const fixture = given();
+        const base = (mockPrisma.user.findUnique as jest.Mock).getMockImplementation()!;
+        (mockPrisma.user.findUnique as jest.Mock).mockImplementation((args: { where: { id: string } }) =>
+          args.where.id === fixture.targetId ? Promise.resolve({ workosUserId: null, isManaged: true }) : base(args)
+        );
+        await expect(add(fixture)).rejects.toMatchObject({ statusCode: 400, code: 'staff_target_needs_invitation' });
+        expect(mockPrisma.teamStaff.create).not.toHaveBeenCalled();
+      });
+
+      it('answers 404 staff_target_not_found when the account was deleted before the lock', async () => {
+        const fixture = given();
+        (mockPrisma.$queryRaw as jest.Mock).mockResolvedValueOnce([{ id: fixture.targetId, deletedAt: new Date() }]);
+        await expect(add(fixture)).rejects.toMatchObject({ statusCode: 404, code: 'staff_target_not_found' });
+        expect(mockPrisma.teamStaff.create).not.toHaveBeenCalled();
+      });
+
+      it('answers 404 when the team is gone under the lock', async () => {
+        const fixture = given();
+        (mockPrisma.$queryRaw as jest.Mock)
+          .mockResolvedValueOnce([{ id: fixture.targetId, deletedAt: null }])
+          .mockResolvedValueOnce([]);
+        await expect(add(fixture)).rejects.toMatchObject({ statusCode: 404, message: 'Team not found' });
+        expect(mockPrisma.teamStaff.create).not.toHaveBeenCalled();
+      });
+
+      it('answers 403 when the requester lost the right to manage staff before the team lock', async () => {
+        const fixture = given();
+        const base = (mockPrisma.user.findUnique as jest.Mock).getMockImplementation()!;
+        let adminReads = 0;
+        (mockPrisma.user.findUnique as jest.Mock).mockImplementation((args: { where: { id: string } }) => {
+          if (args.where.id === fixture.adminId && ++adminReads > 1) {
+            // Demoted from ADMIN meanwhile; no league admin row, no head coach row.
+            return Promise.resolve({ id: fixture.adminId, role: 'COACH', deletedAt: null });
+          }
+          return base(args);
+        });
+        (mockPrisma.leagueAdmin.findUnique as jest.Mock).mockResolvedValue(null);
+        (mockPrisma.teamStaff.findFirst as jest.Mock).mockResolvedValue(null);
+
+        await expect(add(fixture)).rejects.toMatchObject({ statusCode: 403 });
+        expect(mockPrisma.teamStaff.create).not.toHaveBeenCalled();
+      });
+
+      it('answers the already-staff 400 when a staff row appeared before the lock (an accept that committed first)', async () => {
+        const fixture = given();
+        (mockPrisma.teamStaff.findUnique as jest.Mock)
+          .mockResolvedValueOnce(null) // unlocked pre-check
+          .mockResolvedValueOnce({ id: 'accepted-meanwhile' }); // under the lock
+        await expect(add(fixture)).rejects.toMatchObject({
+          statusCode: 400,
+          message: 'User is already a staff member of this team',
+        });
+        expect(mockPrisma.teamStaff.create).not.toHaveBeenCalled();
+      });
     });
 
     it('does not fail the request when the notification send throws', async () => {

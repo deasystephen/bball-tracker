@@ -165,6 +165,34 @@ export function toLocalTimeKey(date: Date): string {
   return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
+/**
+ * A device-local Date that only carries a calendar date "YYYY-MM-DD" to and
+ * from a date picker (read back with `toLocalDateKey`). Noon, so no
+ * daylight-saving change on the device can move it to another day. It is a
+ * container for the picker's fields, never an instant sent to the API.
+ */
+export function pickerDateFor(key: string): Date {
+  const [year, month, day] = key.split('-').map((part) => Number(part));
+  return new Date(year, month - 1, day, 12, 0, 0, 0);
+}
+
+/**
+ * A device-local Date that only carries a wall time "HH:MM" to and from a
+ * time picker (read back with `toLocalTimeKey`). It sits on a mid-January or
+ * mid-July day, away from today's daylight-saving changes, and the first one
+ * on which the device's clock really shows that HH:MM is used (on the
+ * practice's own date the device might skip that hour). Never sent to the API.
+ */
+export function pickerTimeFor(hhmm: string): Date {
+  const [hours, minutes] = hhmm.split(':').map((part) => Number(part));
+  const days: [number, number][] = [[0, 15], [6, 15], [0, 16]];
+  for (const [month, day] of days) {
+    const carrier = new Date(2001, month, day, hours, minutes, 0, 0);
+    if (carrier.getHours() === hours && carrier.getMinutes() === minutes) return carrier;
+  }
+  return new Date(2001, 0, 15, hours, minutes, 0, 0);
+}
+
 /** `date`'s day with `time`'s hours and minutes, both device-local. */
 export function combineDateAndTime(date: Date, time: Date): Date {
   const result = new Date(date);

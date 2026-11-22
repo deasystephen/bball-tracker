@@ -393,6 +393,78 @@ describe('PracticeService.updatePractice', () => {
     );
   });
 
+  describe('a local startDate + startTime (#1051)', () => {
+    const moveTo = async (
+      edit: Record<string, string>,
+      locked: Record<string, unknown> = {}
+    ): Promise<Record<string, unknown>> => {
+      mockPrisma.practiceSession.findUnique.mockResolvedValue(scheduled);
+      lockReads({ cancelledAt: null }, lockedRow(locked));
+      mockPrisma.practiceSession.update.mockResolvedValue(practiceRow({ seriesId: SERIES, isException: true }));
+      await PracticeService.updatePractice(SESSION, edit, USER);
+      return mockPrisma.practiceSession.update.mock.calls[0][0].data;
+    };
+
+    it('reads the wall time in the locked session zone, with that day’s offset', async () => {
+      // 18:00 New York before spring forward is 23:00Z; after it, 22:00Z.
+      const data = await moveTo({ startDate: '2030-03-12', startTime: '18:00' });
+      expect(data).toEqual({
+        startsAt: new Date('2030-03-12T22:00:00Z'),
+        isException: true,
+        exceptionFields: ['startsAt'],
+      });
+    });
+
+    it('moves a time in the spring-forward gap forward by the jump', async () => {
+      // 2030-03-10 02:30 does not happen in New York; it becomes 03:30 EDT.
+      const data = await moveTo({ startDate: '2030-03-10', startTime: '02:30' });
+      expect(data.startsAt).toEqual(new Date('2030-03-10T07:30:00Z'));
+    });
+
+    it('takes the earlier instant of a repeated hour', async () => {
+      // 2030-11-03 01:30 happens twice in New York: 05:30Z (EDT) and 06:30Z (EST).
+      const data = await moveTo({ startDate: '2030-11-03', startTime: '01:30' });
+      expect(data.startsAt).toEqual(new Date('2030-11-03T05:30:00Z'));
+    });
+
+    it('uses a timezone sent with it instead of the stored one, and pins both', async () => {
+      const data = await moveTo({ startDate: '2030-03-12', startTime: '18:00', timezone: 'America/Chicago' });
+      expect(data).toEqual({
+        startsAt: new Date('2030-03-12T23:00:00Z'),
+        timezone: 'America/Chicago',
+        isException: true,
+        exceptionFields: ['startsAt', 'timezone'],
+      });
+    });
+
+    it('pins nothing when the local time is the one already stored', async () => {
+      const data = await moveTo({ startDate: '2030-01-15', startTime: '18:00' });
+      expect(data).toEqual(expect.objectContaining({ isException: false, exceptionFields: [] }));
+    });
+
+    it('range-checks the resolved instant', async () => {
+      mockPrisma.practiceSession.findUnique.mockResolvedValue(scheduled);
+      lockReads({ cancelledAt: null }, lockedRow());
+      await expect(
+        PracticeService.updatePractice(SESSION, { startDate: '2032-01-01', startTime: '18:00' }, USER)
+      ).rejects.toThrow('startDate must be within the next 732 days');
+      expect(mockPrisma.practiceSession.update).not.toHaveBeenCalled();
+    });
+
+    it('keeps a stored start at the later copy of a repeated hour when it is sent back unchanged', async () => {
+      // 06:30Z is the second 01:30 (EST) on 2030-11-03; re-resolving would give 05:30Z.
+      const later = new Date('2030-11-03T06:30:00Z');
+      const data = await moveTo({ startDate: '2030-11-03', startTime: '01:30', notes: 'n' }, { startsAt: later });
+      expect(data).toEqual(expect.objectContaining({ startsAt: later, exceptionFields: ['notes'] }));
+    });
+
+    it('keeps a stored start with seconds, and an old one, when sent back unchanged', async () => {
+      const old = new Date('2029-10-01T22:00:30.123Z'); // 18:00:30 EDT, 80 days before the frozen now
+      const data = await moveTo({ startDate: '2029-10-01', startTime: '18:00', notes: 'n' }, { startsAt: old });
+      expect(data).toEqual(expect.objectContaining({ startsAt: old, exceptionFields: ['notes'] }));
+    });
+  });
+
   it('refuses a session of a cancelled series, and one cancelled or deleted under the lock', async () => {
     mockPrisma.practiceSession.findUnique.mockResolvedValue(scheduled);
 

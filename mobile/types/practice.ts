@@ -112,7 +112,13 @@ export interface CreatePracticeInput extends PracticeDetailsInput {
 }
 
 export interface UpdatePracticeInput extends PracticeDetailsInput {
-  startsAt?: string;
+  /**
+   * A new start as the practice's own wall time: local "YYYY-MM-DD" and
+   * "HH:MM", both or neither, placed in the session's zone by the API (#1051).
+   * The app never sends the `startsAt` instant form on an edit.
+   */
+  startDate?: string;
+  startTime?: string;
   durationMinutes?: number;
 }
 

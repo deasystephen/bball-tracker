@@ -165,3 +165,10 @@ export function localDateOf(instant: Date, timeZone: string): LocalDate {
   const d = new Date(wallClockMs(instant.getTime(), timeZone));
   return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() };
 }
+
+/** The local wall time of `instant` in `timeZone` (a canonical name), "HH:MM" (seconds dropped). */
+export function localTimeOf(instant: Date, timeZone: string): string {
+  const d = new Date(wallClockMs(instant.getTime(), timeZone));
+  const pad = (n: number): string => String(n).padStart(2, '0');
+  return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+}

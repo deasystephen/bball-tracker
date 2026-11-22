@@ -14,6 +14,7 @@ import {
   daysBetween,
   formatLocalDate,
   localDateOf,
+  localTimeOf,
   parseLocalDate,
   weekdayOf,
   zonedTimeToUtc,
@@ -98,6 +99,10 @@ describe('zoned-time helpers', () => {
     // 2026-11-16T01:30Z is still the 15th in Los Angeles.
     expect(localDateOf(new Date('2026-11-16T01:30:00Z'), 'America/Los_Angeles')).toEqual({ year: 2026, month: 11, day: 15 });
     expect(localDateOf(new Date('2026-11-16T01:30:00Z'), 'Asia/Tokyo')).toEqual({ year: 2026, month: 11, day: 16 });
+    // Both copies of New York's repeated 01:30, and seconds dropped.
+    expect(localTimeOf(new Date('2030-11-03T05:30:00Z'), 'America/New_York')).toBe('01:30');
+    expect(localTimeOf(new Date('2030-11-03T06:30:45Z'), 'America/New_York')).toBe('01:30');
+    expect(localTimeOf(new Date('2026-11-16T01:30:00Z'), 'Asia/Tokyo')).toBe('10:30');
   });
 
   it('does calendar arithmetic across month and year ends', () => {

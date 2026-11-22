@@ -125,6 +125,98 @@ export function formatZoneName(value: Date | string, timeZone: string): string {
   }
 }
 
+/** A wall-clock reading: local date "YYYY-MM-DD" and local time "HH:MM". */
+export interface WallClock {
+  date: string;
+  time: string;
+}
+
+/**
+ * What the wall clock in `timeZone` reads at `value` ("2030-03-12", "18:00"),
+ * the starting point of the practice edit form (#1051). This only reads a
+ * clock: one instant has exactly one reading in every zone. The reverse (a
+ * reading to an instant, which a daylight-saving gap or repeated hour makes
+ * ambiguous) is the server's job, never the app's. A runtime whose
+ * `formatToParts` does not split the fields is read from the formatted string
+ * instead. `null` for a zone the runtime does not know, or a reading that is
+ * still not a full 24-hour date and time: the device clock would be another
+ * zone's time shown (and sent back) as the practice's.
+ */
+export function wallClockIn(value: Date | string, timeZone: string): WallClock | null {
+  const instant = toDate(value);
+  const options: Intl.DateTimeFormatOptions = {
+    timeZone,
+    hour12: false,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  };
+  let fields: (string | undefined)[];
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', options).formatToParts(instant);
+    const part = (type: Intl.DateTimeFormatPartTypes): string | undefined =>
+      parts.find((p) => p.type === type)?.value;
+    fields = [part('year'), part('month'), part('day'), part('hour'), part('minute')];
+    if (parts.some((p) => p.type === 'dayPeriod') || fields.some((f) => f === undefined)) {
+      // A runtime that does not split the fields: read the formatted string,
+      // "03/11/2027, 18:00" in en-US.
+      const text = instant.toLocaleString('en-US', options);
+      const match = /^(\d{1,2})\/(\d{1,2})\/(\d{4}),?\s+(\d{1,2}):(\d{2})$/.exec(text.trim());
+      fields = match ? [match[3], match[1], match[2], match[4], match[5]] : [];
+    }
+  } catch {
+    // A zone this runtime does not know.
+    return null;
+  }
+  const [year, month, day, rawHour, minute] = fields.map((f) => (f !== undefined && /^\d+$/.test(f) ? Number(f) : NaN));
+  // Some engines write midnight as 24 with a 24-hour clock.
+  const hour = rawHour === 24 ? 0 : rawHour;
+  if (
+    !(year > 0) ||
+    !(month >= 1 && month <= 12) ||
+    !(day >= 1 && day <= 31) ||
+    !(hour >= 0 && hour <= 23) ||
+    !(minute >= 0 && minute <= 59)
+  ) {
+    return null;
+  }
+  const pad = (n: number, width = 2): string => String(n).padStart(width, '0');
+  return { date: `${pad(year, 4)}-${pad(month)}-${pad(day)}`, time: `${pad(hour)}:${pad(minute)}` };
+}
+
+/**
+ * A local calendar date "YYYY-MM-DD" (no zone) as a long date, e.g. "Tuesday,
+ * March 12, 2030" (the practice edit form, #1051). Formatted as that day at
+ * UTC noon in UTC, so no device zone can move it to another day.
+ */
+export function formatLongLocalDate(key: string): string {
+  const [year, month, day] = key.split('-').map((part) => Number(part));
+  return formatLongDate(new Date(Date.UTC(year, month - 1, day, 12)), { timeZone: 'UTC' });
+}
+
+/**
+ * A zone's name that holds all year, e.g. "Eastern Time" / "hora del este"
+ * (`longGeneric`), for a date and time that may fall on either side of a
+ * daylight-saving change (the practice edit form, #1051). A runtime without
+ * generic names, or one that only offers an offset ("GMT-5"), gets the IANA
+ * name with spaces ("America/New York").
+ */
+export function formatTimeZoneLabel(timeZone: string): string {
+  try {
+    const parts = new Intl.DateTimeFormat(deviceLocale(), {
+      timeZone,
+      timeZoneName: 'longGeneric',
+    } as Intl.DateTimeFormatOptions).formatToParts(new Date());
+    const name = parts.find((p) => p.type === 'timeZoneName')?.value;
+    if (name && !/^(GMT|UTC)[+\-−]/.test(name)) return name;
+  } catch {
+    // fall through to the IANA name
+  }
+  return timeZone.replace(/_/g, ' ');
+}
+
 /** Short game date, e.g. "Sat, Oct 3" / "Sáb, 3 oct" (GameCard). Starts its label, so capitalized. */
 export function formatShortDate(value: Date | string, options: ZoneOption = {}): string {
   const locale = deviceLocale();

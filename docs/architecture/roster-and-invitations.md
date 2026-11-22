@@ -198,7 +198,16 @@ eng-review amendments recorded there).
 with code `staff_target_not_found` since #460 so the app can offer an invitation instead). It refuses
 (400 `staff_target_needs_invitation`) an unclaimed **managed** roster record, named by address or by id:
 its managing coach could rewrite that email (B2.10) and claim the role, so such an address is invited
-instead (the app offers the invitation on either code).
+instead (the app offers the invitation on either code). Since #1038 the write runs in one transaction
+under the `User` row locks of the target and the requester (one sorted `lockUsers` statement) and then
+the team lock (`lockTeamRow`), account deletion's user-then-team order. Behind them it repeats, in this
+order: the requester's `canManageStaff` (403; a head-coach removal or demotion holds the team lock, a
+league admin removal holds the former admin's user lock, so either one that commits meanwhile is
+seen), then the target's tombstone check (404 `staff_target_not_found`), the managed-record refusal
+and the already-staff check. Add Player's case-2 adoption takes the target's user lock before it marks
+a row managed, so the two serialise by construction (before, only the `PATCH /players/:id` email guard
+below kept a managed record that slipped into a staff role from being claimed); the team lock
+serialises it with a staff accept. Proven in `tests/integration/staff-invitation-followups.db.test.ts`.
 `services/staff-invitation-service.ts` invites any address to a staff role through a
 **`StaffInvitation`** row, the third invitation kind next to `TeamInvitation` and
 `GuardianInvitation`. It reuses the same machinery rather than copying it: a random bearer-secret
@@ -296,7 +305,17 @@ for every address match and the address stored trimmed and lower-cased; the shar
     who is removed, demoted or deleted after sending cannot come back through an invitation sent to
     an address they control, and a club that changes head coach re-sends (removing or demoting a head
     coach also cancels the PENDING staff invitations they sent on that team, in the same transaction,
-    when `canManageStaff` no longer holds for them, so a league or system admin keeps theirs); refuses
+    when `canManageStaff` no longer holds for them, so a league or system admin keeps theirs;
+    removing a league admin row (`LeagueService.removeLeagueAdmin`, #1038) does the same on every
+    team of that league, in the removal's transaction and behind the former admin's `User` row lock,
+    which a staff invite takes on its inviter, so an invite in flight is either cancelled or refused,
+    then behind the league row lock (the rollover's User → League → Team order, so no rollover moves
+    rows onto the league's teams meanwhile) and the affected teams' locks, taken in one sorted
+    statement (the lock head-coach removal and demotion hold, so when both of a person's roles go at
+    once the second removal sees the first and cancels); a head coach of one of those
+    teams keeps that team's invitations; an accept already past its
+    inviter re-check when the removal commits can still land, as one that committed just before it
+    would); refuses
     an invitation whose team-season is no longer its lineage's latest (the staff row would land on
     last season's team; a season rollover moves the team's PENDING staff invitations onto the new
     team-season, and cancels the ones whose sender cannot manage the new team-season's staff, so
@@ -306,17 +325,31 @@ for every address match and the address stored trimmed and lower-cased; the shar
     guarded on the status (the loser of a race gets 400); and creates the `TeamStaff` row with the
     invited role **unless the account already holds one**, which is left unchanged
     (`alreadyStaff: true`). Accepting never re-roles, so it can never demote the last head coach.
-    `POST /staff` takes no team lock, so a direct add racing the accept can hit
-    `TeamStaff_teamId_userId_key`; that P2002 rolls the accept back and answers 400 (a retry finds
-    the row and reports `alreadyStaff`).
+    `POST /staff` takes the same team lock since #1038, so a direct add and an accept serialise and
+    the second sees the first's row; the P2002 mapping on `TeamStaff_teamId_userId_key` (rolled back,
+    400) stays as a backstop. Queries trimmed in #1038: the status flip is one guarded `update` that
+    also returns the response row (no re-read), and the latest-season check is one `findFirst` over
+    the lineage that holds the team (`LATEST_TEAM_SEASON_ORDER`, shared with `latestTeamSeasonId`)
+    instead of reading the team's lineage first. The authenticated dispatch hands the row it found to
+    the guardian accept and reject as it already did for staff, so neither reads the invitation and
+    the caller's address twice. A team invitation still costs two primary-key misses (guardian, then
+    staff) before its own accept: the three kinds share one id space and the URL names no kind, so
+    the probes stay; one indexed lookup each is cheaper than a kind parameter old app builds would
+    not send.
 - `GET /invitations/:id` reads team invitations only (guardian and staff ids answer 404 there, as
-  before for guardians); the app never fetches a staff invitation by id.
+  before for guardians). Decided to stay that way (#1038): no client fetches a guardian or staff
+  invitation by id (the invitee reads them from `GET /invitations`, the link from
+  `GET /invitations/by-token/:token`, the head coach from `GET /teams/:teamId/staff-invitations`),
+  and the route's access rules (team roster managers, the invited player) are the team kind's, so
+  serving the other kinds would mean a second set of rules for a reader that does not exist.
 - A lazily expired staff invitation logs `Staff invitation expired`.
 - **Rejection strips the address** (the rejection-only strip of the player flow): the invitee's
   decline sets `invitedEmail` to the per-row sentinel `deleted-<id>@invalid` in the same guarded
   update (the sentinel and the raw-SQL scrub share `utils/stripped-email.ts`); `recipientHash`
   stays, so the cooldown still applies to a re-invite. Cancel and expiry
-  keep the address. With no `User` row created at invite time there is nothing else to strip.
+  keep the address. With no `User` row created at invite time there is nothing else to strip. The
+  decline's response carries the row without `invitedEmail` (`STAFF_INVITATION_DECLINED_SELECT`,
+  #1038): echoing the sentinel would read as an address.
 - **A staff role's email is not the managing coach's to rewrite.** `PATCH /players/:id { email }`
   answers 403 for a non-admin when the row holds any `TeamStaff` row, checked before the write and
   again in the write's `where` (`teamStaff: { none: {} }`): with the email pointed at their own
@@ -477,66 +510,13 @@ themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by 
   request through it is approved by a current roster manager). Both relations are in
   `USER_REFERENCE_COUNT_SELECT`. The data-subject export carries `joinRequests` and
   `createdJoinLinks` (never a token).
-- **Mobile.** `hooks/useJoinLink.ts` holds every call. The team screen shows roster managers a
-  **Share join link** button (`team-join-link`; "Join link · N requests" while requests wait, from
-  `useJoinRequests`, which is requested only for them). `app/teams/[id]/join-link.tsx` shows the
-  explanation, the QR code of `link.url` (`components/QrCode`), **Share link** (React Native's
-  `Share`, the system sheet, which has Copy; there is no clipboard module in the binary), **New
-  link** and **Turn off** (each behind a confirm whose button reads differently from the screen's,
-  "Create new link" / "Turn off link"), and the pending requests with Approve and Decline icons
-  (Decline confirms); each request shows who would be added, who asked, and the asker's email on
-  a line of its own. Requests come from other phones and a link can be replaced from another coach's, so
-  `useJoinRequests`, `useJoinLink` and the public `useJoinLinkPreview` never trust their cache
-  (`staleTime: 0`, `refetchOnMount: 'always'`), and this screen polls the link and the requests
-  every 15 s (`JOIN_LINK_POLL_MS`) and has pull-to-refresh. **Whether a link is live is the
-  server's answer, never the device clock's** (a phone whose clock runs ahead must not be offered
-  "Create join link", which revokes the live one). A re-read that fails keeps what is on screen
-  (the QR code, the rows); the full-screen and inline errors show only when nothing was loaded. The URL is never printed as text. A link is created with the server
-  defaults (14 days, no cap); the app has no control for either yet. A caller without
-  `canManageRoster` gets an `ErrorState` and neither query runs.
-  **The QR code** is `utils/qr-path.ts`: `qrcode-generator` (plain JavaScript, no native code, so
-  it ships by OTA and the drift guard does not list it) computes the matrix at error-correction
-  level M, and one `react-native-svg` `<Path>` of horizontal runs draws it, always black on white
-  with a 4-module quiet zone. `__tests__/utils/qr-path.test.ts` compares the path with the
-  library's matrix module by module and checks the three finder patterns.
-  `app/join/[token].tsx` is the deep-link screen (`hooplings://join/<token>`, and the Universal
-  Link `https://hooplings.com/join/<token>` on iOS): the public preview (`/join/` is in
-  `PUBLIC_PATHS`), then for a signed-out visitor "Log In to Continue" with `/join/<token>` stored
-  as the return path (it survives sign-in and the age screen), and for a signed-in one "Who is
-  joining?" with **Me** / **My child** (`SortPills`, nothing preselected), the child's name and
-  `RelationshipChips`. A new request shows "Request sent" (and "Add another child" for a parent);
-  an account already on the team is sent to it. Expired, full and unknown links each have their
-  own screen; only the server's 400 or 404 is the dead-link screen, every other failure is a
-  retry, as on the web page. Sentry's
-  redaction masks the segment after `/join/` (`services/sentry.ts`), in the custom-scheme deep
-  link too (`hooplings://join/<token>`, where `join` sits in the host position; the same fix covers
-  `hooplings://invite/<token>`). Events: `join_link_created`,
-  `join_link_revoked`, `join_request_sent`, `join_request_approved`, `join_request_declined` (ids
-  and enums; never the link, its token or a name). Android App Links for `/join/` need
-  `android.intentFilters`, which is native config: they wait for the next binary; the custom
-  scheme works today.
-- **Web.** `web/app/join/[token]/page.tsx` renders the preview server-side
-  (`lib/join-lookup.ts`, `X-Hooplings-Client: web`) and offers only **Open in App**
-  (`hooplings://join/<token>?src=web`, `lib/open-in-app.ts#openJoinInApp`, the same App Store
-  fallback as the invite page). Nothing can be accepted on the web: asking needs a signed-in
-  adult. A 400/404 is "Join Link Not Found", a 429/5xx/failed fetch "Temporarily Unavailable"
-  (logged as `Join link lookup unavailable`, reason and status only). `lib/log.ts` masks the
-  segment after `/join/`. `public/.well-known/apple-app-site-association` lists `/join/*` next to
-  `/invite/*`, so iOS hands the https link to the app.
-- **Maestro:** `.maestro/join-link.yaml` (a parent asks through the seeded Lakers link, Frank
-  approves, then replaces the link; needs `SEED_MAESTRO_INVITE_TOKEN=true npx prisma db seed`,
-  which writes the fixed `MAESTRO_JOIN_TOKEN` into a local database only). Every seed deletes the
-  Lakers' join links and requests and writes one fresh link. Written for this change and **not
-  yet run**.
 - Tests: `tests/api/join-links.test.ts` (route → real service → Prisma mock, every gate and
   answer, no token on any body or log line), `tests/schemas/join-link.test.ts`,
   `tests/integration/join-link.db.test.ts` (one live link under concurrent creates, no access
   while pending or after a decline, `maxUses` under concurrency, expired and revoked, the retry
   after the last use, the lapse, an un-claimed requester, both approval kinds, two concurrent
   approvals, deletion). The revoke-against-create race is argued from the shared lock, not
-  reproduced in a test. Mobile: `__tests__/hooks/useJoinLink.runtime.test.tsx`,
-  `__tests__/app/join-request.test.tsx`, `__tests__/app/team-join-link.test.tsx`,
-  `__tests__/utils/qr-path.test.ts`. Web: `web/__tests__/join-page.test.tsx`.
+  reproduced in a test.
 
 ### Mobile roster & invite-status chips (roster/invite unification)
 
