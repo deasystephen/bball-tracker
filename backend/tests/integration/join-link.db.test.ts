@@ -14,8 +14,10 @@
  *  - an expired link is refused (410) and a revoked one reads as unknown (404),
  *    but a retry by an account whose request already exists is answered with
  *    that request whatever happened to the link since;
- *  - a request nobody decides lapses after JOIN_REQUEST_TTL_DAYS and frees
- *    the requester's cap; an account un-claimed into a managed record can
+ *  - a request nobody decides lapses after JOIN_REQUEST_TTL_DAYS and is
+ *    deleted (a coach's decision, the requester's next ask, the list, and the
+ *    hourly sweep with nobody reading anything, #1075), which frees the
+ *    requester's cap; an account un-claimed into a managed record can
  *    neither ask nor be approved;
  *  - approval writes the roster: SELF adds the member; CHILD creates a managed
  *    record with no login, its membership and the primary guardian link, and
@@ -33,6 +35,7 @@ import prisma from '../../src/models';
 import { JOIN_REQUEST_TTL_DAYS, JoinLinkService, type JoinLinkView } from '../../src/services/join-link-service';
 import { AccountService } from '../../src/services/account-service';
 import { NotificationService } from '../../src/services/notification-service';
+import { sweepLapsedJoinRequests } from '../../src/services/join-request-sweep';
 import { canAccessTeam } from '../../src/utils/permissions';
 import {
   BadRequestError,
@@ -41,6 +44,8 @@ import {
   NotFoundError,
 } from '../../src/utils/errors';
 import { DbFixtures, type Org } from '../support/db-fixtures';
+import { backendPid, pause, track, waitForBlockedBy, type Tracked } from '../support/db-locks';
+import { lockUsers } from '../../src/utils/user-row-lock';
 
 jest.setTimeout(30000);
 
@@ -293,7 +298,7 @@ describe('JoinLinkService (real Postgres, #210)', () => {
     expect(await prisma.teamJoinRequest.count({ where: { teamId: club.teamId } })).toBe(1);
   });
 
-  it('a request nobody decides lapses: the name is cleared and the requester may ask again', async () => {
+  it('a lapsed request a coach tries to decide is deleted and refused (400); a retry is a 404', async () => {
     const { org: club, coachId } = await team('stale');
     const link = await JoinLinkService.createLink(club.teamId, {}, coachId);
     const parentId = await adult('waiting');
@@ -307,21 +312,107 @@ describe('JoinLinkService (real Postgres, #210)', () => {
     const old = new Date(Date.now() - (JOIN_REQUEST_TTL_DAYS + 1) * 24 * 60 * 60 * 1000);
     await prisma.teamJoinRequest.update({ where: { id: asked.request.id }, data: { createdAt: old } });
 
-    // Not flipped yet, already undecidable.
-    await expect(JoinLinkService.approveRequest(club.teamId, asked.request.id, coachId)).rejects.toBeInstanceOf(
-      BadRequestError
+    // Not swept yet: the coach's approve deletes it and is refused.
+    await expect(JoinLinkService.approveRequest(club.teamId, asked.request.id, coachId)).rejects.toMatchObject({
+      statusCode: 400,
+      message: `Cannot approve this join request: it lapsed after ${JOIN_REQUEST_TTL_DAYS} days`,
+    });
+    expect(await prisma.teamJoinRequest.findUnique({ where: { id: asked.request.id } })).toBeNull();
+    expect(await prisma.user.count({ where: { name: childName } })).toBe(0);
+    expect(await prisma.teamMember.count({ where: { teamId: club.teamId, playerId: parentId } })).toBe(0);
+    await expect(JoinLinkService.declineRequest(club.teamId, asked.request.id, coachId)).rejects.toBeInstanceOf(
+      NotFoundError
     );
     expect(await JoinLinkService.listRequests(club.teamId, coachId)).toEqual([]);
-    expect(await prisma.teamJoinRequest.findUniqueOrThrow({ where: { id: asked.request.id } })).toMatchObject({
-      status: 'EXPIRED',
+  });
+
+  it('a requester asking again after a lapse gets a fresh request, with no list read in between', async () => {
+    const { org: club, coachId } = await team('again');
+    const link = await JoinLinkService.createLink(club.teamId, {}, coachId);
+    const parentId = await adult('returning');
+    const childName = `Again-${fx.run}`;
+    const asked = await JoinLinkService.requestToJoin(
+      tokenOf(link),
+      { kind: 'child', childName, relationship: 'FATHER' },
+      parentId
+    );
+    if (asked.status !== 'pending') throw new Error('expected a pending request');
+    const old = new Date(Date.now() - (JOIN_REQUEST_TTL_DAYS + 1) * 24 * 60 * 60 * 1000);
+    await prisma.teamJoinRequest.update({ where: { id: asked.request.id }, data: { createdAt: old } });
+
+    const again = await JoinLinkService.requestToJoin(
+      tokenOf(link),
+      { kind: 'child', childName, relationship: 'FATHER' },
+      parentId
+    );
+    expect(again).toMatchObject({ status: 'pending', created: true });
+    if (again.status !== 'pending') throw new Error('expected a pending request');
+    expect(again.request.id).not.toBe(asked.request.id);
+    expect(await prisma.teamJoinRequest.findUnique({ where: { id: asked.request.id } })).toBeNull();
+    expect(await prisma.teamJoinRequest.count({ where: { teamId: club.teamId, requesterId: parentId } })).toBe(1);
+  });
+
+  it('the sweep deletes lapsed and legacy EXPIRED requests nobody reads, and keeps the rest (#1075)', async () => {
+    const { org: club, coachId } = await team('sweep');
+    const link = await JoinLinkService.createLink(club.teamId, {}, coachId);
+    const day = 24 * 60 * 60 * 1000;
+    const longAgo = new Date(Date.now() - (JOIN_REQUEST_TTL_DAYS * day + 60 * 1000));
+    async function ask(label: string): Promise<{ id: string; childName: string }> {
+      const childName = `${label}-${fx.run}`;
+      const asked = await JoinLinkService.requestToJoin(
+        tokenOf(link),
+        { kind: 'child', childName, relationship: 'MOTHER' },
+        await adult(label)
+      );
+      if (asked.status !== 'pending') throw new Error('expected a pending request');
+      return { id: asked.request.id, childName };
+    }
+    const lapsed = await ask('swept');
+    const fresh = await ask('kept');
+    const legacy = await ask('legacy');
+    const declined = await ask('declined');
+    const approved = await ask('approved');
+    await prisma.teamJoinRequest.update({ where: { id: lapsed.id }, data: { createdAt: longAgo } });
+    // A day short of the mark: not lapsed.
+    await prisma.teamJoinRequest.update({
+      where: { id: fresh.id },
+      data: { createdAt: new Date(Date.now() - (JOIN_REQUEST_TTL_DAYS - 1) * day) },
+    });
+    // What the lazy path wrote before #1075: EXPIRED, name already cleared.
+    await prisma.teamJoinRequest.update({
+      where: { id: legacy.id },
+      data: { status: 'EXPIRED', decidedAt: new Date(), childName: null },
+    });
+    // Decided long ago: the sweep leaves decisions alone, however old.
+    await JoinLinkService.declineRequest(club.teamId, declined.id, coachId);
+    await JoinLinkService.approveRequest(club.teamId, approved.id, coachId);
+    await prisma.teamJoinRequest.updateMany({
+      where: { id: { in: [declined.id, approved.id] } },
+      data: { createdAt: longAgo },
+    });
+
+    // No list read, no new ask, no decision: only the sweep.
+    expect(await sweepLapsedJoinRequests()).toBeGreaterThanOrEqual(2);
+
+    expect(await prisma.teamJoinRequest.findUnique({ where: { id: lapsed.id } })).toBeNull();
+    expect(await prisma.teamJoinRequest.findUnique({ where: { id: legacy.id } })).toBeNull();
+    expect(await prisma.teamJoinRequest.count({ where: { childName: lapsed.childName } })).toBe(0);
+    expect(await prisma.teamJoinRequest.findUniqueOrThrow({ where: { id: fresh.id } })).toMatchObject({
+      status: 'PENDING',
+      childName: fresh.childName,
+    });
+    expect(await prisma.teamJoinRequest.findUniqueOrThrow({ where: { id: declined.id } })).toMatchObject({
+      status: 'REJECTED',
       childName: null,
     });
-    expect(await prisma.user.count({ where: { name: childName } })).toBe(0);
+    expect(await prisma.teamJoinRequest.findUniqueOrThrow({ where: { id: approved.id } })).toMatchObject({
+      status: 'ACCEPTED',
+      childName: null,
+    });
 
-    // The same ask is a new request now.
-    await expect(
-      JoinLinkService.requestToJoin(tokenOf(link), { kind: 'child', childName, relationship: 'FATHER' }, parentId)
-    ).resolves.toMatchObject({ status: 'pending', created: true });
+    // A second sweep finds nothing of ours left, and the coach sees only the fresh one.
+    await sweepLapsedJoinRequests();
+    expect((await JoinLinkService.listRequests(club.teamId, coachId)).map((r) => r.id)).toEqual([fresh.id]);
   });
 
   it('an account un-claimed into a managed record can neither ask nor be approved', async () => {
@@ -345,7 +436,7 @@ describe('JoinLinkService (real Postgres, #210)', () => {
     ).rejects.toMatchObject({ statusCode: 401 });
   });
 
-  it('a lapse survives a refused ask: the name stays cleared when the old link is dead', async () => {
+  it('a lapse survives a refused ask: the row stays deleted when the old link is dead', async () => {
     const { org: club, coachId } = await team('lapse');
     const link = await JoinLinkService.createLink(club.teamId, {}, coachId);
     const parentId = await adult('late');
@@ -368,10 +459,7 @@ describe('JoinLinkService (real Postgres, #210)', () => {
       )
     ).rejects.toMatchObject({ statusCode: 410 });
 
-    expect(await prisma.teamJoinRequest.findUniqueOrThrow({ where: { id: asked.request.id } })).toMatchObject({
-      status: 'EXPIRED',
-      childName: null,
-    });
+    expect(await prisma.teamJoinRequest.findUnique({ where: { id: asked.request.id } })).toBeNull();
   });
 
   it('an account a coach keeps declining runs into the cap; approved requests never count', async () => {
@@ -576,6 +664,9 @@ describe('JoinLinkService (real Postgres, #210)', () => {
       const parentId = await adult('dad');
       const requestId = await childRequest(link, parentId, `Same-${fx.run}`);
 
+      // What this proves: whichever order the two calls run in, the request's
+      // status guard lets exactly one through and the other answers 400; it
+      // does not by itself prove the record's lock (the next test does).
       const settled = await Promise.allSettled([
         JoinLinkService.approveRequest(club.teamId, requestId, coachId, { playerId }),
         JoinLinkService.approveRequest(club.teamId, requestId, secondCoachId, { playerId }),
@@ -595,10 +686,45 @@ describe('JoinLinkService (real Postgres, #210)', () => {
       const firstRequestId = await childRequest(link, firstParentId, `Two-${fx.run}`);
       const secondRequestId = await childRequest(link, secondParentId, `Two-${fx.run}`);
 
-      const settled = await Promise.allSettled([
-        JoinLinkService.approveRequest(club.teamId, firstRequestId, coachId, { playerId }),
-        JoinLinkService.approveRequest(club.teamId, secondRequestId, secondCoachId, { playerId }),
-      ]);
+      // Deterministic: the test holds the record's row lock, starts both
+      // approvals, waits until Postgres shows BOTH blocked on it (each has
+      // passed every unlocked read and is inside its transaction), and only
+      // then releases. So the two really contend, and the record's lock alone
+      // decides the outcome.
+      let calls: Tracked<unknown>[] = [];
+      await prisma.$transaction(
+        async (holder) => {
+          await lockUsers(holder, [playerId]);
+          const pid = await backendPid(holder);
+          calls = [
+            track(JoinLinkService.approveRequest(club.teamId, firstRequestId, coachId, { playerId })),
+            track(JoinLinkService.approveRequest(club.teamId, secondRequestId, secondCoachId, { playerId })),
+          ];
+          for (const call of calls) call.promise.catch(() => undefined);
+          // The first waiter queues on the row behind the holder; Postgres
+          // reports the second as blocked by that first waiter, so count the
+          // backends waiting on the holder directly or through one of those.
+          await waitForBlockedBy(holder, pid, { settled: calls[0] });
+          const deadline = Date.now() + 3000;
+          for (;;) {
+            await holder.$executeRaw`SELECT pg_stat_clear_snapshot()`;
+            const [{ n }] = await holder.$queryRaw<{ n: number }[]>`
+              WITH direct AS (
+                SELECT pid FROM pg_stat_activity WHERE ${pid}::int = ANY(pg_blocking_pids(pid))
+              )
+              SELECT count(*)::int AS n FROM pg_stat_activity a
+              WHERE ${pid}::int = ANY(pg_blocking_pids(a.pid))
+                 OR pg_blocking_pids(a.pid) && ARRAY(SELECT pid FROM direct)`;
+            if (n >= 2) break;
+            if (Date.now() > deadline || calls.some((call) => call.settled())) {
+              throw new Error(`expected both approvals waiting on the record lock, saw ${n}`);
+            }
+            await pause(25);
+          }
+        },
+        { timeout: 15_000 }
+      );
+      const settled = await Promise.allSettled(calls.map((call) => call.promise));
 
       expect(settled.filter((s) => s.status === 'fulfilled')).toHaveLength(1);
       const [lost] = settled.filter((s): s is PromiseRejectedResult => s.status === 'rejected');
@@ -617,6 +743,47 @@ describe('JoinLinkService (real Postgres, #210)', () => {
       const loserParentId = links[0].parentId === firstParentId ? secondParentId : firstParentId;
       expect((await prisma.user.findUniqueOrThrow({ where: { id: loserParentId } })).role).toBe('PLAYER');
       expect(await canAccessTeam(loserParentId, club.teamId)).toBe(false);
+    });
+
+    it('a removal from the team committing while the approval waits: 409 not_on_team, nothing linked', async () => {
+      const { club, coachId, link, playerId } = await setup('removed');
+      const parentId = await adult('late');
+      const requestId = await childRequest(link, parentId, `Removed-${fx.run}`);
+
+      // The test removes the record from the team (what TeamService.removePlayer
+      // does, which takes no User or Team lock) and keeps that uncommitted
+      // while the approval runs. Postgres must show the approval waiting on
+      // it holding its User and Team locks, i.e. at the membership lock; the
+      // removal then commits.
+      let approval: Tracked<unknown> | undefined;
+      let blocked: { relations: string[] }[] = [];
+      await prisma.$transaction(
+        async (holder) => {
+          await holder.teamMember.delete({ where: { teamId_playerId: { teamId: club.teamId, playerId } } });
+          const pid = await backendPid(holder);
+          approval = track(JoinLinkService.approveRequest(club.teamId, requestId, coachId, { playerId }));
+          approval.promise.catch(() => undefined);
+          blocked = await waitForBlockedBy(holder, pid, {
+            tables: ['User', 'Team', 'TeamJoinRequest'],
+            settled: approval,
+          });
+        },
+        { timeout: 15_000 }
+      );
+
+      expect(blocked).toHaveLength(1);
+      expect(blocked[0].relations).toEqual(expect.arrayContaining(['Team', 'TeamJoinRequest', 'User']));
+      await expect(approval!.promise).rejects.toMatchObject({
+        statusCode: 409,
+        code: 'join_player_unavailable',
+        details: { reason: 'not_on_team' },
+      });
+      expect(await prisma.guardian.count({ where: { childId: playerId } })).toBe(0);
+      expect(await prisma.teamJoinRequest.findUniqueOrThrow({ where: { id: requestId } })).toMatchObject({
+        status: 'PENDING',
+        childName: `Removed-${fx.run}`,
+      });
+      expect((await prisma.user.findUniqueOrThrow({ where: { id: parentId } })).role).toBe('PLAYER');
     });
 
     it('refuses a record that cannot take the request, and writes nothing', async () => {

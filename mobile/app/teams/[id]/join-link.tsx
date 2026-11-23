@@ -210,7 +210,15 @@ export default function TeamJoinLinkScreen() {
   const approveChoices = (row: JoinRequestRow): ActionMenuItem[] => [
     { label: t('joinLink.approveAsNewPlayer'), onPress: () => void handleApprove(row) },
     ...targetsFor(row).map((member) => ({
-      label: t('joinLink.approveOntoPlayer', { player: displayName(member.player) }),
+      key: member.playerId,
+      // The jersey tells apart two records with the same name, as on the roster row (`#N`).
+      label:
+        member.jerseyNumber != null
+          ? t('joinLink.approveOntoPlayerNumber', {
+              player: displayName(member.player),
+              number: member.jerseyNumber,
+            })
+          : t('joinLink.approveOntoPlayer', { player: displayName(member.player) }),
       onPress: () => void handleApprove(row, member),
     })),
   ];

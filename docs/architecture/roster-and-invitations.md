@@ -433,7 +433,7 @@ themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by 
 - **Tables** (migration `20261122120000_team_join_link`, additive): `TeamJoinLink { teamId, token,
   createdById?, expiresAt, maxUses?, useCount, revokedAt? }` and `TeamJoinRequest { teamId, linkId,
   requesterId, kind SELF|CHILD, childName?, relationship?, status, decidedAt? }`. `status` reuses
-  `InvitationStatus` (PENDING, ACCEPTED = approved, REJECTED = declined, EXPIRED = lapsed, below). A new kind in its own
+  `InvitationStatus` (PENDING, ACCEPTED = approved, REJECTED = declined; a lapsed request is deleted, below, so EXPIRED is no longer written on a join request and only rows from before #1075 carry it). A new kind in its own
   tables, like staff invitations, so no existing invitation reader sees it.
 - **The token is a bearer secret**, `randomBytes(32).toString('base64url')` like the invitation
   tokens. It is read only through `JOIN_LINK_MANAGER_SELECT` and leaves the API only inside
@@ -489,8 +489,9 @@ themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by 
     re-read). The comparison is made in UTC (`NOW() AT TIME ZONE 'UTC'`), as the columns are stored.
   - **The cap, behind that lock** (#1073, owner's decision 2026-11-23). **`maxUses` counts the
     link's pending plus approved requests**: `PENDING` not yet past `JOIN_REQUEST_TTL_DAYS`, and
-    `ACCEPTED`. A declined (`REJECTED`) or lapsed (`EXPIRED`, or `PENDING` past the TTL and not
-    flipped yet) request frees its slot; `CANCELLED` is never written for a join request; a request
+    `ACCEPTED`. A declined (`REJECTED`) request frees its slot, and so does a lapsed one: it is
+    deleted (#1075), and a `PENDING` row past the TTL that the delete has not reached yet (or a
+    legacy `EXPIRED` row) already does not count; `CANCELLED` is never written for a join request; a request
     deleted with its requester's account (below) frees its slot too. The count
     (`join-link-service.ts#countUses`, `slotHoldersWhere`) is a statement of its own after the
     `UPDATE`, so under READ COMMITTED it sees every request committed by an ask that held the lock
@@ -511,13 +512,42 @@ themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by 
   whose role has `canManageRoster`, the requester excepted ("Someone asked to join <team>", no
   person's name; data `{ type: 'join_request', teamId }`). A failed push is a warn, never a failed
   request.
-- **A request nobody decides lapses after `JOIN_REQUEST_TTL_DAYS` (30).** It is flipped to EXPIRED
-  and its `childName` cleared, **lazily**: when the team's list is read and when the requester asks
-  again (nothing in the API is scheduled, as with invitation expiry), in a statement of its own
-  that commits before the ask is judged, so a refused ask never undoes it; an approve or decline of a
-  lapsed row that was not flipped yet answers 400. So a family is never stuck at the pending cap.
-  The typed name of a request on a team whose coaches never open the list, from a requester who
-  never returns, stays until one of those reads happens or the account is deleted.
+- **A request nobody decides lapses after `JOIN_REQUEST_TTL_DAYS` (30) and is deleted** (#1075;
+  before it the row was flipped to EXPIRED with `childName` cleared and kept). One predicate,
+  `lapsedWhere` in `join-link-service.ts`, says which rows: PENDING and older than the TTL, or
+  status EXPIRED (rows the old lazy path flipped; nothing reads them). Declined (REJECTED) and
+  approved (ACCEPTED) rows are never lapsed: the repeat-ask cap reads REJECTED rows for 30 days, and
+  approved rows stay. Every path deletes through that predicate, so they cannot drift:
+  - **Lazily** (`deleteLapsedRequests`, narrowed to the team plus one requester or one request):
+    when the team's list is read and when the requester asks again, in a statement of its own that
+    commits before the ask is judged, so a refused ask never brings the row back. A requester who
+    asks again after a lapse gets a fresh request (`created: true`, a new id). So a family is never
+    stuck at the pending cap.
+  - **On a decision**: an approve or decline of a lapsed row the sweep has not reached yet deletes it
+    and answers **400** `Cannot approve|decline this join request: it lapsed after 30 days`; nothing
+    is written to the roster, and a retry answers 404.
+  - **The hourly sweep** (`services/join-request-sweep.ts`), so a typed child's name never waits on
+    a team nobody opens. `startJoinRequestSweep()` runs in `src/index.ts` after `listen`: the first
+    run is `JOIN_REQUEST_SWEEP_FIRST_RUN_MS` (1 min) after start, then every
+    `JOIN_REQUEST_SWEEP_INTERVAL_MS` (1 h), so a lapsed request is deleted within about an hour of
+    the 30-day mark while the API runs, even when deploys replace the task more often than hourly.
+    `JoinLinkService.deleteAllLapsedRequests` works oldest first in batches of
+    `JOIN_REQUEST_SWEEP_BATCH` (500): read the ids, then one `deleteMany` per batch that re-checks
+    the predicate, so a request a coach decided meanwhile is untouched and one statement stays short.
+    The scheduler copies the socket revocation sweep (`websocket/revocation.ts`): unref'd timers, a
+    tick skipped while a run is in flight (reported once, `Join request sweep stalled`, error and
+    Sentry; the pool's statement timeout bounds a slow batch long before), a database failure
+    logged at warn (`Join request sweep failed`, the first of a streak to Sentry, flow
+    `join-request-sweep`) and retried next hour, never thrown. Shutdown stops it in its first step
+    (`stopJoinRequestSweep()` beside `stopRevocationSweep()`), before Prisma disconnects.
+    Single-replica, so no lock; a second task would run the same idempotent DELETE.
+  - Every path logs `Join requests deleted` when it removed any: `{ teamId, deletedCount }` lazily,
+    `{ deletedCount, teamCount, trigger: 'sweep' }` from the sweep. Counts and ids only.
+  - Tests: `tests/services/join-request-sweep.test.ts` (batching, scheduler),
+    `tests/api/join-links.test.ts` (lazy and decision deletes) and
+    `tests/integration/join-link.db.test.ts` (the sweep deletes lapsed and legacy EXPIRED rows with no
+    read and keeps a request a day short of the mark plus old declined and approved rows; a decision
+    on a lapsed row; a re-ask after a lapse).
 - **`GET /teams/:teamId/join-requests`** (`canManageRoster`, 403 otherwise): the pending requests,
   oldest first, each with `childName`, `relationship` and `requester` (`USER_SUMMARY_WITH_EMAIL_SELECT`:
   the address is how a coach recognises who is asking; roster managers already see roster emails).
@@ -538,24 +568,39 @@ themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by 
   **Onto an existing roster record (#1072):** body `{ playerId }` (`approveJoinRequestSchema`, a
   UUID; an empty body approves as above). For a coach who already typed the roster: the CHILD
   request becomes a guardian link on that record instead of a duplicate player. A SELF request with
-  a `playerId` is a 400 before any lock. The chosen record is locked in the **same** `lockUsers`
-  statement as the requester and the approver (User rows before the team row, the order the
-  guardian accept and account deletion use), and after the status flip it is judged again behind
-  every lock: a live managed record (`isManaged`, not deleted), a member of this team, and no
-  `Guardian` row at all (a child with any link has exactly one primary, so this is "no primary
-  guardian"). Otherwise **409 `join_player_unavailable`** (`JoinPlayerUnavailableError`, `reason`:
-  `not_managed`, `not_on_team` or `has_guardian`) and the whole transaction rolls back: the
-  request stays PENDING with its name, nothing is linked. Then the link is written by
+  a `playerId` is a 400 before any lock. Lock order User → Team → TeamMember: the chosen record is
+  locked in the **same** `lockUsers` statement as the requester and the approver (the per-child
+  lock every `Guardian` writer takes), then the team row, then, after the status flip, the
+  record's `TeamMember` row (`utils/team-row-lock.ts#lockTeamMemberRow`, `FOR UPDATE`).
+  `TeamService.removePlayer` takes no User or Team lock, so without that row lock a removal could
+  commit between the membership read and the `Guardian` insert; now a removal that committed first
+  reads as no row and one that comes second waits until the approval commits. The record is
+  judged behind those locks, in this order: **on this team** (any other id, unknown, a login or a
+  child elsewhere, answers `not_on_team` and reveals nothing more), a live managed record
+  (`isManaged`, not deleted), and no `Guardian` row at all (a child with any link has exactly one
+  primary, so this is "no primary guardian"). Otherwise **409 `join_player_unavailable`**
+  (`JoinPlayerUnavailableError`, `reason`: `not_on_team`, `not_managed` or `has_guardian`) and the
+  whole transaction rolls back: the request stays PENDING with its name, nothing is linked. A
+  pending "Invite a parent" invitation on the record does not block it: the record is still
+  offered, the invitation stays, and an adult who accepts it later becomes a second, non-primary
+  guardian. Then the link is written by
   `GuardianService.linkGuardianLocked`, the guardian accept's own code (primary when it is the
   first link, then the bare-PLAYER → PARENT rule); the coach's record keeps its name, its
   `managedById` and its jersey, and no `TeamMember` or `User` is created. **Races:** two coaches
   approving the same request onto one record serialise on the User locks and the loser gets the
   existing 400 ("no longer pending"); two requests onto one record serialise on the record's lock
   and the loser gets 409 `has_guardian`; an "Invite a parent" accept on the same record takes the
-  same child lock, so the child never ends up with two primaries. Known residual, as for Add
-  Player's case 2 (`utils/team-row-lock.ts`): deleting the coach who manages the record rewrites
-  `managedById` after locking their teams and can deadlock with an approval holding the record's
-  lock; PostgreSQL aborts one side (40P01).
+  same child lock, so the child never ends up with two primaries. **Known residual deadlock**,
+  next to Add Player's case 2 in `utils/team-row-lock.ts`: this is the only path that holds a
+  managed record's row and then waits for a team row. Deleting the coach who manages the record
+  (`deleteAccount`: that coach `FOR UPDATE`, their head-coach teams, then
+  `updateMany({ managedById })`, which needs the record's row) can wait on it in a cycle, for
+  example while a second head coach approves onto a record the departing coach created.
+  PostgreSQL's deadlock detector (1 s by default, before the 4 s `lock_timeout`) aborts one side
+  with 40P01, which `classifyDbError` does not map: that side (the approval or the deletion)
+  answers **500**, not the retryable 503; nothing was written and a retry succeeds. An approval
+  without `playerId` locks only logins and is not part of this cycle. Not reordered: the record
+  after the team would cycle with a guardian accept by the same parent for the same record.
   **`…/decline`**: one status-guarded update, `childName` cleared, nothing written to the roster,
   no notification. Order of refusals on both: team 404, 403, request 404 (another team's id), 400.
 - **Not built (deliberate):** a requester cannot list or withdraw their own requests. A link is not
@@ -584,7 +629,10 @@ themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by 
   (Decline confirms); each request shows who would be added, who asked, and the asker's email on
   a line of its own. **Approve on a CHILD request** (#1072) opens an `ActionMenu` ("Add <child> to
   the roster") when the roster has records it could be: **Add as a new player** (the request as
-  before) and one "Same child as <player>, already on the roster" item per candidate, from
+  before) and one "Same child as <player>, already on the roster" item per candidate (with
+  "(#N)" after the name when the record has a jersey, jersey 0 included, as the roster row shows
+  it; each item is keyed by the player id through `ActionMenuItem.key`, so two records with the
+  same name are two rows; two same-named records without a jersey still read alike), from
   `utils/join-request-targets.ts#attachablePlayers` (members that are managed, not deleted and not
   in `team.guardianLinkedPlayerIds`; a record with the typed name first, then by name via
   `sortRosterMembers`). A SELF request, or a roster without such a record, approves at once as
@@ -641,8 +689,10 @@ themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by 
   while pending or after a decline, `maxUses` under concurrency, expired and revoked, the retry
   after the last use, the lapse, an un-claimed requester, both approval kinds, two concurrent
   approvals, deletion; #1072: approval onto an existing record, each 409 reason, a SELF request
-  with `playerId`, two coaches approving one request onto one record, and two requests onto one
-  record at once). The revoke-against-create race is argued from the shared lock, not
+  with `playerId`, two coaches approving one request onto one record (decided by the status
+  guard), two requests onto one record held behind the test's lock on the record until Postgres
+  shows both waiting, and a removal from the team committed while the approval waits at the
+  membership lock). The coach-deletion deadlock is not reproduced in a test. The revoke-against-create race is argued from the shared lock, not
   reproduced in a test. Mobile: `__tests__/hooks/useJoinLink.runtime.test.tsx`,
   `__tests__/app/join-request.test.tsx`, `__tests__/app/team-join-link.test.tsx`,
   `__tests__/utils/qr-path.test.ts`. Web: `web/__tests__/join-page.test.tsx`.

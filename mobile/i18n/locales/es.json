@@ -1160,6 +1160,7 @@
     "approveChoiceTitle": "Agregar a {{name}} a la plantilla",
     "approveAsNewPlayer": "Agregar como jugador nuevo",
     "approveOntoPlayer": "Es {{player}}, que ya está en la plantilla",
+    "approveOntoPlayerNumber": "Es {{player}} (#{{number}}), que ya está en la plantilla",
     "linkedToPlayer": "{{parent}} ahora está vinculado con {{player}}",
     "decline": "Rechazar",
     "declineLabel": "Rechazar a {{name}}",

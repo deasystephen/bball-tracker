@@ -228,8 +228,11 @@ model Game {
 ### Join code
 
 - 8 characters from an unambiguous alphabet (no `0/O/1/I`), rendered `XXXX-XXXX`, typeable on a
-  phone. Also shared as `https://hooplings.com/join/<code>`, which opens the app (existing
-  Universal Link plumbing) with the code pre-filled on the team picker.
+  phone. Also shared as `https://hooplings.com/competitions/join/<code>`, which opens the app
+  (existing Universal Link plumbing) with the code pre-filled on the team picker. The path is
+  not `/join/<code>`: since #210 `/join/<token>` is the team join link, on the web, in the
+  Universal Link file and as the app route `app/join/[token].tsx` (#1077). The build adds
+  `/competitions/join/*` to the Universal Link file and a matching web and app route.
 - Guessing is bounded by the endpoint, not by length: `POST /competitions/join` is rate-limited
   **per user id + IP** (about 10 attempts / 15 min; the route is authenticated so the caller is
   known). Unknown and rotated codes answer the same generic 404. Organizer can rotate at any time.
@@ -279,7 +282,7 @@ competitionAccessWhere(userId, childIds)   = { OR: [ { season: { league: { admin
 ### Mobile (competition build)
 
 - `teams/[id].tsx`: "Competitions" chip row; **Join competition** action (code entry sheet,
-  `components/ActionMenu` pattern; pre-filled from the `/join/<code>` link) rendered only when
+  `components/ActionMenu` pattern; pre-filled from the `/competitions/join/<code>` link) rendered only when
   `canManageStaff(team, userId, userRole, leagueAdminOf)`. Derivations in
   `utils/competition-scope.ts` (`canJoinCompetition`, `isEntered`), never inline.
 - `admin/leagues/[id].tsx`: per-season competitions list; create; `admin/competitions/[id].tsx`
@@ -374,7 +377,7 @@ the rollout COMPLETED and `/health` reports `db: ok` before publishing the OTA.
 | Per-season identity | `Team` row is already a team-season | Reused as-is; lineage added |
 | Competition period + admin set | `Season` (name, dates) + `LeagueAdmin` + `isLeagueAdmin` | Reused; no new admin table |
 | Cross-club entry secret | Invitation token discipline (`INVITATION_SELECT`, `omitToken`) | Strip generalised (`omitSecret`); rate limit keyed by caller instead |
-| Deep link into the app | Universal Links (`applinks:hooplings.com`, `/invite/<token>`) | Reused for `/join/<code>` |
+| Deep link into the app | Universal Links (`applinks:hooplings.com`, `/invite/<token>`) | Reused for `/competitions/join/<code>` (`/join/<token>` is the team join link, #1077) |
 | Team-side read predicate | `teamAccessWhere` | Reused inside `competitionAccessWhere` |
 | Real-DB authz test harness | `tests/integration/league-access.db.test.ts` | Pattern copied; extended for lineage |
 | Snapshot restore procedure | `docs/runbooks/rds-backup-restore.md` Procedure A | Used for the migration rehearsal; drill log filled |
