@@ -67,6 +67,7 @@ describe('legal pages (#25)', () => {
       ['“Deleted user”', 'attributed to "Deleted user"'],
       ['city, region and country', '**city,\n  region and country**'],
       ['lapses 30 days after it was sent', 'lapses, **30 days** after it was sent'],
+      ['removed from it within about an hour', '**within about an hour** of that mark'],
     ];
     for (const [page, runbook] of windows) {
       expect(body).toContain(page);

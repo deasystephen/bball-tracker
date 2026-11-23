@@ -60,12 +60,16 @@ export const MAX_PENDING_JOIN_REQUESTS_PER_ACCOUNT = 6;
 
 /**
  * A request nobody decides lapses: after this many days it is flipped to
- * EXPIRED and its `childName` cleared, lazily, the next time the team's list
- * is read or the requester asks again (nothing in this API is scheduled). So
- * a family is never stuck at the pending cap, and a typed child's name does
- * not wait on a coach forever.
+ * EXPIRED and its `childName` cleared. Lazily, the next time the team's list
+ * is read or the requester asks again, and by the hourly sweep
+ * (`join-request-sweep.ts`, #1075) on a team nobody opens. So a family is
+ * never stuck at the pending cap, and a typed child's name does not wait on a
+ * coach forever.
  */
 export const JOIN_REQUEST_TTL_DAYS = 30;
+
+/** Requests the sweep lapses per statement, so one statement stays short. */
+export const JOIN_REQUEST_SWEEP_BATCH = 500;
 
 const JOIN_LINK_NOT_FOUND = 'Join link not found';
 const JOIN_REQUEST_NOT_FOUND = 'Join request not found';
@@ -198,6 +202,19 @@ function linkState(row: Pick<JoinLinkPublicRow, 'expiresAt' | 'maxUses' | 'useCo
 /** The moment before which a PENDING request has lapsed. */
 function staleBefore(now: Date = new Date()): Date {
   return new Date(now.getTime() - JOIN_REQUEST_TTL_DAYS * 24 * 60 * 60 * 1000);
+}
+
+/**
+ * The one definition of a lapse, shared by the lazy expiry and the sweep so
+ * they never drift: which rows (PENDING, older than the TTL) and what is
+ * written (EXPIRED, decided now, the typed child's name cleared).
+ */
+function lapsedWhere(now: Date): Prisma.TeamJoinRequestWhereInput {
+  return { status: 'PENDING', createdAt: { lt: staleBefore(now) } };
+}
+
+function lapseData(now: Date): Prisma.TeamJoinRequestUpdateManyMutationInput {
+  return { status: 'EXPIRED', decidedAt: now, childName: null };
 }
 
 /** Names compared the way a coach reads them: trimmed, inner whitespace collapsed, case ignored. */
@@ -345,13 +362,51 @@ export class JoinLinkService {
   private static async expireStaleRequests(
     where: Pick<Prisma.TeamJoinRequestWhereInput, 'teamId' | 'requesterId'>
   ): Promise<void> {
+    const now = new Date();
     const { count } = await prisma.teamJoinRequest.updateMany({
-      where: { ...where, status: 'PENDING', createdAt: { lt: staleBefore() } },
-      data: { status: 'EXPIRED', decidedAt: new Date(), childName: null },
+      where: { ...where, ...lapsedWhere(now) },
+      data: lapseData(now),
     });
     if (count > 0) {
       logger.info('Join requests expired', { teamId: where.teamId, expiredCount: count });
     }
+  }
+
+  /**
+   * The sweep's expiry (#1075): every lapsed request, on every team, with
+   * nobody reading a list. Same rows and same write as `expireStaleRequests`,
+   * in batches of `JOIN_REQUEST_SWEEP_BATCH` (oldest first, one short UPDATE
+   * per batch, each re-checking the lapse so a request decided meanwhile is
+   * left alone). Returns how many it expired; logs one domain event, counts
+   * only, when that is more than none. Errors propagate to the scheduler.
+   */
+  static async expireLapsedRequests(): Promise<number> {
+    let expired = 0;
+    const teamIds = new Set<string>();
+    for (;;) {
+      const now = new Date();
+      const batch = await prisma.teamJoinRequest.findMany({
+        where: lapsedWhere(now),
+        select: { id: true, teamId: true },
+        orderBy: { createdAt: 'asc' },
+        take: JOIN_REQUEST_SWEEP_BATCH,
+      });
+      if (batch.length === 0) break;
+      const { count } = await prisma.teamJoinRequest.updateMany({
+        where: { id: { in: batch.map((row) => row.id) }, ...lapsedWhere(now) },
+        data: lapseData(now),
+      });
+      expired += count;
+      for (const row of batch) teamIds.add(row.teamId);
+      // A short batch was the last one; a batch that changed nothing (all
+      // decided meanwhile) stops the run rather than spin, the next sweep
+      // picks up whatever is left.
+      if (batch.length < JOIN_REQUEST_SWEEP_BATCH || count === 0) break;
+    }
+    if (expired > 0) {
+      logger.info('Join requests expired', { expiredCount: expired, teamCount: teamIds.size, trigger: 'sweep' });
+    }
+    return expired;
   }
 
   /**

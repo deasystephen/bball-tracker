@@ -13,7 +13,8 @@
  *    but a retry by an account whose request already exists is answered with
  *    that request whatever happened to the link since;
  *  - a request nobody decides lapses after JOIN_REQUEST_TTL_DAYS and frees
- *    the requester's cap; an account un-claimed into a managed record can
+ *    the requester's cap, and the hourly sweep lapses it with nobody reading
+ *    the list (#1075); an account un-claimed into a managed record can
  *    neither ask nor be approved;
  *  - approval writes the roster: SELF adds the member; CHILD creates a managed
  *    record with no login, its membership and the primary guardian link, and
@@ -28,6 +29,7 @@ import prisma from '../../src/models';
 import { JOIN_REQUEST_TTL_DAYS, JoinLinkService, type JoinLinkView } from '../../src/services/join-link-service';
 import { AccountService } from '../../src/services/account-service';
 import { NotificationService } from '../../src/services/notification-service';
+import { sweepLapsedJoinRequests } from '../../src/services/join-request-sweep';
 import { canAccessTeam } from '../../src/utils/permissions';
 import { BadRequestError, JoinLinkInactiveError, NotFoundError } from '../../src/utils/errors';
 import { DbFixtures, type Org } from '../support/db-fixtures';
@@ -260,6 +262,53 @@ describe('JoinLinkService (real Postgres, #210)', () => {
     await expect(
       JoinLinkService.requestToJoin(tokenOf(link), { kind: 'child', childName, relationship: 'FATHER' }, parentId)
     ).resolves.toMatchObject({ status: 'pending', created: true });
+  });
+
+  it('the sweep lapses a request nobody reads, and keeps one that has not lapsed (#1075)', async () => {
+    const { org: club, coachId } = await team('sweep');
+    const link = await JoinLinkService.createLink(club.teamId, {}, coachId);
+    const lapsedParent = await adult('swept');
+    const freshParent = await adult('kept');
+    const lapsedName = `Swept-${fx.run}`;
+    const freshName = `Kept-${fx.run}`;
+    const lapsed = await JoinLinkService.requestToJoin(
+      tokenOf(link),
+      { kind: 'child', childName: lapsedName, relationship: 'MOTHER' },
+      lapsedParent
+    );
+    const fresh = await JoinLinkService.requestToJoin(
+      tokenOf(link),
+      { kind: 'child', childName: freshName, relationship: 'FATHER' },
+      freshParent
+    );
+    if (lapsed.status !== 'pending' || fresh.status !== 'pending') throw new Error('expected pending requests');
+    const day = 24 * 60 * 60 * 1000;
+    await prisma.teamJoinRequest.update({
+      where: { id: lapsed.request.id },
+      data: { createdAt: new Date(Date.now() - (JOIN_REQUEST_TTL_DAYS * day + 60 * 1000)) },
+    });
+    // A day short of the mark: not lapsed.
+    await prisma.teamJoinRequest.update({
+      where: { id: fresh.request.id },
+      data: { createdAt: new Date(Date.now() - (JOIN_REQUEST_TTL_DAYS - 1) * day) },
+    });
+
+    // No list read, no new ask: only the sweep.
+    expect(await sweepLapsedJoinRequests()).toBeGreaterThanOrEqual(1);
+
+    const swept = await prisma.teamJoinRequest.findUniqueOrThrow({ where: { id: lapsed.request.id } });
+    expect(swept).toMatchObject({ status: 'EXPIRED', childName: null });
+    expect(swept.decidedAt).toBeInstanceOf(Date);
+    expect(await prisma.teamJoinRequest.findUniqueOrThrow({ where: { id: fresh.request.id } })).toMatchObject({
+      status: 'PENDING',
+      childName: freshName,
+      decidedAt: null,
+    });
+    expect(await prisma.teamJoinRequest.count({ where: { childName: lapsedName } })).toBe(0);
+
+    // A second sweep finds nothing of ours left to lapse, and the coach sees only the fresh one.
+    await sweepLapsedJoinRequests();
+    expect((await JoinLinkService.listRequests(club.teamId, coachId)).map((r) => r.id)).toEqual([fresh.request.id]);
   });
 
   it('an account un-claimed into a managed record can neither ask nor be approved', async () => {
