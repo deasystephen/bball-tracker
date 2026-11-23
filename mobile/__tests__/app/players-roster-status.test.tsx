@@ -8,7 +8,7 @@
  */
 
 import { act, render, fireEvent, waitFor } from '@testing-library/react-native';
-import { Alert } from 'react-native';
+import { Alert, ScrollView } from 'react-native';
 
 import ManagePlayersScreen from '../../app/teams/[id]/players';
 import { useAuthStore } from '../../store/auth-store';
@@ -929,20 +929,32 @@ describe('ManagePlayersScreen — roster status and actions', () => {
         },
       });
 
-    it('Add Player shows the refusal on the jersey field and in a toast, and typing clears the field error', async () => {
+    it('Add Player shows the refusal once, on the jersey field scrolled into view, and typing clears it', async () => {
       mockAddRosterPlayer.mutateAsync.mockRejectedValue(jerseyTaken());
-      const { getByTestId, getByLabelText, findByText, queryByText } = render(<ManagePlayersScreen />);
+      const scrollTo = jest.spyOn(ScrollView.prototype, 'scrollTo');
+      const screen = render(<ManagePlayersScreen />);
+      const { getByTestId, getByLabelText, findByText, queryByText } = screen;
 
       fireEvent.press(getByTestId('add-player-button'));
       fireEvent.press(getByLabelText(AGE_YES));
       fireEvent.changeText(getByTestId('add-player-name-input'), 'New Kid');
       fireEvent.changeText(getByTestId('add-player-jersey-input'), '8');
+      // The card at y=40 in the scroll content, the jersey field at y=300 in the card.
+      fireEvent(getByTestId('add-player-jersey-field'), 'layout', {
+        nativeEvent: { layout: { x: 0, y: 300, width: 300, height: 90 } },
+      });
+      fireEvent(getByTestId('roster-form-card'), 'layout', {
+        nativeEvent: { layout: { x: 0, y: 40, width: 340, height: 900 } },
+      });
       fireEvent.press(getByTestId('add-player-submit'));
 
       const message = 'Number 8 is already worn by Ada Active. Pick another number or leave it blank.';
       expect(await findByText(message)).toBeTruthy();
-      // Also a toast: the submit button is below the fold, the field may not be in view.
-      expect(mockShowToast).toHaveBeenCalledWith(message, 'error');
+      // Once: no toast, it landed on top of the inline error (#1095).
+      expect(mockShowToast).not.toHaveBeenCalled();
+      // The field is brought into view, a little above its label.
+      expect(scrollTo).toHaveBeenCalledWith({ y: 340 - 16, animated: true });
+      scrollTo.mockRestore();
       // The form stays open with what the coach typed.
       expect(getByTestId('add-player-name-input').props.value).toBe('New Kid');
 

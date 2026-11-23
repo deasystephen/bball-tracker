@@ -48,6 +48,30 @@ describe('ListItem', () => {
     });
   });
 
+  describe('subtitle line (#1095)', () => {
+    it('renders the accessory after the subtitle', () => {
+      const { getByText } = render(
+        <ListItem title="Bryce James" subtitle="#9 • SG" subtitleAccessory={<Text>Parent connected</Text>} />
+      );
+      expect(getByText('#9 • SG')).toBeTruthy();
+      expect(getByText('Parent connected')).toBeTruthy();
+    });
+
+    it('renders the accessory alone when there is no subtitle', () => {
+      const { getByText } = render(
+        <ListItem title="E2E Under Thirteen" subtitleAccessory={<Text>Parent invited</Text>} />
+      );
+      expect(getByText('Parent invited')).toBeTruthy();
+    });
+
+    it('lets the title use the lines it is given (default one)', () => {
+      const { getByText, rerender } = render(<ListItem title="Bryce James" />);
+      expect(getByText('Bryce James').props.numberOfLines).toBe(1);
+      rerender(<ListItem title="Bryce James" titleNumberOfLines={2} />);
+      expect(getByText('Bryce James').props.numberOfLines).toBe(2);
+    });
+  });
+
   describe('elements', () => {
     it('should render left element', () => {
       const { getByText } = render(

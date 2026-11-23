@@ -14,7 +14,7 @@
  * PENDING rows; "Invite"/"Resend" are the same supersede create call.
  */
 
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   View,
   StyleSheet,
@@ -25,6 +25,7 @@ import {
   Modal,
   Platform,
   Pressable,
+  type LayoutChangeEvent,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -215,6 +216,12 @@ export default function ManagePlayersScreen() {
   const [jerseyNumber, setJerseyNumber] = useState('');
   // The server's 409 jersey_number_taken, shown on the jersey field (#1087).
   const [jerseyError, setJerseyError] = useState<string | null>(null);
+  // Where the jersey field sits in the scroll content, so a refusal can bring
+  // it into view: the submit button is below the fold (#1095). The card's
+  // offset in the content plus the field's offset in the card.
+  const scrollRef = useRef<ScrollView>(null);
+  const formCardY = useRef(0);
+  const jerseyFieldY = useRef(0);
   const [position, setPosition] = useState('');
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
@@ -276,6 +283,22 @@ export default function ManagePlayersScreen() {
       number: conflict.jerseyNumber,
       name: displayName({ name: conflict.playerName, deletedAt: conflict.playerDeletedAt }),
     });
+  };
+
+  /**
+   * Shows a jersey refusal once, under the field, and scrolls the field into
+   * view (no toast: it landed on top of the inline error, #1095).
+   */
+  const showJerseyError = (message: string) => {
+    setJerseyError(message);
+    scrollRef.current?.scrollTo({
+      y: Math.max(0, formCardY.current + jerseyFieldY.current - spacing.md),
+      animated: true,
+    });
+  };
+
+  const trackJerseyField = (e: LayoutChangeEvent) => {
+    jerseyFieldY.current = e.nativeEvent.layout.y;
   };
 
   /** Typing a new number clears the refusal for the old one. */
@@ -379,10 +402,7 @@ export default function ManagePlayersScreen() {
       setUploadingAvatar(false);
       const taken = jerseyTakenMessage(err);
       if (taken) {
-        // Inline on the field, and a toast too: the submit button sits below
-        // the fold, so the field itself may be scrolled out of view.
-        setJerseyError(taken);
-        toast.showToast(taken, 'error');
+        showJerseyError(taken);
         return;
       }
       toast.showToast(uploadAwareErrorMessage(err, t, 'roster.addFailed'), 'error');
@@ -417,8 +437,7 @@ export default function ManagePlayersScreen() {
     } catch (err) {
       const taken = jerseyTakenMessage(err);
       if (taken) {
-        setJerseyError(taken);
-        toast.showToast(taken, 'error');
+        showJerseyError(taken);
         return;
       }
       toast.showToast(err instanceof Error ? err.message : t('guardians.inviteFailed'), 'error');
@@ -715,11 +734,23 @@ export default function ManagePlayersScreen() {
     const emailIssue = getEmailDeliveryIssue(member.player);
     const subtitle = details || member.player.email || undefined;
 
+    // The chip sits on the second line, after "#jersey • position" (wrapping
+    // under it when both do not fit), never beside the name: next to the
+    // parent chips the name was squeezed to "Bryce…" (#1095). The name keeps
+    // the whole width but the menu button and may take two lines.
     const row = (
       <ListItem
         key={member.id}
         title={displayName(member.player)}
+        titleNumberOfLines={2}
         subtitle={subtitle}
+        subtitleAccessory={
+          <StatusChip
+            status={rosterStatus.status}
+            playerName={displayName(member.player)}
+            colors={colors}
+          />
+        }
         // A flagged row continues into the strip below; the strip draws the divider.
         style={emailIssue ? styles.rowWithIssue : undefined}
         leftElement={
@@ -728,21 +759,14 @@ export default function ManagePlayersScreen() {
           ) : undefined
         }
         rightElement={
-          <View style={styles.rowActions}>
-            <StatusChip
-              status={rosterStatus.status}
-              playerName={displayName(member.player)}
-              colors={colors}
-            />
-            <TouchableOpacity
-              onPress={() => setMenuForPlayerId(member.playerId)}
-              accessibilityRole="button"
-              accessibilityLabel={t('roster.optionsA11y', { name: displayName(member.player) })}
-              style={styles.rowButton}
-            >
-              <Ionicons name="ellipsis-horizontal" size={22} color={colors.textSecondary} />
-            </TouchableOpacity>
-          </View>
+          <TouchableOpacity
+            onPress={() => setMenuForPlayerId(member.playerId)}
+            accessibilityRole="button"
+            accessibilityLabel={t('roster.optionsA11y', { name: displayName(member.player) })}
+            style={styles.rowButton}
+          >
+            <Ionicons name="ellipsis-horizontal" size={22} color={colors.textSecondary} />
+          </TouchableOpacity>
         }
       />
     );
@@ -834,6 +858,7 @@ export default function ManagePlayersScreen() {
       </View>
 
       <ScrollView
+        ref={scrollRef}
         contentContainerStyle={[
           styles.scrollContent,
           { padding, paddingBottom: insets.bottom + spacing.xl },
@@ -842,7 +867,14 @@ export default function ManagePlayersScreen() {
       >
 
         {/* Add Player card */}
-        <Card variant="elevated" style={styles.formCard}>
+        <Card
+          variant="elevated"
+          style={styles.formCard}
+          testID="roster-form-card"
+          onLayout={(e) => {
+            formCardY.current = e.nativeEvent.layout.y;
+          }}
+        >
           <ThemedText variant="h4" heading style={styles.formTitle}>
             {showAddForm ? t('teams.addPlayer') : t('roster.invitePlayer')}
           </ThemedText>
@@ -929,15 +961,17 @@ export default function ManagePlayersScreen() {
 
               {selectedPlayer && (
                 <>
-                  <Input
-                    label={t('players.jerseyNumber')}
-                    placeholder={t('roster.jerseyPlaceholder')}
-                    value={jerseyNumber}
-                    onChangeText={changeJersey}
-                    error={jerseyError ?? undefined}
-                    keyboardType="number-pad"
-                    maxLength={2}
-                  />
+                  <View onLayout={trackJerseyField}>
+                    <Input
+                      label={t('players.jerseyNumber')}
+                      placeholder={t('roster.jerseyPlaceholder')}
+                      value={jerseyNumber}
+                      onChangeText={changeJersey}
+                      error={jerseyError ?? undefined}
+                      keyboardType="number-pad"
+                      maxLength={2}
+                    />
+                  </View>
 
                   <Input
                     label={t('players.position')}
@@ -1026,16 +1060,18 @@ export default function ManagePlayersScreen() {
                 />
               )}
 
-              <Input
-                label={t('players.jerseyNumber')}
-                placeholder={t('roster.jerseyPlaceholder')}
-                value={jerseyNumber}
-                onChangeText={changeJersey}
-                error={jerseyError ?? undefined}
-                keyboardType="number-pad"
-                maxLength={2}
-                testID="add-player-jersey-input"
-              />
+              <View onLayout={trackJerseyField} testID="add-player-jersey-field">
+                <Input
+                  label={t('players.jerseyNumber')}
+                  placeholder={t('roster.jerseyPlaceholder')}
+                  value={jerseyNumber}
+                  onChangeText={changeJersey}
+                  error={jerseyError ?? undefined}
+                  keyboardType="number-pad"
+                  maxLength={2}
+                  testID="add-player-jersey-input"
+                />
+              </View>
 
               <Input
                 label={t('players.position')}
@@ -1394,6 +1430,9 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
   },
   chip: {
+    // A long label (Spanish, large text) wraps inside the chip rather than
+    // running past the row.
+    maxWidth: '100%',
     borderWidth: 1,
     borderRadius: borderRadius.full,
     paddingHorizontal: spacing.sm,
