@@ -62,13 +62,16 @@ export const JOIN_LINK_DEFAULT_EXPIRES_DAYS = 14;
 export const MAX_PENDING_JOIN_REQUESTS_PER_ACCOUNT = 6;
 
 /**
- * A request nobody decides lapses: after this many days it is flipped to
- * EXPIRED and its `childName` cleared, lazily, the next time the team's list
- * is read or the requester asks again (nothing in this API is scheduled). So
- * a family is never stuck at the pending cap, and a typed child's name does
- * not wait on a coach forever.
+ * A request nobody decides lapses after this many days and is deleted: lazily,
+ * the next time the team's list is read, the requester asks again or a coach
+ * tries to decide it, and by the hourly sweep (`join-request-sweep.ts`, #1075)
+ * on a team nobody opens. So a family is never stuck at the pending cap, and
+ * a typed child's name does not wait on a coach forever.
  */
 export const JOIN_REQUEST_TTL_DAYS = 30;
+
+/** Requests the sweep deletes per statement, so one statement stays short. */
+export const JOIN_REQUEST_SWEEP_BATCH = 500;
 
 const JOIN_LINK_NOT_FOUND = 'Join link not found';
 const JOIN_REQUEST_NOT_FOUND = 'Join request not found';
@@ -209,6 +212,16 @@ function staleBefore(now: Date = new Date()): Date {
   return new Date(now.getTime() - JOIN_REQUEST_TTL_DAYS * 24 * 60 * 60 * 1000);
 }
 
+/**
+ * The one definition of a lapsed request, which every path deletes (the lazy
+ * deletes, the decide path, the sweep), so they never drift: PENDING and older
+ * than the TTL, or EXPIRED (a row the lazy path flipped before #1075 made a
+ * lapse a delete; nothing writes EXPIRED on a join request any more).
+ */
+function lapsedWhere(now: Date): Prisma.TeamJoinRequestWhereInput {
+  return { OR: [{ status: 'PENDING', createdAt: { lt: staleBefore(now) } }, { status: 'EXPIRED' }] };
+}
+
 /** Names compared the way a coach reads them: trimmed, inner whitespace collapsed, case ignored. */
 function sameName(a: string, b: string): boolean {
   const fold = (value: string): string => value.trim().replace(/\s+/g, ' ').toLowerCase();
@@ -344,23 +357,59 @@ export class JoinLinkService {
   }
 
   /**
-   * Lazy expiry of requests nobody decided within `JOIN_REQUEST_TTL_DAYS`:
-   * EXPIRED, and the typed child's name cleared. Runs where pending requests
-   * are read (the team's list, the requester's next ask), as a statement of
-   * its own and never inside the caller's transaction: a refusal that rolls
-   * the ask back must not bring the name back, nor leave a log line for an
-   * expiry that did not happen.
+   * Lazy delete of the team's lapsed requests (`lapsedWhere`), narrowed to one
+   * requester or one request. Runs where pending requests are read or decided
+   * (the team's list, the requester's next ask, an approve or decline), as a
+   * statement of its own and never inside the caller's transaction: a refusal
+   * that rolls the ask back must not bring the row back, nor leave a log line
+   * for a delete that did not happen. Returns how many it deleted.
    */
-  private static async expireStaleRequests(
-    where: Pick<Prisma.TeamJoinRequestWhereInput, 'teamId' | 'requesterId'>
-  ): Promise<void> {
-    const { count } = await prisma.teamJoinRequest.updateMany({
-      where: { ...where, status: 'PENDING', createdAt: { lt: staleBefore() } },
-      data: { status: 'EXPIRED', decidedAt: new Date(), childName: null },
+  private static async deleteLapsedRequests(
+    where: Pick<Prisma.TeamJoinRequestWhereInput, 'teamId' | 'requesterId' | 'id'>
+  ): Promise<number> {
+    const { count } = await prisma.teamJoinRequest.deleteMany({
+      where: { ...where, ...lapsedWhere(new Date()) },
     });
     if (count > 0) {
-      logger.info('Join requests expired', { teamId: where.teamId, expiredCount: count });
+      logger.info('Join requests deleted', { teamId: where.teamId, deletedCount: count });
     }
+    return count;
+  }
+
+  /**
+   * The sweep's delete (#1075): every lapsed request, on every team, with
+   * nobody reading a list. Same rows as `deleteLapsedRequests`, in batches of
+   * `JOIN_REQUEST_SWEEP_BATCH` (oldest first, one short DELETE per batch, each
+   * re-checking the lapse so a request a coach decided meanwhile is left
+   * alone). Returns how many it deleted; logs one domain event, counts only,
+   * when that is more than none. Errors propagate to the scheduler.
+   */
+  static async deleteAllLapsedRequests(): Promise<number> {
+    let deleted = 0;
+    const teamIds = new Set<string>();
+    for (;;) {
+      const now = new Date();
+      const batch = await prisma.teamJoinRequest.findMany({
+        where: lapsedWhere(now),
+        select: { id: true, teamId: true },
+        orderBy: { createdAt: 'asc' },
+        take: JOIN_REQUEST_SWEEP_BATCH,
+      });
+      if (batch.length === 0) break;
+      const { count } = await prisma.teamJoinRequest.deleteMany({
+        where: { id: { in: batch.map((row) => row.id) }, ...lapsedWhere(now) },
+      });
+      deleted += count;
+      for (const row of batch) teamIds.add(row.teamId);
+      // A short batch was the last one; a batch that changed nothing (all
+      // decided meanwhile) stops the run rather than spin, the next sweep
+      // picks up whatever is left.
+      if (batch.length < JOIN_REQUEST_SWEEP_BATCH || count === 0) break;
+    }
+    if (deleted > 0) {
+      logger.info('Join requests deleted', { deletedCount: deleted, teamCount: teamIds.size, trigger: 'sweep' });
+    }
+    return deleted;
   }
 
   /**
@@ -404,8 +453,8 @@ export class JoinLinkService {
     const kind: JoinRequestKind = data.kind === 'child' ? 'CHILD' : 'SELF';
     const childName = data.kind === 'child' ? data.childName : null;
 
-    // Committed before the ask is judged (see expireStaleRequests).
-    await this.expireStaleRequests({ teamId, requesterId: userId });
+    // Committed before the ask is judged (see deleteLapsedRequests).
+    await this.deleteLapsedRequests({ teamId, requesterId: userId });
 
     const result = await prisma.$transaction(async (tx): Promise<JoinRequestResult> => {
       await lockUsers(tx, [userId]);
@@ -584,7 +633,7 @@ export class JoinLinkService {
   /** The team's pending join requests, oldest first, for roster managers only. */
   static async listRequests(teamId: string, userId: string): Promise<JoinRequestListItem[]> {
     await this.requireRosterManager(teamId, userId);
-    await this.expireStaleRequests({ teamId });
+    await this.deleteLapsedRequests({ teamId });
     return prisma.teamJoinRequest.findMany({
       where: { teamId, status: 'PENDING' },
       select: JOIN_REQUEST_LIST_SELECT,
@@ -595,7 +644,7 @@ export class JoinLinkService {
   /**
    * Team 404, the 403 gate, then the request (404 for another team's id, so a
    * caller who may not manage the roster learns nothing about ids), then the
-   * status (400 once it has been decided).
+   * lapse (deleted, 400), then the status (400 once it has been decided).
    */
   private static async requirePendingRequest(
     teamId: string,
@@ -611,13 +660,14 @@ export class JoinLinkService {
     if (!request) {
       throw new NotFoundError(JOIN_REQUEST_NOT_FOUND);
     }
+    // Lapsed but not swept yet (a coach's screen older than the lapse): the
+    // row is deleted here, as the list would have, and the decision refused.
+    // A retry then finds no row (404).
+    if ((await this.deleteLapsedRequests({ teamId, id: request.id })) > 0) {
+      throw new BadRequestError(`Cannot ${verb} this join request: it lapsed after ${JOIN_REQUEST_TTL_DAYS} days`);
+    }
     if (request.status !== 'PENDING') {
       throw new BadRequestError(`Cannot ${verb} a join request with status: ${request.status}`);
-    }
-    if (request.createdAt < staleBefore()) {
-      // Lapsed but not yet flipped (nobody read the list since): the same
-      // answer the list's lazy expiry would have produced.
-      throw new BadRequestError(`Cannot ${verb} a join request with status: EXPIRED`);
     }
     return { team, request };
   }
