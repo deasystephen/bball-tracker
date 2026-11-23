@@ -1594,6 +1594,18 @@ describe('TeamService', () => {
         expectBadRequestError(error, 'Player is already on this team');
       });
 
+      it('answers a plain 409 when the write reaches the jersey unique index anyway (#1087 backstop)', async () => {
+        const { teamId, playerId, coachId } = setAddPlayerPath();
+        (mockPrisma.teamMember.create as jest.Mock).mockRejectedValue(
+          uniqueViolation('TeamMember_teamId_jerseyNumber_key')
+        );
+
+        const error = await TeamService.addPlayer(teamId, { playerId, jerseyNumber: 8 }, coachId).catch((e) => e);
+
+        expect(error).toMatchObject({ statusCode: 409, message: 'Another player on this team already wears number 8.' });
+        expect(mockPrisma.teamMember.create).toHaveBeenCalledTimes(1);
+      });
+
       it('propagates a failure that is not P2002', async () => {
         const { teamId, playerId, coachId } = setAddPlayerPath();
         const boom = new Error('connection reset');
@@ -1717,11 +1729,23 @@ describe('TeamService', () => {
       it('re-sending the number the member already wears is never checked (position-only edit)', async () => {
         const { teamId, coachId, playerId } = setup();
 
-        // The member wears 10: even a pair sharing it from before the rule saves (no holder lookup).
+        // The member wears 10 and the app always resends it: no holder lookup, the edit just saves.
         await TeamService.updateTeamMember(teamId, playerId, { jerseyNumber: 10, position: 'Guard' }, coachId);
 
         expect(mockPrisma.teamMember.findFirst).not.toHaveBeenCalled();
         expect(mockPrisma.teamMember.update).toHaveBeenCalled();
+      });
+
+      it('answers a plain 409 when the update reaches the jersey unique index anyway (#1087 backstop)', async () => {
+        const { teamId, coachId, playerId } = setup();
+        (mockPrisma.teamMember.update as jest.Mock).mockRejectedValue(
+          uniqueViolation('TeamMember_teamId_jerseyNumber_key')
+        );
+
+        const error = await TeamService.updateTeamMember(teamId, playerId, { jerseyNumber: 7 }, coachId).catch((e) => e);
+
+        expect(error).toMatchObject({ statusCode: 409, message: 'Another player on this team already wears number 7.' });
+        expect(mockPrisma.teamMember.update).toHaveBeenCalledTimes(1);
       });
 
       it('decides "unchanged" from the row read under the lock, not the earlier unlocked read', async () => {

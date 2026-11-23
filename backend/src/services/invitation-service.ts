@@ -37,10 +37,15 @@ import { publicAppUrl } from '../utils/urls';
 import { EMAIL_SUPPRESSION_CLEARED } from '../utils/email-suppression';
 import { emailEquals } from '../utils/email-match';
 import { USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
-import { createOrConflict, isUniqueViolation } from '../utils/prisma-errors';
+import { createOrConflict, isUniqueViolation, violatedConstraint } from '../utils/prisma-errors';
 import { keyShareUsers, lockUsers } from '../utils/user-row-lock';
 import { lockTeamOrNotFound, lockTeamRow } from '../utils/team-row-lock';
-import { assertJerseyNumberFree, findJerseyHolder } from '../utils/jersey-number';
+import {
+  JERSEY_NUMBER_INDEX,
+  assertJerseyNumberFree,
+  findJerseyHolder,
+  orJerseyConflict,
+} from '../utils/jersey-number';
 import {
   assertOwnUploadUrl,
   checkAvatarUpload,
@@ -612,6 +617,11 @@ export class InvitationService {
     if (!isUniqueViolation(err)) {
       throw err;
     }
+    // A jersey-number violation is not an email race: running the roster
+    // write again would only fail the same way (#1087; never a retry).
+    if (violatedConstraint(err).index === JERSEY_NUMBER_INDEX) {
+      throw err;
+    }
     const racedUser = await prisma.user.findFirst({
       where: { email: emailEquals(email) },
     });
@@ -1159,6 +1169,16 @@ export class InvitationService {
    * reason instead of failing the whole add.
    */
   static async addRosterPlayer(
+    teamId: string,
+    data: AddRosterPlayerInput,
+    userId: string
+  ): Promise<AddRosterPlayerResult> {
+    // The locked check inside answers a taken number with the holder's name;
+    // this maps a write that reached the unique index anyway to a 409 (#1087).
+    return orJerseyConflict(data.jerseyNumber, () => this.addRosterPlayerChecked(teamId, data, userId));
+  }
+
+  private static async addRosterPlayerChecked(
     teamId: string,
     data: AddRosterPlayerInput,
     userId: string

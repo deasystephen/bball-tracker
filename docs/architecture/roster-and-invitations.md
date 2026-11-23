@@ -601,8 +601,8 @@ themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by 
   `{ error, code, jerseyNumber, playerId, playerName, playerDeletedAt }`, naming the holder; the
   `error` message never names them, because route catches log it). Blank (`null` / absent) is always
   allowed; `0` is a number like any other (`!= null`, never truthiness); setting a member to the
-  number they already hold is a no-op, not an error, and is not even looked up, so a pair that
-  predates the rule can still save a position-only edit (the mobile sheet always sends the number).
+  number they already hold is a no-op, not an error, and is not even looked up, so a
+  position-only edit always saves (the mobile sheet always sends the number).
   Another team's numbers never count.
 - **Where it is refused:** Add Player (`POST /teams/:teamId/players`, every case: cases 1 and 2
   inside their transaction after the "already on this team" check, so re-adding a current member
@@ -644,11 +644,21 @@ themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by 
   it: no existing helper made that a few lines, and a notification for this alone was out of scope.
 - **Season rollover** copies the roster with its numbers unchanged (`createMany` of the source
   rows) and is never refused over a number: the source team's numbers are already unique under
-  this rule. A pair that predates the rule is carried as it is, so it is resolved on either row.
-- **No unique index yet.** Production had duplicate pairs before this rule (two number 8s on the
-  owner's test team), so a partial unique index on `(teamId, jerseyNumber) WHERE jerseyNumber IS
-  NOT NULL` would fail to migrate. It is the follow-up once the duplicates are resolved. The
-  read-only query that lists them (run it against production before writing that migration):
+  this rule, and the unique index below guarantees it.
+- **The database guarantee.** A partial unique index,
+  `TeamMember_teamId_jerseyNumber_key ON (teamId, jerseyNumber) WHERE jerseyNumber IS NOT NULL`
+  (hand-written migration `20261123120000_team_member_jersey_unique`; Prisma cannot express a
+  partial index, so `schema.prisma` carries a comment, not an `@@unique`). Members with no number
+  never collide. The locked check is what answers a coach, with the holder's name; a write that
+  reached the index without it is mapped by `utils/jersey-number.ts#orJerseyConflict` (around Add
+  Player, `addPlayer` and the edit) to a plain 409 with no holder, never a 500 and never a retry.
+  The accept paths are not wrapped: their number is decided behind the lock and dropped when
+  taken. **The migration cannot fail on existing duplicates:** it first clears the number of every
+  later holder of a shared number (the member who has held it longest keeps it), because
+  `docker/entrypoint.sh` runs `migrate deploy` on every start and a failed migration would stop
+  the single API task from starting at all. Production had none (read-only one-off task,
+  2026-11-22, run after the rule was live: two pairs found earlier, both renumbered by the owner,
+  none left among 14 members), so there it changed nothing. The query that lists such pairs:
 
   ```sql
   SELECT tm."teamId", t.name AS team, tm."jerseyNumber", count(*) AS holders,
@@ -669,7 +679,8 @@ themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by 
   code, so the app is safe in either deploy order. A refused add leaves the photo it uploaded
   first unreferenced in S3 (as any failed add does); the pending-upload expiry removes it.
 - **Tests:** `backend/tests/integration/jersey-number.db.test.ts` (real Postgres: refusals on add,
-  invite and edit; 0, blank and the own-number no-op; a pre-rule pair editing its position; a
+  invite and edit; 0, blank and the own-number no-op; a position-only edit; the unique index refusing a direct
+  duplicate, staying partial, and its 409 backstop; a
   re-added member; a deleted holder; two concurrent adds held behind the team lock leave one
   holder, and fail without it; an accept waits on the player's `User` lock holding nothing on the
   team side and does not wait on a plain update of that row; Add Player case 2 waits on the acting
