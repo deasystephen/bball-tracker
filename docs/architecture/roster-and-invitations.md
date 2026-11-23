@@ -674,8 +674,10 @@ themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by 
   `app/teams/[id]/players.tsx` show `roster.jerseyTaken` ("Number 8 is already worn by Ada. Pick
   another number or leave it blank.") against the jersey field, the holder named through
   `displayName` (a deleted account reads as the localized label); typing in the field clears it.
-  The two add forms also toast it, because their submit button sits below the fold and the field may
-  be out of view; the edit sheet shows it inline only. An API without the rule never sends the
+  The refusal shows once, never also as a toast (a toast landed on top of the inline text, #1095):
+  the two add forms, whose submit button sits below the fold, scroll the jersey field back into view
+  when it is outside the visible window (the form card's and the field's `onLayout` offsets against
+  the ScrollView's `onScroll` offset and height); the edit sheet shows it inline as well. An API without the rule never sends the
   code, so the app is safe in either deploy order. A refused add leaves the photo it uploaded
   first unreferenced in S3 (as any failed add does); the pending-upload expiry removes it.
 - **Tests:** `backend/tests/integration/jersey-number.db.test.ts` (real Postgres: refusals on add,
@@ -745,6 +747,12 @@ themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by 
   menu: Android caps Alert at three buttons and silently truncates. Chip accessibility
   labels are row-anchored (`"<player> status: <label>"`) and Maestro asserts that exact
   string — a bare `assertVisible: "Active"` can false-pass off a neighboring row.
+- **Row layout (#1095):** the name has the row to itself apart from the ⋯ button and may take two
+  lines (`ListItem titleNumberOfLines`); the status chip sits on the second line after
+  "#jersey • position" (`ListItem subtitleAccessory`), wrapping under it when both do not fit, and
+  a long label wraps inside the chip (`maxWidth: '100%'`). Never put the chip back beside the name:
+  "Parent connected" left "Bryce…", and Spanish ("Invitación del padre o tutor vencida") left no
+  name at all.
 - Every roster row's menu has **Edit jersey & position** (bottom-sheet form, prefilled with the
   `!= null` rule so jersey 0 renders) → `useUpdateTeamMember` →
   `PATCH /teams/:id/players/:playerId`; an emptied input sends `null`, which clears the stored

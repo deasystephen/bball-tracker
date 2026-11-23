@@ -48,6 +48,46 @@ describe('ListItem', () => {
     });
   });
 
+  describe('subtitle line (#1095)', () => {
+    it('renders the accessory after the subtitle', () => {
+      const { getByText } = render(
+        <ListItem title="Bryce James" subtitle="#9 • SG" subtitleAccessory={<Text>Parent connected</Text>} />
+      );
+      expect(getByText('#9 • SG')).toBeTruthy();
+      expect(getByText('Parent connected')).toBeTruthy();
+    });
+
+    it('renders the accessory alone when there is no subtitle', () => {
+      const { getByText } = render(
+        <ListItem title="E2E Under Thirteen" subtitleAccessory={<Text>Parent invited</Text>} />
+      );
+      expect(getByText('Parent invited')).toBeTruthy();
+    });
+
+    it('renders nothing for an empty subtitle, never a bare "" child (React Native rejects it)', () => {
+      // The test renderer drops "" from toJSON(), so look at the elements' own children props.
+      const emptyStringChildren = (ui: React.ReactElement) =>
+        render(ui).UNSAFE_root.findAll(
+          (node) => {
+            const kids = node.props?.children;
+            return Array.isArray(kids) ? kids.includes('') : kids === '';
+          },
+          { deep: true }
+        );
+      expect(emptyStringChildren(<ListItem title="Ada" subtitle="" />)).toHaveLength(0);
+      expect(
+        emptyStringChildren(<ListItem title="Ada" subtitle="" subtitleAccessory={<Text>Active</Text>} />)
+      ).toHaveLength(0);
+    });
+
+    it('lets the title use the lines it is given (default one)', () => {
+      const { getByText, rerender } = render(<ListItem title="Bryce James" />);
+      expect(getByText('Bryce James').props.numberOfLines).toBe(1);
+      rerender(<ListItem title="Bryce James" titleNumberOfLines={2} />);
+      expect(getByText('Bryce James').props.numberOfLines).toBe(2);
+    });
+  });
+
   describe('elements', () => {
     it('should render left element', () => {
       const { getByText } = render(

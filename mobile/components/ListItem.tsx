@@ -21,6 +21,17 @@ import { MIN_TOUCH_TARGET } from '../utils/touch-target';
 interface ListItemProps extends Omit<TouchableOpacityProps, 'style'> {
   title: string;
   subtitle?: string;
+  /**
+   * Rendered on the subtitle's line, after it (or alone when there is no
+   * subtitle), wrapping to a line of its own when both do not fit. For a
+   * status chip that must not take its width from the title (#1095).
+   * For rows that are NOT pressable: with `onPress` the row is one
+   * accessibility element labelled from title and subtitle, which hides the
+   * accessory from VoiceOver and Maestro.
+   */
+  subtitleAccessory?: React.ReactNode;
+  /** Lines the title may use before it truncates (default 1). */
+  titleNumberOfLines?: number;
   rightElement?: React.ReactNode;
   leftElement?: React.ReactNode;
   onPress?: () => void;
@@ -31,6 +42,8 @@ interface ListItemProps extends Omit<TouchableOpacityProps, 'style'> {
 export const ListItem: React.FC<ListItemProps> = ({
   title,
   subtitle,
+  subtitleAccessory,
+  titleNumberOfLines = 1,
   rightElement,
   leftElement,
   onPress,
@@ -62,10 +75,24 @@ export const ListItem: React.FC<ListItemProps> = ({
     <View style={styles.content}>
       {leftElement && <View style={styles.leftElement}>{leftElement}</View>}
       <View style={styles.textContainer}>
-        <ThemedText variant="body" numberOfLines={1}>
+        <ThemedText variant="body" numberOfLines={titleNumberOfLines}>
           {title}
         </ThemedText>
-        {subtitle && (
+        {subtitleAccessory ? (
+          <View style={styles.subtitleRow}>
+            {subtitle ? (
+              <ThemedText
+                variant="caption"
+                color="textSecondary"
+                style={styles.subtitleInRow}
+                numberOfLines={1}
+              >
+                {subtitle}
+              </ThemedText>
+            ) : null}
+            {subtitleAccessory}
+          </View>
+        ) : subtitle ? (
           <ThemedText
             variant="caption"
             color="textSecondary"
@@ -74,7 +101,7 @@ export const ListItem: React.FC<ListItemProps> = ({
           >
             {subtitle}
           </ThemedText>
-        )}
+        ) : null}
       </View>
       {rightElement && <View style={styles.rightElement}>{rightElement}</View>}
     </View>
@@ -118,6 +145,17 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     marginTop: 2,
+  },
+  subtitleRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: spacing.sm,
+    rowGap: spacing.xs,
+    marginTop: spacing.xs,
+  },
+  subtitleInRow: {
+    flexShrink: 1,
   },
   rightElement: {
     marginLeft: spacing.md,
