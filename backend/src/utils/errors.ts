@@ -361,6 +361,36 @@ export class JoinLinkInactiveError extends DetailedError<JoinLinkInactiveDetails
   }
 }
 
+export interface JoinPlayerUnavailableDetails extends Record<string, unknown> {
+  /**
+   * Why the roster record cannot take this request (#1072): it is not on the
+   * team (any more), it is not a live managed record (it has its own login,
+   * or was deleted), or it already has a parent or guardian linked.
+   */
+  reason: 'not_on_team' | 'not_managed' | 'has_guardian';
+}
+
+/**
+ * 409 `join_player_unavailable` — a coach approved a CHILD join request onto
+ * an existing roster record (#1072) that cannot take it. Judged under the
+ * record's row lock, so the loser of two approvals onto the same record gets
+ * this with `has_guardian` and nothing is written. The app re-reads the team
+ * so the choice is offered again from fresh data.
+ */
+export class JoinPlayerUnavailableError extends DetailedError<JoinPlayerUnavailableDetails> {
+  constructor(reason: JoinPlayerUnavailableDetails['reason']) {
+    super(
+      'join_player_unavailable',
+      { reason },
+      reason === 'has_guardian'
+        ? 'That player already has a parent or guardian linked. Choose another player or add a new one.'
+        : 'That player can no longer be linked to this request. Choose another player or add a new one.',
+      409
+    );
+    Object.setPrototypeOf(this, JoinPlayerUnavailableError.prototype);
+  }
+}
+
 /**
  * 409 `player_has_records`: `DELETE /players/:id` hard-deletes an unclaimed
  * roster record only when nothing references it (#1047), the rule account

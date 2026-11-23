@@ -894,6 +894,7 @@ describe('Team join links API (#210)', () => {
         requesterId: PARENT_ID,
         playerId: PARENT_ID,
         kind: 'SELF',
+        linkedExisting: false,
         userId: COACH_ID,
       });
       expect(pushSpy).toHaveBeenCalledWith([PARENT_ID], {
@@ -1083,6 +1084,167 @@ describe('Team join links API (#210)', () => {
       expect(res.status).toBe(200);
       expect(warnSpy).toHaveBeenCalledWith('Join approval push failed', { teamId: TEAM_ID, error: 'offline' });
       warnSpy.mockRestore();
+    });
+
+    describe('onto an existing roster record (#1072)', () => {
+      const EXISTING_ID = 'c8d9e0f1-a2b3-4567-a901-cdef01234567';
+
+      /**
+       * A CHILD request, and the chosen record as the attach checks read it:
+       * a live managed record on the team with `guardians` links already.
+       */
+      function givenAttach(
+        options: { managed?: boolean; onTeam?: boolean; guardians?: number; requesterRole?: string } = {}
+      ): void {
+        const { managed = true, onTeam = true, guardians = 0, requesterRole = 'PLAYER' } = options;
+        givenTeam();
+        mockPrisma.teamJoinRequest.findFirst.mockResolvedValue(
+          requestRow({ kind: 'CHILD', childName: 'Riley Park', relationship: 'MOTHER' })
+        );
+        mockPrisma.teamJoinRequest.findUniqueOrThrow.mockImplementation(
+          async ({ select }: { select: Record<string, unknown> }) =>
+            applySelect(requestRow({ kind: 'CHILD', status: 'ACCEPTED' }), select)
+        );
+        mockPrisma.$queryRaw.mockImplementation(async () => [
+          { id: COACH_ID, deletedAt: null },
+          { id: PARENT_ID, deletedAt: null },
+          { id: EXISTING_ID, deletedAt: null },
+        ]);
+        mockPrisma.user.findFirst.mockImplementation(async ({ where }: { where: { id: string } }) => {
+          if (where.id === EXISTING_ID) {
+            return managed ? { id: EXISTING_ID } : null;
+          }
+          return { id: PARENT_ID, role: requesterRole };
+        });
+        mockPrisma.teamMember.findUnique.mockImplementation(
+          async ({ where }: { where: { teamId_playerId?: { playerId: string } } }) =>
+            onTeam && where.teamId_playerId?.playerId === EXISTING_ID ? { id: 'member-row' } : null
+        );
+        mockPrisma.guardian.count.mockReset();
+        mockPrisma.guardian.count.mockResolvedValue(guardians);
+        mockPrisma.guardian.findUnique.mockReset();
+        mockPrisma.guardian.findUnique.mockResolvedValue(null);
+        mockPrisma.guardian.create.mockImplementation(
+          async ({ data }: { data: Record<string, unknown> }) => ({ id: 'guardian-row', ...data })
+        );
+        mockPrisma.teamMember.count.mockResolvedValue(0);
+        mockPrisma.teamStaff.count.mockResolvedValue(0);
+        mockPrisma.user.updateMany.mockResolvedValue({ count: 1 });
+      }
+
+      it('links the requester as the first, primary guardian of the chosen record and creates no player', async () => {
+        givenAttach();
+        const info = spyOnInfo();
+
+        const res = await request(app).post(url).send({ playerId: EXISTING_ID });
+
+        expect(res.status).toBe(200);
+        expect(res.body).toMatchObject({
+          success: true,
+          playerId: EXISTING_ID,
+          linkedExisting: true,
+          request: { id: REQUEST_ID, kind: 'CHILD', status: 'ACCEPTED' },
+        });
+        // The chosen record is locked with the requester and the approver, in
+        // the one User statement, before the team row (User before Team).
+        const [firstLockSql, ...firstLockValues] = mockPrisma.$queryRaw.mock.calls[0];
+        expect(String(firstLockSql)).toContain('FROM "User"');
+        expect(JSON.stringify(firstLockValues)).toContain(EXISTING_ID);
+        expect(mockPrisma.user.findFirst).toHaveBeenCalledWith({
+          where: { id: EXISTING_ID, deletedAt: null, isManaged: true },
+          select: { id: true },
+        });
+        expect(mockPrisma.user.create).not.toHaveBeenCalled();
+        expect(mockPrisma.teamMember.create).not.toHaveBeenCalled();
+        expect(mockPrisma.guardian.create).toHaveBeenCalledWith({
+          data: { parentId: PARENT_ID, childId: EXISTING_ID, relationship: 'MOTHER', isPrimary: true },
+          select: { id: true, parentId: true, childId: true, relationship: true, isPrimary: true },
+        });
+        // The guardian accept's role rule: a bare PLAYER becomes PARENT.
+        expect(mockPrisma.user.updateMany).toHaveBeenCalledWith({
+          where: { id: PARENT_ID, deletedAt: null },
+          data: { role: 'PARENT' },
+        });
+        // The request is decided and its typed name cleared, as on every approval.
+        expect(mockPrisma.teamJoinRequest.updateMany).toHaveBeenCalledWith({
+          where: { id: REQUEST_ID, status: 'PENDING' },
+          data: { status: 'ACCEPTED', decidedAt: expect.any(Date), childName: null },
+        });
+        expect(domainEvent(info, 'Join request approved')).toEqual({
+          requestId: REQUEST_ID,
+          teamId: TEAM_ID,
+          requesterId: PARENT_ID,
+          playerId: EXISTING_ID,
+          kind: 'CHILD',
+          linkedExisting: true,
+          userId: COACH_ID,
+        });
+        expect(JSON.stringify(info.mock.calls)).not.toContain('Riley');
+        expect(pushSpy).toHaveBeenCalledWith([PARENT_ID], {
+          title: 'Request approved',
+          body: 'Your child has been added to Hornets.',
+          data: { type: 'join_request_approved', teamId: TEAM_ID },
+        });
+      });
+
+      it('keeps a coach requester a COACH', async () => {
+        givenAttach({ requesterRole: 'COACH' });
+
+        const res = await request(app).post(url).send({ playerId: EXISTING_ID });
+
+        expect(res.status).toBe(200);
+        expect(mockPrisma.user.updateMany).not.toHaveBeenCalled();
+      });
+
+      it.each([
+        ['has_guardian', { guardians: 1 }],
+        ['not_on_team', { onTeam: false }],
+        ['not_managed', { managed: false }],
+      ] as const)('answers 409 join_player_unavailable (%s) behind the locks and writes no link', async (reason, options) => {
+        givenAttach(options);
+
+        const res = await request(app).post(url).send({ playerId: EXISTING_ID });
+
+        expect(res.status).toBe(409);
+        expect(res.body).toMatchObject({ code: 'join_player_unavailable', reason });
+        expect(mockPrisma.guardian.create).not.toHaveBeenCalled();
+        expect(mockPrisma.user.create).not.toHaveBeenCalled();
+        expect(mockPrisma.user.updateMany).not.toHaveBeenCalled();
+        expect(pushSpy).not.toHaveBeenCalled();
+      });
+
+      it('refuses a playerId on a SELF request with 400 before any lock', async () => {
+        givenTeam();
+        mockPrisma.teamJoinRequest.findFirst.mockResolvedValue(requestRow());
+
+        const res = await request(app).post(url).send({ playerId: EXISTING_ID });
+
+        expect(res.status).toBe(400);
+        expect(res.body.error).toBe('Only a request for a child can be linked to an existing player');
+        expect(mockPrisma.$queryRaw).not.toHaveBeenCalled();
+        expect(mockPrisma.teamJoinRequest.updateMany).not.toHaveBeenCalled();
+      });
+
+      it('validates playerId (400) before reading anything', async () => {
+        givenTeam();
+
+        const res = await request(app).post(url).send({ playerId: 'not-a-uuid' });
+
+        expect(res.status).toBe(400);
+        expect(res.body.error).toBe('playerId must be a valid UUID');
+        expect(mockPrisma.teamJoinRequest.findFirst).not.toHaveBeenCalled();
+      });
+
+      it('the loser of two approvals of one request onto one record gets 400 and writes nothing', async () => {
+        givenAttach();
+        mockPrisma.teamJoinRequest.updateMany.mockResolvedValue({ count: 0 });
+
+        const res = await request(app).post(url).send({ playerId: EXISTING_ID });
+
+        expect(res.status).toBe(400);
+        expect(res.body.error).toBe('Cannot approve join request: it is no longer pending');
+        expect(mockPrisma.guardian.create).not.toHaveBeenCalled();
+      });
     });
   });
 

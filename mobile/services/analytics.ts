@@ -178,7 +178,8 @@ export interface AnalyticsEventProps {
    * already on the team, and whether this call created the request.
    */
   join_request_sent: { kind: 'self' | 'child'; outcome: 'pending' | 'already_member'; created: boolean };
-  join_request_approved: { team_id: string; request_id: string; kind: 'self' | 'child' };
+  /** `linked_existing`: a CHILD request approved onto an existing roster record (#1072). */
+  join_request_approved: { team_id: string; request_id: string; kind: 'self' | 'child'; linked_existing: boolean };
   join_request_declined: { team_id: string; request_id: string };
   invitation_sent: { team_id: string; invitation_id: string; resend: boolean; email_sent: boolean | null };
   /**

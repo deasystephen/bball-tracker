@@ -159,19 +159,41 @@ export function useJoinRequests(teamId: string, enabled: boolean, options: { pol
   });
 }
 
-/** Approve a request: the player (or the child, with the parent as guardian) joins the roster. */
+/**
+ * Approve a request: the player (or the child, with the parent as guardian)
+ * joins the roster. With `playerId` (#1072, CHILD requests only) the parent is
+ * linked as guardian of that existing roster record instead of a new one being
+ * created; the API answers 409 `join_player_unavailable` when the record was
+ * taken meanwhile, and the team is re-read so the choice is offered afresh.
+ */
 export function useApproveJoinRequest() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ teamId, request }: { teamId: string; request: Pick<JoinRequestRow, 'id' | 'kind'> }) => {
-      await apiClient.post(`/teams/${teamId}/join-requests/${request.id}/approve`);
+    mutationFn: async ({
+      teamId,
+      request,
+      playerId,
+    }: {
+      teamId: string;
+      request: Pick<JoinRequestRow, 'id' | 'kind'>;
+      playerId?: string;
+    }) => {
+      const url = `/teams/${teamId}/join-requests/${request.id}/approve`;
+      await (playerId ? apiClient.post(url, { playerId }) : apiClient.post(url));
+    },
+    onError: (_, variables) => {
+      if (variables.playerId) {
+        // The record may have been linked or removed from another phone.
+        queryClient.invalidateQueries({ queryKey: teamKeys.detail(variables.teamId) });
+      }
     },
     onSuccess: (_, variables) => {
       trackEvent(AnalyticsEvents.JOIN_REQUEST_APPROVED, {
         team_id: variables.teamId,
         request_id: variables.request.id,
         kind: variables.request.kind === 'CHILD' ? 'child' : 'self',
+        linked_existing: variables.playerId != null,
       });
       // The roster changed.
       queryClient.invalidateQueries({ queryKey: teamKeys.detail(variables.teamId) });

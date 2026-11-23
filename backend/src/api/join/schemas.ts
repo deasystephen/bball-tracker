@@ -58,5 +58,17 @@ export const joinRequestSchema = z.discriminatedUnion(
   { error: 'kind must be self or child' }
 );
 
+/**
+ * `POST /teams/:teamId/join-requests/:requestId/approve` (#1072). An empty
+ * body approves as before (SELF joins; CHILD creates a new roster record).
+ * `{ playerId }` approves a CHILD request onto that existing managed roster
+ * record of the team instead, which must have no guardian yet. Unknown keys
+ * are stripped.
+ */
+export const approveJoinRequestSchema = z.object({
+  playerId: z.string({ error: 'playerId must be a string' }).uuid('playerId must be a valid UUID').optional(),
+});
+
 export type CreateJoinLinkInput = z.infer<typeof createJoinLinkSchema>;
 export type JoinRequestInput = z.infer<typeof joinRequestSchema>;
+export type ApproveJoinRequestInput = z.infer<typeof approveJoinRequestSchema>;

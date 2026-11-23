@@ -130,7 +130,11 @@ Removing the last guardian never deletes the child.
   record is created with the `Guardian` link to that parent in the same transaction (`isPrimary`,
   being the record's first link), and the parent's role follows the same derived rule through the
   shared `GuardianService.promoteBareAccountToParent`. No `GuardianInvitation` row exists for it.
-  Detail: `roster-and-invitations.md`, Team join links.
+  **Or onto a record the coach already added (#1072):** the coach picks one of the team's managed
+  records with no guardian, and the link is written by `GuardianService.linkGuardianLocked`, the
+  same code the guardian accept uses (existing link returned as is, primacy by count, then the
+  PARENT rule), with the child locked in the approval's single `lockUsers` statement, as the
+  per-child lock above requires. Detail: `roster-and-invitations.md`, Team join links.
 - **Other guardian routes.** `GET …/guardians` → `{ guardians: [{ id, userId, name, deletedAt, email?, relationship,
   isPrimary, createdAt }], pendingInvitations }` (roster managers or the child's guardians; `email` only for
   roster managers; each pending row carries `canResend`, see Resend above). `DELETE …/guardians/:guardianUserId` (roster manager, or the guardian removing themself).

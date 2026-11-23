@@ -26,7 +26,7 @@ import { InvitationService } from '../../services/invitation-service';
 import { GuardianService } from '../../services/guardian-service';
 import { StaffInvitationService } from '../../services/staff-invitation-service';
 import { JoinLinkService } from '../../services/join-link-service';
-import { createJoinLinkSchema } from '../join/schemas';
+import { approveJoinRequestSchema, createJoinLinkSchema } from '../join/schemas';
 import { omitToken } from '../invitations/serializers';
 import { AnnouncementService } from '../../services/announcement-service';
 import { validateUuidParams } from '../middleware/validate-params';
@@ -495,16 +495,25 @@ router.get('/:teamId/join-requests', validateUuidParams('teamId'), async (req, r
  * POST /api/v1/teams/:teamId/join-requests/:requestId/approve
  * Approve a pending request: this is where the roster is written (the
  * requester as a member, or a managed child plus the guardian link).
+ * Body (#1072): `{ playerId? }` links a CHILD request to that existing
+ * managed roster record instead of creating one (409 when it cannot take it).
  */
 router.post(
   '/:teamId/join-requests/:requestId/approve',
   validateUuidParams('teamId', 'requestId'),
   async (req, res) => {
     try {
+      const validationResult = approveJoinRequestSchema.safeParse(req.body ?? {});
+      if (!validationResult.success) {
+        throw new BadRequestError(
+          validationResult.error.issues.map((e: { message: string }) => e.message).join(', ')
+        );
+      }
       const result = await JoinLinkService.approveRequest(
         req.params.teamId as string,
         req.params.requestId as string,
-        req.user!.id
+        req.user!.id,
+        validationResult.data
       );
       res.json({ success: true, ...result });
     } catch (error) {

@@ -11,7 +11,7 @@ import { render, fireEvent, waitFor } from '@testing-library/react-native';
 import TeamJoinLinkScreen from '../../app/teams/[id]/join-link';
 import { i18n } from '../../i18n';
 import { useAuthStore } from '../../store/auth-store';
-import type { Team, TeamStaff } from '../../hooks/useTeams';
+import type { Team, TeamMember, TeamStaff } from '../../hooks/useTeams';
 import type { JoinLink, JoinRequestRow } from '../../hooks/useJoinLink';
 
 const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn(), canGoBack: jest.fn(() => true) };
@@ -365,6 +365,132 @@ describe('TeamJoinLinkScreen (#210)', () => {
     await pressAlertButton(alertSpy, 'Decline');
     expect(mockDecline.mutateAsync).toHaveBeenCalledWith({ teamId: 't1', requestId: 'req-self' });
     expect(mockApprove.mutateAsync).not.toHaveBeenCalled();
+  });
+
+  describe('approving a child onto a player already on the roster (#1072)', () => {
+    const member = (playerId: string, name: string, extra: Partial<TeamMember['player']> = {}): TeamMember => ({
+      id: `m-${playerId}`,
+      playerId,
+      jerseyNumber: null,
+      player: { id: playerId, name, email: null, isManaged: true, deletedAt: null, ...extra },
+    });
+    const rosterTeam: Team = {
+      ...baseTeam,
+      members: [
+        member('p-alex', 'Alex Kim'),
+        member('p-riley', 'riley  park'),
+        // Already has a parent linked: not offered.
+        member('p-jo', 'Jo Lee'),
+        // Has their own login: not offered.
+        member('p-sam', 'Sam Self', { isManaged: false, email: 'sam.self@example.com' }),
+        // A deleted account's roster entry: not offered.
+        member('p-gone', 'Gone Player', { deletedAt: '2026-11-01T00:00:00Z' }),
+      ],
+      guardianLinkedPlayerIds: ['p-jo'],
+    };
+
+    it('Approve asks which: a new player, or one of the records without a parent, the same name first', async () => {
+      signIn({ id: 'coach-1', role: 'COACH' });
+      mockTeam = rosterTeam;
+      mockRequests = [childRequest];
+      mockApprove.mutateAsync.mockResolvedValueOnce(undefined);
+      const { getByLabelText, getByText, getAllByRole, queryByText } = render(<TeamJoinLinkScreen />);
+
+      fireEvent.press(getByLabelText('Approve Riley Park'));
+
+      expect(getByText('Add Riley Park to the roster')).toBeTruthy();
+      expect(mockApprove.mutateAsync).not.toHaveBeenCalled();
+      const labels = getAllByRole('button').map((node) => node.props.accessibilityLabel as string);
+      const offered = labels.filter((label) => label === 'Add as a new player' || /^Same child as /.test(label));
+      expect(offered).toEqual([
+        'Add as a new player',
+        'Same child as riley  park, already on the roster',
+        'Same child as Alex Kim, already on the roster',
+      ]);
+      expect(queryByText(/Jo Lee/)).toBeNull();
+      expect(queryByText(/Sam Self/)).toBeNull();
+      expect(queryByText(/Gone Player/)).toBeNull();
+
+      fireEvent.press(getByLabelText('Same child as riley  park, already on the roster'));
+
+      await waitFor(() =>
+        expect(mockApprove.mutateAsync).toHaveBeenCalledWith({ teamId: 't1', request: childRequest, playerId: 'p-riley' })
+      );
+      expect(mockShowToast).toHaveBeenCalledWith('Pat Park is now linked to riley  park', 'success');
+    });
+
+    it('"Add as a new player" approves as before', async () => {
+      signIn({ id: 'coach-1', role: 'COACH' });
+      mockTeam = rosterTeam;
+      mockRequests = [childRequest];
+      mockApprove.mutateAsync.mockResolvedValueOnce(undefined);
+      const { getByLabelText } = render(<TeamJoinLinkScreen />);
+
+      fireEvent.press(getByLabelText('Approve Riley Park'));
+      fireEvent.press(getByLabelText('Add as a new player'));
+
+      await waitFor(() => expect(mockApprove.mutateAsync).toHaveBeenCalledTimes(1));
+      expect(mockApprove.mutateAsync.mock.calls[0][0]).toEqual({ teamId: 't1', request: childRequest });
+      expect(mockApprove.mutateAsync.mock.calls[0][0].playerId).toBeUndefined();
+      expect(mockShowToast).toHaveBeenCalledWith('Riley Park was added to the roster', 'success');
+    });
+
+    it('a record taken meanwhile: the server\'s 409 message is shown and the list re-read', async () => {
+      signIn({ id: 'coach-1', role: 'COACH' });
+      mockTeam = rosterTeam;
+      mockRequests = [childRequest];
+      mockApprove.mutateAsync.mockRejectedValueOnce({
+        isAxiosError: true,
+        response: {
+          status: 409,
+          data: {
+            error: 'That player already has a parent or guardian linked. Choose another player or add a new one.',
+            code: 'join_player_unavailable',
+            reason: 'has_guardian',
+          },
+        },
+      });
+      const { getByLabelText } = render(<TeamJoinLinkScreen />);
+
+      fireEvent.press(getByLabelText('Approve Riley Park'));
+      fireEvent.press(getByLabelText('Same child as Alex Kim, already on the roster'));
+
+      await waitFor(() => expect(mockShowToast).toHaveBeenCalledWith(expect.any(String), 'error'));
+      expect(mockRefetchRequests).toHaveBeenCalled();
+    });
+
+    it('a SELF request, or a roster with no such record, approves at once with no menu', async () => {
+      signIn({ id: 'coach-1', role: 'COACH' });
+      mockTeam = rosterTeam;
+      mockRequests = [selfRequest];
+      mockApprove.mutateAsync.mockResolvedValue(undefined);
+      const self = render(<TeamJoinLinkScreen />);
+      fireEvent.press(self.getByLabelText('Approve Sam Teen'));
+      await waitFor(() => expect(mockApprove.mutateAsync).toHaveBeenCalledWith({ teamId: 't1', request: selfRequest }));
+      expect(self.queryByText('Add as a new player')).toBeNull();
+      self.unmount();
+
+      mockTeam = { ...rosterTeam, guardianLinkedPlayerIds: ['p-jo', 'p-alex', 'p-riley'] };
+      mockRequests = [childRequest];
+      const child = render(<TeamJoinLinkScreen />);
+      fireEvent.press(child.getByLabelText('Approve Riley Park'));
+      await waitFor(() => expect(mockApprove.mutateAsync).toHaveBeenCalledWith({ teamId: 't1', request: childRequest }));
+      expect(child.queryByText('Add as a new player')).toBeNull();
+    });
+
+    it('offers the choice in Spanish', async () => {
+      signIn({ id: 'coach-1', role: 'COACH' });
+      mockTeam = rosterTeam;
+      mockRequests = [childRequest];
+      await i18n.changeLanguage('es');
+      const { getByLabelText, getByText } = render(<TeamJoinLinkScreen />);
+
+      fireEvent.press(getByLabelText('Aprobar a Riley Park'));
+
+      expect(getByText('Agregar a Riley Park a la plantilla')).toBeTruthy();
+      expect(getByText('Agregar como jugador nuevo')).toBeTruthy();
+      expect(getByText('Es Alex Kim, que ya está en la plantilla')).toBeTruthy();
+    });
   });
 
   it('renders in Spanish', async () => {

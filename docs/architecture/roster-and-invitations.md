@@ -513,16 +513,35 @@ themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by 
   `User` (`isManaged`, no email, no login, `managedById` = the approving coach), its `TeamMember`
   and the `Guardian` link to the requester (`isPrimary`, the record's first), and a bare PLAYER
   requester becomes PARENT (`GuardianService.promoteBareAccountToParent`, the guardian accept's
-  rule, now shared). Logs `Join request approved`; best-effort push to the requester ("You have
-  been added to <team>", or "Your child has been added to <team>" for a child request; none when
-  the approver is the requester).
+  rule, now shared). Logs `Join request approved` (with `linkedExisting`); best-effort push to the
+  requester ("You have been added to <team>", or "Your child has been added to <team>" for a child
+  request; none when the approver is the requester). Response `{ request, playerId, linkedExisting }`.
+  **Onto an existing roster record (#1072):** body `{ playerId }` (`approveJoinRequestSchema`, a
+  UUID; an empty body approves as above). For a coach who already typed the roster: the CHILD
+  request becomes a guardian link on that record instead of a duplicate player. A SELF request with
+  a `playerId` is a 400 before any lock. The chosen record is locked in the **same** `lockUsers`
+  statement as the requester and the approver (User rows before the team row, the order the
+  guardian accept and account deletion use), and after the status flip it is judged again behind
+  every lock: a live managed record (`isManaged`, not deleted), a member of this team, and no
+  `Guardian` row at all (a child with any link has exactly one primary, so this is "no primary
+  guardian"). Otherwise **409 `join_player_unavailable`** (`JoinPlayerUnavailableError`, `reason`:
+  `not_managed`, `not_on_team` or `has_guardian`) and the whole transaction rolls back: the
+  request stays PENDING with its name, nothing is linked. Then the link is written by
+  `GuardianService.linkGuardianLocked`, the guardian accept's own code (primary when it is the
+  first link, then the bare-PLAYER → PARENT rule); the coach's record keeps its name, its
+  `managedById` and its jersey, and no `TeamMember` or `User` is created. **Races:** two coaches
+  approving the same request onto one record serialise on the User locks and the loser gets the
+  existing 400 ("no longer pending"); two requests onto one record serialise on the record's lock
+  and the loser gets 409 `has_guardian`; an "Invite a parent" accept on the same record takes the
+  same child lock, so the child never ends up with two primaries. Known residual, as for Add
+  Player's case 2 (`utils/team-row-lock.ts`): deleting the coach who manages the record rewrites
+  `managedById` after locking their teams and can deadlock with an approval holding the record's
+  lock; PostgreSQL aborts one side (40P01).
   **`…/decline`**: one status-guarded update, `childName` cleared, nothing written to the roster,
   no notification. Order of refusals on both: team 404, 403, request 404 (another team's id), 400.
-- **Not built (deliberate):** approving a CHILD request always creates a new roster record. When
-  the coach already added that child, decline the request and use "Invite a parent" on the existing
-  row (`guardians.md`); linking a request to an existing record is a follow-up. A requester cannot
-  list or withdraw their own requests. A link is not moved by a season rollover: it stays on the
-  team-season it was created for.
+- **Not built (deliberate):** a requester cannot list or withdraw their own requests. A link is not
+  moved by a season rollover: it stays on the team-season it was created for. Approving onto an
+  existing record does not rename it to the name the parent typed.
 - **Account deletion and the under-age un-claim** delete every `TeamJoinRequest` the account sent
   (`purgeLoginBindings`), so a sign-up that only asked to join is erased outright; `deleteAccount`
   also sets `createdById` to null on the links the account created (the link stays live: every
@@ -537,7 +556,15 @@ themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by 
   link** and **Turn off** (each behind a confirm whose button reads differently from the screen's,
   "Create new link" / "Turn off link"), and the pending requests with Approve and Decline icons
   (Decline confirms); each request shows who would be added, who asked, and the asker's email on
-  a line of its own. Requests come from other phones and a link can be replaced from another coach's, so
+  a line of its own. **Approve on a CHILD request** (#1072) opens an `ActionMenu` ("Add <child> to
+  the roster") when the roster has records it could be: **Add as a new player** (the request as
+  before) and one "Same child as <player>, already on the roster" item per candidate, from
+  `utils/join-request-targets.ts#attachablePlayers` (members that are managed, not deleted and not
+  in `team.guardianLinkedPlayerIds`; a record with the typed name first, then by name via
+  `sortRosterMembers`). A SELF request, or a roster without such a record, approves at once as
+  before. A 409 shows the server's message, and the hook re-reads the team so the menu is
+  rebuilt from fresh data. The menu does not scroll: a roster with very many unlinked records
+  makes a tall sheet. Requests come from other phones and a link can be replaced from another coach's, so
   `useJoinRequests`, `useJoinLink` and the public `useJoinLinkPreview` never trust their cache
   (`staleTime: 0`, `refetchOnMount: 'always'`), and this screen polls the link and the requests
   every 15 s (`JOIN_LINK_POLL_MS`) and has pull-to-refresh. **Whether a link is live is the
@@ -587,7 +614,9 @@ themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by 
   `tests/integration/join-link.db.test.ts` (one live link under concurrent creates, no access
   while pending or after a decline, `maxUses` under concurrency, expired and revoked, the retry
   after the last use, the lapse, an un-claimed requester, both approval kinds, two concurrent
-  approvals, deletion). The revoke-against-create race is argued from the shared lock, not
+  approvals, deletion; #1072: approval onto an existing record, each 409 reason, a SELF request
+  with `playerId`, two coaches approving one request onto one record, and two requests onto one
+  record at once). The revoke-against-create race is argued from the shared lock, not
   reproduced in a test. Mobile: `__tests__/hooks/useJoinLink.runtime.test.tsx`,
   `__tests__/app/join-request.test.tsx`, `__tests__/app/team-join-link.test.tsx`,
   `__tests__/utils/qr-path.test.ts`. Web: `web/__tests__/join-page.test.tsx`.

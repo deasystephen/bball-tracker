@@ -22,9 +22,11 @@ import {
   Card,
 } from '../../../components';
 import { QrCode } from '../../../components/QrCode';
+import { ActionMenu, type ActionMenuItem } from '../../../components/ActionMenu';
 import { BackButton } from '../../../components/BackButton';
 import { useToast } from '../../../components/Toast';
-import { useTeam, hasTeamPermission } from '../../../hooks/useTeams';
+import { useTeam, hasTeamPermission, type TeamMember } from '../../../hooks/useTeams';
+import { attachablePlayers } from '../../../utils/join-request-targets';
 import {
   useJoinLink,
   useCreateJoinLink,
@@ -151,15 +153,42 @@ export default function TeamJoinLinkScreen() {
         })
       : t('joinLink.requestSelfDetail');
 
-  const handleApprove = async (row: JoinRequestRow) => {
+  const handleApprove = async (row: JoinRequestRow, target?: TeamMember) => {
     try {
-      await approve.mutateAsync({ teamId: id, request: row });
-      toast.showToast(t('joinLink.approved', { name: requestSubject(row) }), 'success');
+      await approve.mutateAsync({ teamId: id, request: row, playerId: target?.playerId });
+      toast.showToast(
+        target
+          ? t('joinLink.linkedToPlayer', { parent: displayName(row.requester), player: displayName(target.player) })
+          : t('joinLink.approved', { name: requestSubject(row) }),
+        'success'
+      );
     } catch (err) {
       toast.showToast(getApiErrorMessage(err, t('joinLink.approveFailed')), 'error');
       void refetchRequests();
     }
   };
+
+  // A CHILD request may be the child the coach already typed in (#1072):
+  // when the roster has records that could be theirs, Approve asks which.
+  const [choosingFor, setChoosingFor] = useState<JoinRequestRow | null>(null);
+  const targetsFor = (row: JoinRequestRow): TeamMember[] =>
+    row.kind === 'CHILD' && team ? attachablePlayers(team, row.childName) : [];
+
+  const onApprovePress = (row: JoinRequestRow) => {
+    if (targetsFor(row).length > 0) {
+      setChoosingFor(row);
+    } else {
+      void handleApprove(row);
+    }
+  };
+
+  const approveChoices = (row: JoinRequestRow): ActionMenuItem[] => [
+    { label: t('joinLink.approveAsNewPlayer'), onPress: () => void handleApprove(row) },
+    ...targetsFor(row).map((member) => ({
+      label: t('joinLink.approveOntoPlayer', { player: displayName(member.player) }),
+      onPress: () => void handleApprove(row, member),
+    })),
+  ];
 
   const confirmDecline = (row: JoinRequestRow) => {
     Alert.alert(t('joinLink.declineTitle'), t('joinLink.declineBody', { name: requestSubject(row) }), [
@@ -348,7 +377,7 @@ export default function TeamJoinLinkScreen() {
                 </View>
                 <View style={styles.rowActions}>
                   <TouchableOpacity
-                    onPress={() => void handleApprove(row)}
+                    onPress={() => onApprovePress(row)}
                     style={styles.rowButton}
                     accessibilityRole="button"
                     accessibilityLabel={t('joinLink.approveLabel', { name: subject })}
@@ -371,6 +400,12 @@ export default function TeamJoinLinkScreen() {
           })
         )}
       </ScrollView>
+      <ActionMenu
+        visible={choosingFor !== null}
+        title={choosingFor ? t('joinLink.approveChoiceTitle', { name: requestSubject(choosingFor) }) : ''}
+        items={choosingFor ? approveChoices(choosingFor) : []}
+        onClose={() => setChoosingFor(null)}
+      />
     </ThemedView>
   );
 }

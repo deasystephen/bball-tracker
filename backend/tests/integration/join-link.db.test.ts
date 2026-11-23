@@ -18,6 +18,9 @@
  *  - approval writes the roster: SELF adds the member; CHILD creates a managed
  *    record with no login, its membership and the primary guardian link, and
  *    makes a bare PLAYER a PARENT; two concurrent approvals write it once;
+ *  - a CHILD request approved onto an existing managed record (#1072) links
+ *    the parent as its primary guardian and creates nothing; two approvals
+ *    onto one record at once (one request or two) leave exactly one link;
  *  - account deletion removes the requester's requests (so the row can be
  *    erased) and un-owns the links a deleted coach created.
  *
@@ -29,7 +32,12 @@ import { JOIN_REQUEST_TTL_DAYS, JoinLinkService, type JoinLinkView } from '../..
 import { AccountService } from '../../src/services/account-service';
 import { NotificationService } from '../../src/services/notification-service';
 import { canAccessTeam } from '../../src/utils/permissions';
-import { BadRequestError, JoinLinkInactiveError, NotFoundError } from '../../src/utils/errors';
+import {
+  BadRequestError,
+  JoinLinkInactiveError,
+  JoinPlayerUnavailableError,
+  NotFoundError,
+} from '../../src/utils/errors';
 import { DbFixtures, type Org } from '../support/db-fixtures';
 
 jest.setTimeout(30000);
@@ -444,6 +452,161 @@ describe('JoinLinkService (real Postgres, #210)', () => {
     expect(await prisma.user.count({ where: { name: childName } })).toBe(1);
     expect(await prisma.teamMember.count({ where: { teamId: club.teamId } })).toBe(1);
     expect(await prisma.guardian.count({ where: { parentId } })).toBe(1);
+  });
+
+  describe('approving a CHILD request onto an existing roster record (#1072)', () => {
+    /** A managed roster record (no login, no email) the coach typed in, on the team. */
+    async function typedPlayer(label: string, club: Org, coachId: string): Promise<string> {
+      counter += 1;
+      const id = await fx.user(`typed-${label}${counter}`, 'PLAYER');
+      await prisma.user.update({ where: { id }, data: { isManaged: true, managedById: coachId, email: null } });
+      await fx.member(id, club);
+      return id;
+    }
+
+    /** A team with two roster managers, a link, and one typed player. */
+    async function setup(label: string): Promise<{
+      club: Org;
+      coachId: string;
+      secondCoachId: string;
+      link: JoinLinkView;
+      playerId: string;
+    }> {
+      const { org: club, coachId } = await team(label);
+      const secondCoachId = await fx.user(`second-${label}${counter}`, 'COACH');
+      await fx.staff(secondCoachId, club);
+      const link = await JoinLinkService.createLink(club.teamId, {}, coachId);
+      const playerId = await typedPlayer(label, club, coachId);
+      return { club, coachId, secondCoachId, link, playerId };
+    }
+
+    async function childRequest(link: JoinLinkView, parentId: string, childName: string): Promise<string> {
+      const asked = await JoinLinkService.requestToJoin(
+        tokenOf(link),
+        { kind: 'child', childName, relationship: 'MOTHER' },
+        parentId
+      );
+      if (asked.status !== 'pending') throw new Error('expected a pending request');
+      return asked.request.id;
+    }
+
+    it('links the parent as primary guardian of the existing record and creates no duplicate', async () => {
+      const { club, coachId, link, playerId } = await setup('attach');
+      const parentId = await adult('mum');
+      const requestId = await childRequest(link, parentId, `Typed-${fx.run}`);
+
+      const approved = await JoinLinkService.approveRequest(club.teamId, requestId, coachId, { playerId });
+
+      expect(approved).toMatchObject({ playerId, linkedExisting: true, request: { status: 'ACCEPTED', kind: 'CHILD' } });
+      expect(await prisma.teamMember.count({ where: { teamId: club.teamId } })).toBe(1);
+      expect(await prisma.user.count({ where: { name: `Typed-${fx.run}` } })).toBe(0);
+      expect(await prisma.guardian.findMany({ where: { childId: playerId } })).toEqual([
+        expect.objectContaining({ parentId, relationship: 'MOTHER', isPrimary: true }),
+      ]);
+      // The coach's record is untouched: still managed by them, still no login.
+      expect(await prisma.user.findUniqueOrThrow({ where: { id: playerId } })).toMatchObject({
+        isManaged: true,
+        managedById: coachId,
+        email: null,
+      });
+      expect((await prisma.user.findUniqueOrThrow({ where: { id: parentId } })).role).toBe('PARENT');
+      expect(await canAccessTeam(parentId, club.teamId)).toBe(true);
+      expect(await prisma.teamJoinRequest.findUniqueOrThrow({ where: { id: requestId } })).toMatchObject({
+        status: 'ACCEPTED',
+        childName: null,
+      });
+    });
+
+    it('two coaches approving one request onto one record at once: one link, the loser gets 400', async () => {
+      const { club, coachId, secondCoachId, link, playerId } = await setup('same');
+      const parentId = await adult('dad');
+      const requestId = await childRequest(link, parentId, `Same-${fx.run}`);
+
+      const settled = await Promise.allSettled([
+        JoinLinkService.approveRequest(club.teamId, requestId, coachId, { playerId }),
+        JoinLinkService.approveRequest(club.teamId, requestId, secondCoachId, { playerId }),
+      ]);
+
+      expect(settled.filter((s) => s.status === 'fulfilled')).toHaveLength(1);
+      const [lost] = settled.filter((s): s is PromiseRejectedResult => s.status === 'rejected');
+      expect(lost.reason).toBeInstanceOf(BadRequestError);
+      expect(await prisma.guardian.count({ where: { childId: playerId } })).toBe(1);
+      expect(await prisma.teamMember.count({ where: { teamId: club.teamId } })).toBe(1);
+    });
+
+    it('two coaches approving two requests onto one record at once: one guardian, the loser gets 409 and stays pending', async () => {
+      const { club, coachId, secondCoachId, link, playerId } = await setup('two');
+      const firstParentId = await adult('first');
+      const secondParentId = await adult('second');
+      const firstRequestId = await childRequest(link, firstParentId, `Two-${fx.run}`);
+      const secondRequestId = await childRequest(link, secondParentId, `Two-${fx.run}`);
+
+      const settled = await Promise.allSettled([
+        JoinLinkService.approveRequest(club.teamId, firstRequestId, coachId, { playerId }),
+        JoinLinkService.approveRequest(club.teamId, secondRequestId, secondCoachId, { playerId }),
+      ]);
+
+      expect(settled.filter((s) => s.status === 'fulfilled')).toHaveLength(1);
+      const [lost] = settled.filter((s): s is PromiseRejectedResult => s.status === 'rejected');
+      expect(lost.reason).toBeInstanceOf(JoinPlayerUnavailableError);
+      expect(lost.reason).toMatchObject({ statusCode: 409, details: { reason: 'has_guardian' } });
+      const links = await prisma.guardian.findMany({ where: { childId: playerId } });
+      expect(links).toHaveLength(1);
+      expect(links[0].isPrimary).toBe(true);
+      // The loser rolled back whole: its request waits for the coach, its name intact.
+      const statuses = await prisma.teamJoinRequest.findMany({
+        where: { id: { in: [firstRequestId, secondRequestId] } },
+        select: { status: true, childName: true },
+      });
+      expect(statuses.map((s) => s.status).sort()).toEqual(['ACCEPTED', 'PENDING']);
+      expect(statuses.find((s) => s.status === 'PENDING')?.childName).toBe(`Two-${fx.run}`);
+      const loserParentId = links[0].parentId === firstParentId ? secondParentId : firstParentId;
+      expect((await prisma.user.findUniqueOrThrow({ where: { id: loserParentId } })).role).toBe('PLAYER');
+      expect(await canAccessTeam(loserParentId, club.teamId)).toBe(false);
+    });
+
+    it('refuses a record that cannot take the request, and writes nothing', async () => {
+      const { club, coachId, link, playerId } = await setup('refuse');
+      const { org: other, coachId: otherCoachId } = await team('elsewhere');
+      const elsewhereId = await typedPlayer('elsewhere', other, otherCoachId);
+      const loginId = await adult('login');
+      await fx.member(loginId, club);
+      const guardedId = await typedPlayer('guarded', club, coachId);
+      const existingGuardianId = await adult('existing');
+      await fx.guardian(existingGuardianId, guardedId);
+
+      const parentId = await adult('asker');
+      const requestId = await childRequest(link, parentId, `Refused-${fx.run}`);
+
+      await expect(
+        JoinLinkService.approveRequest(club.teamId, requestId, coachId, { playerId: elsewhereId })
+      ).rejects.toMatchObject({ statusCode: 409, details: { reason: 'not_on_team' } });
+      await expect(
+        JoinLinkService.approveRequest(club.teamId, requestId, coachId, { playerId: loginId })
+      ).rejects.toMatchObject({ statusCode: 409, details: { reason: 'not_managed' } });
+      await expect(
+        JoinLinkService.approveRequest(club.teamId, requestId, coachId, { playerId: guardedId })
+      ).rejects.toMatchObject({ statusCode: 409, details: { reason: 'has_guardian' } });
+
+      expect(await prisma.guardian.count({ where: { parentId } })).toBe(0);
+      expect(await prisma.teamJoinRequest.findUniqueOrThrow({ where: { id: requestId } })).toMatchObject({
+        status: 'PENDING',
+      });
+
+      // A SELF request cannot be linked to a record.
+      const selfId = await adult('self');
+      await JoinLinkService.requestToJoin(tokenOf(link), { kind: 'self' }, selfId);
+      const selfRequest = (await JoinLinkService.listRequests(club.teamId, coachId)).find((r) => r.kind === 'SELF')!;
+      await expect(
+        JoinLinkService.approveRequest(club.teamId, selfRequest.id, coachId, { playerId })
+      ).rejects.toBeInstanceOf(BadRequestError);
+      expect(await prisma.teamMember.count({ where: { teamId: club.teamId, playerId: selfId } })).toBe(0);
+
+      // The record is still free: the original request can go onto it.
+      await expect(
+        JoinLinkService.approveRequest(club.teamId, requestId, coachId, { playerId })
+      ).resolves.toMatchObject({ linkedExisting: true });
+    });
   });
 
   it('a request id from another team is not found, whoever asks', async () => {

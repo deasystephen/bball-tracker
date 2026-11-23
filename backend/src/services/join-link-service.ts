@@ -16,6 +16,8 @@
  *    record (`isManaged`, no login, `managedById` = the approving coach), its
  *    `TeamMember` row and the `Guardian` link to the requester, who becomes
  *    PARENT by the guardian accept's rule. The child never gets a login.
+ *    Or (#1072) the coach links the request to an existing managed record of
+ *    the team that has no guardian yet, instead of creating a duplicate.
  *
  * The token is a bearer secret. It is read only through
  * `JOIN_LINK_MANAGER_SELECT`, returned only to roster managers (as the URL
@@ -32,6 +34,7 @@ import {
   BadRequestError,
   ForbiddenError,
   JoinLinkInactiveError,
+  JoinPlayerUnavailableError,
   NotFoundError,
   UnauthorizedError,
 } from '../utils/errors';
@@ -43,7 +46,7 @@ import { publicAppUrl } from '../utils/urls';
 import { USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
 import { GuardianService } from './guardian-service';
 import { NotificationService } from './notification-service';
-import type { CreateJoinLinkInput, JoinRequestInput } from '../api/join/schemas';
+import type { ApproveJoinRequestInput, CreateJoinLinkInput, JoinRequestInput } from '../api/join/schemas';
 
 /** A link nobody rotates dies by itself: the default lifetime when the coach picks none. */
 export const JOIN_LINK_DEFAULT_EXPIRES_DAYS = 14;
@@ -176,8 +179,14 @@ export type JoinRequestResult =
 
 export interface ApproveJoinRequestResult {
   request: JoinRequestSummary;
-  /** The roster record the approval wrote: the requester (SELF) or the new managed child (CHILD). */
+  /**
+   * The roster record the approval wrote or linked: the requester (SELF), the
+   * new managed child (CHILD), or the existing record the coach chose (CHILD
+   * with `playerId`, #1072).
+   */
   playerId: string;
+  /** True when a CHILD request was linked to an existing roster record instead of creating one. */
+  linkedExisting: boolean;
 }
 
 function toView(row: JoinLinkManagerRow): JoinLinkView {
@@ -629,13 +638,32 @@ export class JoinLinkService {
    *    coach adds the player), its `TeamMember` and the `Guardian` link to the
    *    requester as the child's first, primary guardian; a bare PLAYER
    *    requester becomes PARENT (the guardian accept's rule).
+   *  - CHILD with `playerId` (#1072): no new record. The coach chose one of
+   *    the team's existing managed records, and the requester becomes its
+   *    guardian (`GuardianService.linkGuardianLocked`, the guardian accept's
+   *    code). That record is locked in the SAME `lockUsers` statement as the
+   *    requester and the approver (User rows before Team, one id-ordered
+   *    statement, the order the guardian accept and account deletion use),
+   *    and re-judged behind every lock: still a live managed record, still on
+   *    this team, still without a guardian, else 409
+   *    `join_player_unavailable` and nothing is written. Two approvals onto
+   *    one record therefore leave exactly one guardian link.
    */
-  static async approveRequest(teamId: string, requestId: string, userId: string): Promise<ApproveJoinRequestResult> {
+  static async approveRequest(
+    teamId: string,
+    requestId: string,
+    userId: string,
+    data: ApproveJoinRequestInput = {}
+  ): Promise<ApproveJoinRequestResult> {
     const { team, request } = await this.requirePendingRequest(teamId, requestId, userId, 'approve');
     const { requesterId } = request;
+    const targetPlayerId = data.playerId ?? null;
+    if (targetPlayerId !== null && request.kind !== 'CHILD') {
+      throw new BadRequestError('Only a request for a child can be linked to an existing player');
+    }
 
     const result = await prisma.$transaction(async (tx): Promise<ApproveJoinRequestResult> => {
-      const locked = await lockUsers(tx, [requesterId, userId]);
+      const locked = await lockUsers(tx, targetPlayerId ? [requesterId, userId, targetPlayerId] : [requesterId, userId]);
       if (!locked.some((row) => row.id === userId && row.deletedAt === null)) {
         throw new NotFoundError('Account not found');
       }
@@ -679,13 +707,22 @@ export class JoinLinkService {
           update: {},
           select: { id: true },
         });
-        return { request: updated, playerId: requesterId };
+        return { request: updated, playerId: requesterId, linkedExisting: false };
       }
 
       if (!request.childName || !request.relationship) {
         // A CHILD row always carries both (the schema requires them); a row
         // without them cannot be turned into a roster record.
         throw new BadRequestError('This join request is incomplete. Ask the family to send it again.');
+      }
+      if (targetPlayerId !== null) {
+        await this.assertAttachable(tx, teamId, targetPlayerId);
+        await GuardianService.linkGuardianLocked(
+          tx,
+          { parentId: requesterId, childId: targetPlayerId, relationship: request.relationship },
+          requester.role
+        );
+        return { request: updated, playerId: targetPlayerId, linkedExisting: true };
       }
       const child = await tx.user.create({
         data: { name: request.childName, role: 'PLAYER', isManaged: true, managedById: userId, email: null },
@@ -700,7 +737,7 @@ export class JoinLinkService {
       if (requester.role === 'PLAYER') {
         await GuardianService.promoteBareAccountToParent(tx, requesterId);
       }
-      return { request: updated, playerId: child.id };
+      return { request: updated, playerId: child.id, linkedExisting: false };
     });
 
     logger.info('Join request approved', {
@@ -709,6 +746,7 @@ export class JoinLinkService {
       requesterId,
       playerId: result.playerId,
       kind: request.kind,
+      linkedExisting: result.linkedExisting,
       userId,
     });
     // A coach who approved their own request needs no push about it.
@@ -717,6 +755,34 @@ export class JoinLinkService {
     }
 
     return result;
+  }
+
+  /**
+   * Whether the roster record a coach chose can take a CHILD request (#1072),
+   * judged inside the approval's transaction, behind the record's row lock:
+   * a live managed record (not a login, not deleted), a member of this team,
+   * with no guardian linked yet (a child with any link has exactly one
+   * primary, so "no guardian" is "no primary guardian"). 409
+   * `join_player_unavailable` otherwise, which rolls the approval back.
+   */
+  private static async assertAttachable(tx: Prisma.TransactionClient, teamId: string, playerId: string): Promise<void> {
+    const player = await tx.user.findFirst({
+      where: { id: playerId, deletedAt: null, isManaged: true },
+      select: { id: true },
+    });
+    if (!player) {
+      throw new JoinPlayerUnavailableError('not_managed');
+    }
+    const member = await tx.teamMember.findUnique({
+      where: { teamId_playerId: { teamId, playerId } },
+      select: { id: true },
+    });
+    if (!member) {
+      throw new JoinPlayerUnavailableError('not_on_team');
+    }
+    if ((await tx.guardian.count({ where: { childId: playerId } })) > 0) {
+      throw new JoinPlayerUnavailableError('has_guardian');
+    }
   }
 
   /**
