@@ -32,6 +32,7 @@ import { getApiErrorMessage, isRateLimitedError } from '../../services/api-clien
 import { useIsAuthenticated } from '../../store/auth-store';
 import { setPendingReturnPath } from '../../utils/return-path';
 import { useTranslation } from '../../i18n';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { spacing } from '../../theme';
 import type { GuardianRelationship } from '../../../shared/types';
 
@@ -44,6 +45,7 @@ export default function JoinDeepLinkScreen() {
   const toast = useToast();
   const { t } = useTranslation();
   const goBack = useGoBack('/');
+  const insets = useSafeAreaInsets();
   const isAuthenticated = useIsAuthenticated();
 
   const { data: link, isLoading, error, refetch } = useJoinLinkPreview(token);
@@ -168,7 +170,10 @@ export default function JoinDeepLinkScreen() {
 
   return (
     <ThemedView variant="background" style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        contentContainerStyle={[styles.scrollContent, { paddingTop: spacing.xl + insets.top, paddingBottom: spacing.xl + insets.bottom }]}
+        keyboardShouldPersistTaps="handled"
+      >
         <Ionicons name="people-outline" size={64} color={colors.primary} />
         <ThemedText variant="h1" heading style={styles.title}>
           {t('join.title', { team: link.teamName })}
@@ -297,7 +302,8 @@ const styles = StyleSheet.create({
   },
   title: { textAlign: 'center', marginTop: spacing.md, marginBottom: spacing.sm },
   subtitle: { textAlign: 'center', marginBottom: spacing.lg },
-  formCard: { width: '100%', marginBottom: spacing.md },
+  // ThemedView (the Card's body) is flex: 1; size the card to its content instead.
+  formCard: { width: '100%', flexGrow: 0, flexShrink: 0, flexBasis: 'auto', marginBottom: spacing.md },
   question: { marginBottom: spacing.sm },
   childNote: { marginTop: spacing.md, marginBottom: spacing.md },
   btn: { marginTop: spacing.md, width: '100%' },
