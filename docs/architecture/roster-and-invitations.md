@@ -433,7 +433,7 @@ themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by 
 - **Tables** (migration `20261122120000_team_join_link`, additive): `TeamJoinLink { teamId, token,
   createdById?, expiresAt, maxUses?, useCount, revokedAt? }` and `TeamJoinRequest { teamId, linkId,
   requesterId, kind SELF|CHILD, childName?, relationship?, status, decidedAt? }`. `status` reuses
-  `InvitationStatus` (PENDING, ACCEPTED = approved, REJECTED = declined, EXPIRED = lapsed, below). A new kind in its own
+  `InvitationStatus` (PENDING, ACCEPTED = approved, REJECTED = declined; a lapsed request is deleted, below, so EXPIRED is no longer written on a join request and only rows from before #1075 carry it). A new kind in its own
   tables, like staff invitations, so no existing invitation reader sees it.
 - **The token is a bearer secret**, `randomBytes(32).toString('base64url')` like the invitation
   tokens. It is read only through `JOIN_LINK_MANAGER_SELECT` and leaves the API only inside
@@ -492,32 +492,42 @@ themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by 
   whose role has `canManageRoster`, the requester excepted ("Someone asked to join <team>", no
   person's name; data `{ type: 'join_request', teamId }`). A failed push is a warn, never a failed
   request.
-- **A request nobody decides lapses after `JOIN_REQUEST_TTL_DAYS` (30).** It is flipped to EXPIRED
-  (`decidedAt` set) and its `childName` cleared. One definition (`lapsedWhere` / `lapseData` in
-  `join-link-service.ts`) serves two paths that cannot drift:
-  - **Lazily**, when the team's list is read and when the requester asks again, in a statement of
-    its own that commits before the ask is judged, so a refused ask never undoes it; an approve or
-    decline of a lapsed row that was not flipped yet answers 400. So a family is never stuck at the
-    pending cap.
-  - **The hourly sweep** (#1075, `services/join-request-sweep.ts`), so a typed child's name never
-    waits on a team nobody opens. `startJoinRequestSweep()` runs in `src/index.ts` after `listen`:
-    the first run is `JOIN_REQUEST_SWEEP_FIRST_RUN_MS` (1 min) after start, then every
-    `JOIN_REQUEST_SWEEP_INTERVAL_MS` (1 h), so a lapse is applied within about an hour of the
-    30-day mark while the API runs, even when deploys replace the task more often than hourly.
-    `JoinLinkService.expireLapsedRequests` works oldest first in batches of
-    `JOIN_REQUEST_SWEEP_BATCH` (500): read the ids, then one `updateMany` per batch that re-checks
-    the lapse, so a request decided meanwhile is untouched and one statement stays short. It logs
-    one `Join requests expired` line (`expiredCount`, `teamCount`, `trigger: 'sweep'`; counts only)
-    when it expired any. The scheduler copies the socket revocation sweep (`websocket/revocation.ts`):
-    unref'd timers, a tick skipped while a run is in flight, a run past
-    `JOIN_REQUEST_SWEEP_STALL_MS` (5 min) reported once (`Join request sweep stalled`, error and
-    Sentry), a database failure logged at warn (`Join request sweep failed`, the first of a streak
-    to Sentry, flow `join-request-sweep`) and retried next hour, never thrown. Shutdown stops it in
-    its first step (`stopJoinRequestSweep()` beside `stopRevocationSweep()`), before Prisma
-    disconnects. Single-replica, so no lock; a second task would run the same idempotent UPDATE.
-    Tests: `tests/services/join-request-sweep.test.ts` (batching, scheduler) and
-    `tests/integration/join-link.db.test.ts` (a lapsed request is expired with no list read; one a
-    day short of the mark is kept).
+- **A request nobody decides lapses after `JOIN_REQUEST_TTL_DAYS` (30) and is deleted** (#1075;
+  before it the row was flipped to EXPIRED with `childName` cleared and kept). One predicate,
+  `lapsedWhere` in `join-link-service.ts`, says which rows: PENDING and older than the TTL, or
+  status EXPIRED (rows the old lazy path flipped; nothing reads them). Declined (REJECTED) and
+  approved (ACCEPTED) rows are never lapsed: the repeat-ask cap reads REJECTED rows for 30 days, and
+  approved rows stay. Every path deletes through that predicate, so they cannot drift:
+  - **Lazily** (`deleteLapsedRequests`, narrowed to the team plus one requester or one request):
+    when the team's list is read and when the requester asks again, in a statement of its own that
+    commits before the ask is judged, so a refused ask never brings the row back. A requester who
+    asks again after a lapse gets a fresh request (`created: true`, a new id). So a family is never
+    stuck at the pending cap.
+  - **On a decision**: an approve or decline of a lapsed row the sweep has not reached yet deletes it
+    and answers **400** `Cannot approve|decline this join request: it lapsed after 30 days`; nothing
+    is written to the roster, and a retry answers 404.
+  - **The hourly sweep** (`services/join-request-sweep.ts`), so a typed child's name never waits on
+    a team nobody opens. `startJoinRequestSweep()` runs in `src/index.ts` after `listen`: the first
+    run is `JOIN_REQUEST_SWEEP_FIRST_RUN_MS` (1 min) after start, then every
+    `JOIN_REQUEST_SWEEP_INTERVAL_MS` (1 h), so a lapsed request is deleted within about an hour of
+    the 30-day mark while the API runs, even when deploys replace the task more often than hourly.
+    `JoinLinkService.deleteAllLapsedRequests` works oldest first in batches of
+    `JOIN_REQUEST_SWEEP_BATCH` (500): read the ids, then one `deleteMany` per batch that re-checks
+    the predicate, so a request a coach decided meanwhile is untouched and one statement stays short.
+    The scheduler copies the socket revocation sweep (`websocket/revocation.ts`): unref'd timers, a
+    tick skipped while a run is in flight (reported once, `Join request sweep stalled`, error and
+    Sentry; the pool's statement timeout bounds a slow batch long before), a database failure
+    logged at warn (`Join request sweep failed`, the first of a streak to Sentry, flow
+    `join-request-sweep`) and retried next hour, never thrown. Shutdown stops it in its first step
+    (`stopJoinRequestSweep()` beside `stopRevocationSweep()`), before Prisma disconnects.
+    Single-replica, so no lock; a second task would run the same idempotent DELETE.
+  - Every path logs `Join requests deleted` when it removed any: `{ teamId, deletedCount }` lazily,
+    `{ deletedCount, teamCount, trigger: 'sweep' }` from the sweep. Counts and ids only.
+  - Tests: `tests/services/join-request-sweep.test.ts` (batching, scheduler),
+    `tests/api/join-links.test.ts` (lazy and decision deletes) and
+    `tests/integration/join-link.db.test.ts` (the sweep deletes lapsed and legacy EXPIRED rows with no
+    read and keeps a request a day short of the mark plus old declined and approved rows; a decision
+    on a lapsed row; a re-ask after a lapse).
 - **`GET /teams/:teamId/join-requests`** (`canManageRoster`, 403 otherwise): the pending requests,
   oldest first, each with `childName`, `relationship` and `requester` (`USER_SUMMARY_WITH_EMAIL_SELECT`:
   the address is how a coach recognises who is asking; roster managers already see roster emails).

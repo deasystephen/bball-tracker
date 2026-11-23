@@ -66,8 +66,9 @@ describe('legal pages (#25)', () => {
       ['15 days in Datadog', 'kept for **15 days**'],
       ['“Deleted user”', 'attributed to "Deleted user"'],
       ['city, region and country', '**city,\n  region and country**'],
-      ['lapses 30 days after it was sent', 'lapses, **30 days** after it was sent'],
-      ['removed from it within about an hour', '**within about an hour** of that mark'],
+      ['lapses 30 days after it was sent', 'lapses **30 days** after it was sent'],
+      ['is deleted within about an hour', 'deletes it\n  **within about an hour** of that mark'],
+      ['until your account or the team is deleted', 'until the account or the team is deleted'],
     ];
     for (const [page, runbook] of windows) {
       expect(body).toContain(page);

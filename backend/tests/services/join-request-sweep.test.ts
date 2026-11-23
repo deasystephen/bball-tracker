@@ -1,6 +1,6 @@
 /**
  * The join-request sweep (#1075) against the mocked Prisma: the batched
- * expiry in `JoinLinkService.expireLapsedRequests` and the scheduler in
+ * delete in `JoinLinkService.deleteAllLapsedRequests` and the scheduler in
  * `services/join-request-sweep.ts` (interval, first run, no overlap, failure
  * handling, stop). The real Postgres is in
  * `tests/integration/join-link.db.test.ts`.
@@ -22,7 +22,6 @@ import {
 import {
   JOIN_REQUEST_SWEEP_FIRST_RUN_MS,
   JOIN_REQUEST_SWEEP_INTERVAL_MS,
-  JOIN_REQUEST_SWEEP_STALL_MS,
   startJoinRequestSweep,
   stopJoinRequestSweep,
   sweepLapsedJoinRequests,
@@ -30,7 +29,7 @@ import {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const findMany = mockPrisma.teamJoinRequest.findMany as jest.Mock;
-const updateMany = mockPrisma.teamJoinRequest.updateMany as jest.Mock;
+const deleteMany = mockPrisma.teamJoinRequest.deleteMany as jest.Mock;
 
 function rows(count: number, teamId = 'team-1'): Array<{ id: string; teamId: string }> {
   return Array.from({ length: count }, (_, i) => ({ id: `r-${teamId}-${i}`, teamId }));
@@ -43,53 +42,49 @@ beforeEach(async () => {
   await sweepLapsedJoinRequests();
   jest.clearAllMocks();
   findMany.mockReset();
-  updateMany.mockReset();
+  deleteMany.mockReset();
 });
 
 afterEach(() => {
   stopJoinRequestSweep();
 });
 
-describe('JoinLinkService.expireLapsedRequests', () => {
+describe('JoinLinkService.deleteAllLapsedRequests', () => {
   it('writes nothing and logs nothing when no request has lapsed', async () => {
     findMany.mockResolvedValueOnce([]);
     const info = spyOnInfo();
 
-    expect(await JoinLinkService.expireLapsedRequests()).toBe(0);
-    expect(updateMany).not.toHaveBeenCalled();
+    expect(await JoinLinkService.deleteAllLapsedRequests()).toBe(0);
+    expect(deleteMany).not.toHaveBeenCalled();
     expect(info).not.toHaveBeenCalled();
   });
 
-  it('lapses with the lazy expiry\'s rule and write, re-checking the lapse in the UPDATE', async () => {
+  it('deletes the lazy path\'s lapsed rows (stale PENDING, legacy EXPIRED), re-checking the lapse in the DELETE', async () => {
     findMany.mockResolvedValueOnce([...rows(2, 'team-1'), ...rows(1, 'team-2')]);
-    updateMany.mockResolvedValueOnce({ count: 3 });
+    deleteMany.mockResolvedValueOnce({ count: 3 });
     const info = spyOnInfo();
     const before = Date.now();
 
-    expect(await JoinLinkService.expireLapsedRequests()).toBe(3);
+    expect(await JoinLinkService.deleteAllLapsedRequests()).toBe(3);
 
-    const read = findMany.mock.calls[0][0] as {
-      where: { status: string; createdAt: { lt: Date } };
-      take: number;
-      orderBy: unknown;
-    };
-    expect(read.where.status).toBe('PENDING');
-    expect(Math.abs(read.where.createdAt.lt.getTime() - (before - JOIN_REQUEST_TTL_DAYS * DAY_MS))).toBeLessThan(5000);
+    type Lapsed = { OR: [{ status: string; createdAt: { lt: Date } }, { status: string }] };
+    const read = findMany.mock.calls[0][0] as { where: Lapsed; take: number; orderBy: unknown };
+    const [stale, legacy] = read.where.OR;
+    expect(stale.status).toBe('PENDING');
+    expect(Math.abs(stale.createdAt.lt.getTime() - (before - JOIN_REQUEST_TTL_DAYS * DAY_MS))).toBeLessThan(5000);
+    expect(legacy).toEqual({ status: 'EXPIRED' });
     expect(read.take).toBe(JOIN_REQUEST_SWEEP_BATCH);
     expect(read.orderBy).toEqual({ createdAt: 'asc' });
 
-    const write = updateMany.mock.calls[0][0] as {
-      where: { id: { in: string[] }; status: string; createdAt: { lt: Date } };
-      data: Record<string, unknown>;
-    };
+    // The DELETE narrows to the batch and re-checks the same lapse, so a
+    // request a coach decided meanwhile (ACCEPTED, REJECTED) is left alone.
+    const write = deleteMany.mock.calls[0][0] as { where: Lapsed & { id: { in: string[] } } };
     expect(write.where.id.in).toEqual(['r-team-1-0', 'r-team-1-1', 'r-team-2-0']);
-    expect(write.where.status).toBe('PENDING');
-    expect(write.where.createdAt.lt).toEqual(read.where.createdAt.lt);
-    // The typed name goes with the lapse, exactly as on the lazy path.
-    expect(write.data).toEqual({ status: 'EXPIRED', decidedAt: expect.any(Date), childName: null });
+    expect(write.where.OR).toEqual(read.where.OR);
+    expect(mockPrisma.teamJoinRequest.updateMany).not.toHaveBeenCalled();
 
     // Counts only: no request ids, no names.
-    expect(domainEvent(info, 'Join requests expired')).toEqual({ expiredCount: 3, teamCount: 2, trigger: 'sweep' });
+    expect(domainEvent(info, 'Join requests deleted')).toEqual({ deletedCount: 3, teamCount: 2, trigger: 'sweep' });
   });
 
   it('works through a backlog in batches of JOIN_REQUEST_SWEEP_BATCH until a short batch', async () => {
@@ -97,20 +92,20 @@ describe('JoinLinkService.expireLapsedRequests', () => {
       .mockResolvedValueOnce(rows(JOIN_REQUEST_SWEEP_BATCH, 'a'))
       .mockResolvedValueOnce(rows(JOIN_REQUEST_SWEEP_BATCH, 'b'))
       .mockResolvedValueOnce(rows(7, 'c'));
-    updateMany
+    deleteMany
       .mockResolvedValueOnce({ count: JOIN_REQUEST_SWEEP_BATCH })
       .mockResolvedValueOnce({ count: JOIN_REQUEST_SWEEP_BATCH })
       .mockResolvedValueOnce({ count: 7 });
     const info = spyOnInfo();
 
-    expect(await JoinLinkService.expireLapsedRequests()).toBe(JOIN_REQUEST_SWEEP_BATCH * 2 + 7);
+    expect(await JoinLinkService.deleteAllLapsedRequests()).toBe(JOIN_REQUEST_SWEEP_BATCH * 2 + 7);
     expect(findMany).toHaveBeenCalledTimes(3);
-    expect(updateMany).toHaveBeenCalledTimes(3);
-    for (const [args] of updateMany.mock.calls as Array<[{ where: { id: { in: string[] } } }]>) {
+    expect(deleteMany).toHaveBeenCalledTimes(3);
+    for (const [args] of deleteMany.mock.calls as Array<[{ where: { id: { in: string[] } } }]>) {
       expect(args.where.id.in.length).toBeLessThanOrEqual(JOIN_REQUEST_SWEEP_BATCH);
     }
-    expect(domainEvent(info, 'Join requests expired')).toEqual({
-      expiredCount: JOIN_REQUEST_SWEEP_BATCH * 2 + 7,
+    expect(domainEvent(info, 'Join requests deleted')).toEqual({
+      deletedCount: JOIN_REQUEST_SWEEP_BATCH * 2 + 7,
       teamCount: 3,
       trigger: 'sweep',
     });
@@ -118,19 +113,19 @@ describe('JoinLinkService.expireLapsedRequests', () => {
 
   it('stops after a full batch that changed nothing (all decided meanwhile) rather than spin', async () => {
     findMany.mockResolvedValue(rows(JOIN_REQUEST_SWEEP_BATCH));
-    updateMany.mockResolvedValue({ count: 0 });
+    deleteMany.mockResolvedValue({ count: 0 });
     const info = spyOnInfo();
 
-    expect(await JoinLinkService.expireLapsedRequests()).toBe(0);
+    expect(await JoinLinkService.deleteAllLapsedRequests()).toBe(0);
     expect(findMany).toHaveBeenCalledTimes(1);
     expect(info).not.toHaveBeenCalled();
   });
 });
 
 describe('sweepLapsedJoinRequests', () => {
-  it('returns what the service expired', async () => {
+  it('returns what the service deleted', async () => {
     findMany.mockResolvedValueOnce(rows(2));
-    updateMany.mockResolvedValueOnce({ count: 2 });
+    deleteMany.mockResolvedValueOnce({ count: 2 });
     spyOnInfo();
     expect(await sweepLapsedJoinRequests()).toBe(2);
   });
@@ -159,7 +154,27 @@ describe('startJoinRequestSweep', () => {
   beforeEach(() => jest.useFakeTimers());
   afterEach(() => jest.useRealTimers());
 
-  it('first runs JOIN_REQUEST_SWEEP_FIRST_RUN_MS after start, then every interval, never overlapping, until stopped', async () => {
+  it('first runs JOIN_REQUEST_SWEEP_FIRST_RUN_MS after start, then every interval, until stopped', async () => {
+    findMany.mockResolvedValue([]);
+    startJoinRequestSweep();
+
+    await jest.advanceTimersByTimeAsync(JOIN_REQUEST_SWEEP_FIRST_RUN_MS - 1);
+    expect(findMany).not.toHaveBeenCalled();
+    await jest.advanceTimersByTimeAsync(1);
+    expect(findMany).toHaveBeenCalledTimes(1);
+    await jest.advanceTimersByTimeAsync(JOIN_REQUEST_SWEEP_INTERVAL_MS - JOIN_REQUEST_SWEEP_FIRST_RUN_MS);
+    expect(findMany).toHaveBeenCalledTimes(2);
+    await jest.advanceTimersByTimeAsync(JOIN_REQUEST_SWEEP_INTERVAL_MS);
+    expect(findMany).toHaveBeenCalledTimes(3);
+
+    stopJoinRequestSweep();
+    stopJoinRequestSweep();
+    await jest.advanceTimersByTimeAsync(JOIN_REQUEST_SWEEP_INTERVAL_MS * 3);
+    expect(findMany).toHaveBeenCalledTimes(3);
+  });
+
+  it('never overlaps: a run still in flight at the next tick is skipped and reported once as stalled', async () => {
+    const error = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
     let release: (value: Array<{ id: string; teamId: string }>) => void = () => undefined;
     findMany.mockImplementation(
       () =>
@@ -169,24 +184,29 @@ describe('startJoinRequestSweep', () => {
     );
     startJoinRequestSweep();
 
-    await jest.advanceTimersByTimeAsync(JOIN_REQUEST_SWEEP_FIRST_RUN_MS - 1);
-    expect(findMany).not.toHaveBeenCalled();
-    await jest.advanceTimersByTimeAsync(1);
+    await jest.advanceTimersByTimeAsync(JOIN_REQUEST_SWEEP_FIRST_RUN_MS);
     expect(findMany).toHaveBeenCalledTimes(1);
+    expect(error).not.toHaveBeenCalled();
 
-    // Still in flight at the first interval tick: skipped.
-    await jest.advanceTimersByTimeAsync(JOIN_REQUEST_SWEEP_INTERVAL_MS - JOIN_REQUEST_SWEEP_FIRST_RUN_MS);
+    // Still in flight at the next ticks: skipped, reported on the first only.
+    await jest.advanceTimersByTimeAsync(JOIN_REQUEST_SWEEP_INTERVAL_MS * 3);
     expect(findMany).toHaveBeenCalledTimes(1);
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(error).toHaveBeenCalledWith('Join request sweep error', {
+      runningMs: String(JOIN_REQUEST_SWEEP_INTERVAL_MS - JOIN_REQUEST_SWEEP_FIRST_RUN_MS),
+      error: 'Join request sweep stalled',
+    });
+    expect(captureException).toHaveBeenCalledTimes(1);
+    expect(captureException).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'Join request sweep stalled' }),
+      expect.objectContaining({ flow: 'join-request-sweep' })
+    );
 
+    // Once it settles, the next tick runs again.
     release([]);
     await jest.advanceTimersByTimeAsync(JOIN_REQUEST_SWEEP_INTERVAL_MS);
     expect(findMany).toHaveBeenCalledTimes(2);
-
-    stopJoinRequestSweep();
-    stopJoinRequestSweep();
-    release([]);
-    await jest.advanceTimersByTimeAsync(JOIN_REQUEST_SWEEP_INTERVAL_MS * 3);
-    expect(findMany).toHaveBeenCalledTimes(2);
+    error.mockRestore();
   });
 
   it('a second start replaces the first: one timer, one first run', async () => {
@@ -240,26 +260,5 @@ describe('startJoinRequestSweep', () => {
     fail(new Error('Prisma disconnected'));
     await jest.advanceTimersByTimeAsync(0);
     expect(captureException).not.toHaveBeenCalled();
-  });
-
-  it('reports a sweep that never settles once, and runs none beside it', async () => {
-    const error = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
-    findMany.mockImplementation(() => new Promise(() => undefined));
-    // An interval shorter than the stall bound, so ticks land while it hangs.
-    const interval = JOIN_REQUEST_SWEEP_STALL_MS / 5;
-    startJoinRequestSweep(interval, interval);
-
-    await jest.advanceTimersByTimeAsync(interval);
-    await jest.advanceTimersByTimeAsync(JOIN_REQUEST_SWEEP_STALL_MS - interval);
-    expect(captureException).not.toHaveBeenCalled();
-    await jest.advanceTimersByTimeAsync(interval * 5);
-
-    expect(findMany).toHaveBeenCalledTimes(1);
-    expect(captureException).toHaveBeenCalledTimes(1);
-    expect(captureException).toHaveBeenCalledWith(
-      expect.objectContaining({ message: 'Join request sweep stalled' }),
-      expect.objectContaining({ flow: 'join-request-sweep' })
-    );
-    error.mockRestore();
   });
 });

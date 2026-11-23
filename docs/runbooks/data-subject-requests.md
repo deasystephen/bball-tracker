@@ -92,12 +92,14 @@ on `deletedAt IS NULL`, so a request that raced the deletion cannot re-identify 
   uploaded for a child or player they manage stays while that profile shows it. Mechanism:
   `docs/architecture/backend-services.md#avatar-uploads-servicesupload-servicets-apiuploads`.
 - **Join requests (#210).** A request to join a team through a join link holds the requester's
-  account id and, for a child, the name and relationship the parent typed. The name is cleared
-  when a coach approves (it is then the roster record's name) or declines, and when the request
-  lapses, **30 days** after it was sent: the API's hourly sweep (#1075) applies the lapse
+  account id and, for a child, the name and relationship the parent typed. When a coach approves,
+  the name is cleared from the request (it is then the roster record's name); when a coach
+  declines, the name is cleared. A decided request keeps the rest of the row (account id,
+  relationship, the decision) until the account or the team is deleted. A request no coach answers
+  lapses **30 days** after it was sent and is deleted: the API's hourly sweep (#1075) deletes it
   **within about an hour** of that mark while the API is running, sooner if the team's request list
-  is read or the requester asks again first. The lapsed row (account id, relationship, status) stays
-  without the name. Deleting the account deletes its requests.
+  is read, a coach tries to decide it or the requester asks again first. Deleting the account
+  deletes its requests.
 - RDS automated backups retain the pre-deletion data for up to **7 days**
   (`backup_retention_period` in `infra/rds.tf`); they are not edited. **Manual snapshots**
   (taken before risky migrations and major upgrades, `docs/runbooks/rds-backup-restore.md`) have
