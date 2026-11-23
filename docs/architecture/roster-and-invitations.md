@@ -519,24 +519,39 @@ themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by 
   **Onto an existing roster record (#1072):** body `{ playerId }` (`approveJoinRequestSchema`, a
   UUID; an empty body approves as above). For a coach who already typed the roster: the CHILD
   request becomes a guardian link on that record instead of a duplicate player. A SELF request with
-  a `playerId` is a 400 before any lock. The chosen record is locked in the **same** `lockUsers`
-  statement as the requester and the approver (User rows before the team row, the order the
-  guardian accept and account deletion use), and after the status flip it is judged again behind
-  every lock: a live managed record (`isManaged`, not deleted), a member of this team, and no
-  `Guardian` row at all (a child with any link has exactly one primary, so this is "no primary
-  guardian"). Otherwise **409 `join_player_unavailable`** (`JoinPlayerUnavailableError`, `reason`:
-  `not_managed`, `not_on_team` or `has_guardian`) and the whole transaction rolls back: the
-  request stays PENDING with its name, nothing is linked. Then the link is written by
+  a `playerId` is a 400 before any lock. Lock order User → Team → TeamMember: the chosen record is
+  locked in the **same** `lockUsers` statement as the requester and the approver (the per-child
+  lock every `Guardian` writer takes), then the team row, then, after the status flip, the
+  record's `TeamMember` row (`utils/team-row-lock.ts#lockTeamMemberRow`, `FOR UPDATE`).
+  `TeamService.removePlayer` takes no User or Team lock, so without that row lock a removal could
+  commit between the membership read and the `Guardian` insert; now a removal that committed first
+  reads as no row and one that comes second waits until the approval commits. The record is
+  judged behind those locks, in this order: **on this team** (any other id, unknown, a login or a
+  child elsewhere, answers `not_on_team` and reveals nothing more), a live managed record
+  (`isManaged`, not deleted), and no `Guardian` row at all (a child with any link has exactly one
+  primary, so this is "no primary guardian"). Otherwise **409 `join_player_unavailable`**
+  (`JoinPlayerUnavailableError`, `reason`: `not_on_team`, `not_managed` or `has_guardian`) and the
+  whole transaction rolls back: the request stays PENDING with its name, nothing is linked. A
+  pending "Invite a parent" invitation on the record does not block it: the record is still
+  offered, the invitation stays, and an adult who accepts it later becomes a second, non-primary
+  guardian. Then the link is written by
   `GuardianService.linkGuardianLocked`, the guardian accept's own code (primary when it is the
   first link, then the bare-PLAYER → PARENT rule); the coach's record keeps its name, its
   `managedById` and its jersey, and no `TeamMember` or `User` is created. **Races:** two coaches
   approving the same request onto one record serialise on the User locks and the loser gets the
   existing 400 ("no longer pending"); two requests onto one record serialise on the record's lock
   and the loser gets 409 `has_guardian`; an "Invite a parent" accept on the same record takes the
-  same child lock, so the child never ends up with two primaries. Known residual, as for Add
-  Player's case 2 (`utils/team-row-lock.ts`): deleting the coach who manages the record rewrites
-  `managedById` after locking their teams and can deadlock with an approval holding the record's
-  lock; PostgreSQL aborts one side (40P01).
+  same child lock, so the child never ends up with two primaries. **Known residual deadlock**,
+  next to Add Player's case 2 in `utils/team-row-lock.ts`: this is the only path that holds a
+  managed record's row and then waits for a team row. Deleting the coach who manages the record
+  (`deleteAccount`: that coach `FOR UPDATE`, their head-coach teams, then
+  `updateMany({ managedById })`, which needs the record's row) can wait on it in a cycle, for
+  example while a second head coach approves onto a record the departing coach created.
+  PostgreSQL's deadlock detector (1 s by default, before the 4 s `lock_timeout`) aborts one side
+  with 40P01, which `classifyDbError` does not map: that side (the approval or the deletion)
+  answers **500**, not the retryable 503; nothing was written and a retry succeeds. An approval
+  without `playerId` locks only logins and is not part of this cycle. Not reordered: the record
+  after the team would cycle with a guardian accept by the same parent for the same record.
   **`…/decline`**: one status-guarded update, `childName` cleared, nothing written to the roster,
   no notification. Order of refusals on both: team 404, 403, request 404 (another team's id), 400.
 - **Not built (deliberate):** a requester cannot list or withdraw their own requests. A link is not
@@ -558,7 +573,10 @@ themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by 
   (Decline confirms); each request shows who would be added, who asked, and the asker's email on
   a line of its own. **Approve on a CHILD request** (#1072) opens an `ActionMenu` ("Add <child> to
   the roster") when the roster has records it could be: **Add as a new player** (the request as
-  before) and one "Same child as <player>, already on the roster" item per candidate, from
+  before) and one "Same child as <player>, already on the roster" item per candidate (with
+  "(#N)" after the name when the record has a jersey, jersey 0 included, as the roster row shows
+  it; each item is keyed by the player id through `ActionMenuItem.key`, so two records with the
+  same name are two rows; two same-named records without a jersey still read alike), from
   `utils/join-request-targets.ts#attachablePlayers` (members that are managed, not deleted and not
   in `team.guardianLinkedPlayerIds`; a record with the typed name first, then by name via
   `sortRosterMembers`). A SELF request, or a roster without such a record, approves at once as
@@ -615,8 +633,10 @@ themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by 
   while pending or after a decline, `maxUses` under concurrency, expired and revoked, the retry
   after the last use, the lapse, an un-claimed requester, both approval kinds, two concurrent
   approvals, deletion; #1072: approval onto an existing record, each 409 reason, a SELF request
-  with `playerId`, two coaches approving one request onto one record, and two requests onto one
-  record at once). The revoke-against-create race is argued from the shared lock, not
+  with `playerId`, two coaches approving one request onto one record (decided by the status
+  guard), two requests onto one record held behind the test's lock on the record until Postgres
+  shows both waiting, and a removal from the team committed while the approval waits at the
+  membership lock). The coach-deletion deadlock is not reproduced in a test. The revoke-against-create race is argued from the shared lock, not
   reproduced in a test. Mobile: `__tests__/hooks/useJoinLink.runtime.test.tsx`,
   `__tests__/app/join-request.test.tsx`, `__tests__/app/team-join-link.test.tsx`,
   `__tests__/utils/qr-path.test.ts`. Web: `web/__tests__/join-page.test.tsx`.

@@ -1160,6 +1160,7 @@
     "approveChoiceTitle": "Add {{name}} to the roster",
     "approveAsNewPlayer": "Add as a new player",
     "approveOntoPlayer": "Same child as {{player}}, already on the roster",
+    "approveOntoPlayerNumber": "Same child as {{player}} (#{{number}}), already on the roster",
     "linkedToPlayer": "{{parent}} is now linked to {{player}}",
     "decline": "Decline",
     "declineLabel": "Decline {{name}}",

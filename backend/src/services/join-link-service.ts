@@ -39,7 +39,7 @@ import {
   UnauthorizedError,
 } from '../utils/errors';
 import { hasTeamPermission } from '../utils/permissions';
-import { lockTeamRow } from '../utils/team-row-lock';
+import { lockTeamMemberRow, lockTeamRow } from '../utils/team-row-lock';
 import { lockUsers } from '../utils/user-row-lock';
 import { logger } from '../utils/logger';
 import { publicAppUrl } from '../utils/urls';
@@ -643,11 +643,18 @@ export class JoinLinkService {
    *    guardian (`GuardianService.linkGuardianLocked`, the guardian accept's
    *    code). That record is locked in the SAME `lockUsers` statement as the
    *    requester and the approver (User rows before Team, one id-ordered
-   *    statement, the order the guardian accept and account deletion use),
-   *    and re-judged behind every lock: still a live managed record, still on
-   *    this team, still without a guardian, else 409
+   *    statement; the per-child lock the guardian accept also takes on the
+   *    child), then the team row, then its `TeamMember` row
+   *    (`lockTeamMemberRow`, FOR UPDATE, so a removal cannot commit before
+   *    the link is written). Judged behind those locks: on this team first
+   *    (so an id from elsewhere only ever reads `not_on_team`), then a live
+   *    managed record, then no guardian yet; else 409
    *    `join_player_unavailable` and nothing is written. Two approvals onto
-   *    one record therefore leave exactly one guardian link.
+   *    one record therefore leave exactly one guardian link. This path is the
+   *    only one that holds a managed record's row and then waits for a team:
+   *    it can deadlock with deleting the coach who manages the record (known
+   *    residual, `utils/team-row-lock.ts`). Without `playerId` only logins
+   *    are locked, and that cycle cannot form.
    */
   static async approveRequest(
     teamId: string,
@@ -759,26 +766,30 @@ export class JoinLinkService {
 
   /**
    * Whether the roster record a coach chose can take a CHILD request (#1072),
-   * judged inside the approval's transaction, behind the record's row lock:
-   * a live managed record (not a login, not deleted), a member of this team,
-   * with no guardian linked yet (a child with any link has exactly one
-   * primary, so "no guardian" is "no primary guardian"). 409
-   * `join_player_unavailable` otherwise, which rolls the approval back.
+   * judged inside the approval's transaction, behind the record's User row
+   * lock and the team row lock:
+   *  1. a member of this team, checked by locking the `TeamMember` row
+   *     (`lockTeamMemberRow`), which also holds off a removal until commit.
+   *     First, so any id that is not on this team (unknown, a login or a
+   *     child elsewhere) answers `not_on_team` and tells the caller nothing
+   *     about it;
+   *  2. a live managed record (not a login, not deleted);
+   *  3. no guardian linked yet (a child with any link has exactly one
+   *     primary, so "no guardian" is "no primary guardian"); the User row
+   *     lock keeps this true until commit, since every guardian link writer
+   *     takes it.
+   * 409 `join_player_unavailable` otherwise, which rolls the approval back.
    */
   private static async assertAttachable(tx: Prisma.TransactionClient, teamId: string, playerId: string): Promise<void> {
+    if (!(await lockTeamMemberRow(tx, teamId, playerId))) {
+      throw new JoinPlayerUnavailableError('not_on_team');
+    }
     const player = await tx.user.findFirst({
       where: { id: playerId, deletedAt: null, isManaged: true },
       select: { id: true },
     });
     if (!player) {
       throw new JoinPlayerUnavailableError('not_managed');
-    }
-    const member = await tx.teamMember.findUnique({
-      where: { teamId_playerId: { teamId, playerId } },
-      select: { id: true },
-    });
-    if (!member) {
-      throw new JoinPlayerUnavailableError('not_on_team');
     }
     if ((await tx.guardian.count({ where: { childId: playerId } })) > 0) {
       throw new JoinPlayerUnavailableError('has_guardian');

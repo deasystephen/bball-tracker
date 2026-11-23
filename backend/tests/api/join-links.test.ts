@@ -1105,21 +1105,25 @@ describe('Team join links API (#210)', () => {
           async ({ select }: { select: Record<string, unknown> }) =>
             applySelect(requestRow({ kind: 'CHILD', status: 'ACCEPTED' }), select)
         );
-        mockPrisma.$queryRaw.mockImplementation(async () => [
-          { id: COACH_ID, deletedAt: null },
-          { id: PARENT_ID, deletedAt: null },
-          { id: EXISTING_ID, deletedAt: null },
-        ]);
+        // lockUsers / lockTeamRow find every row; lockTeamMemberRow finds the
+        // membership only when the record is on the team.
+        mockPrisma.$queryRaw.mockImplementation(async (sql: TemplateStringsArray) =>
+          sql.join('?').includes('"TeamMember"')
+            ? onTeam
+              ? [{ id: 'member-row' }]
+              : []
+            : [
+                { id: COACH_ID, deletedAt: null },
+                { id: PARENT_ID, deletedAt: null },
+                { id: EXISTING_ID, deletedAt: null },
+              ]
+        );
         mockPrisma.user.findFirst.mockImplementation(async ({ where }: { where: { id: string } }) => {
           if (where.id === EXISTING_ID) {
             return managed ? { id: EXISTING_ID } : null;
           }
           return { id: PARENT_ID, role: requesterRole };
         });
-        mockPrisma.teamMember.findUnique.mockImplementation(
-          async ({ where }: { where: { teamId_playerId?: { playerId: string } } }) =>
-            onTeam && where.teamId_playerId?.playerId === EXISTING_ID ? { id: 'member-row' } : null
-        );
         mockPrisma.guardian.count.mockReset();
         mockPrisma.guardian.count.mockResolvedValue(guardians);
         mockPrisma.guardian.findUnique.mockReset();
@@ -1196,9 +1200,28 @@ describe('Team join links API (#210)', () => {
         expect(mockPrisma.user.updateMany).not.toHaveBeenCalled();
       });
 
+      it('locks the membership row (FOR UPDATE) after the team row, then judges the record', async () => {
+        givenAttach();
+
+        await request(app).post(url).send({ playerId: EXISTING_ID });
+
+        const sqls = mockPrisma.$queryRaw.mock.calls.map(([sql]: [TemplateStringsArray]) => sql.join('?'));
+        const teamAt = sqls.findIndex((sql: string) => sql.includes('FROM "Team"'));
+        const memberAt = sqls.findIndex((sql: string) => sql.includes('FROM "TeamMember"'));
+        expect(teamAt).toBeGreaterThan(0);
+        expect(memberAt).toBeGreaterThan(teamAt);
+        expect(sqls[memberAt]).toContain('FOR UPDATE');
+        expect(JSON.stringify(mockPrisma.$queryRaw.mock.calls[memberAt].slice(1))).toBe(
+          JSON.stringify([TEAM_ID, EXISTING_ID])
+        );
+      });
+
       it.each([
         ['has_guardian', { guardians: 1 }],
         ['not_on_team', { onTeam: false }],
+        // Membership is judged first: an id not on this team never reveals what it is.
+        ['not_on_team', { onTeam: false, managed: false }],
+        ['not_on_team', { onTeam: false, guardians: 1 }],
         ['not_managed', { managed: false }],
       ] as const)('answers 409 join_player_unavailable (%s) behind the locks and writes no link', async (reason, options) => {
         givenAttach(options);

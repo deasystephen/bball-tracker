@@ -39,6 +39,8 @@ import {
   NotFoundError,
 } from '../../src/utils/errors';
 import { DbFixtures, type Org } from '../support/db-fixtures';
+import { backendPid, pause, track, waitForBlockedBy, type Tracked } from '../support/db-locks';
+import { lockUsers } from '../../src/utils/user-row-lock';
 
 jest.setTimeout(30000);
 
@@ -522,6 +524,9 @@ describe('JoinLinkService (real Postgres, #210)', () => {
       const parentId = await adult('dad');
       const requestId = await childRequest(link, parentId, `Same-${fx.run}`);
 
+      // What this proves: whichever order the two calls run in, the request's
+      // status guard lets exactly one through and the other answers 400; it
+      // does not by itself prove the record's lock (the next test does).
       const settled = await Promise.allSettled([
         JoinLinkService.approveRequest(club.teamId, requestId, coachId, { playerId }),
         JoinLinkService.approveRequest(club.teamId, requestId, secondCoachId, { playerId }),
@@ -541,10 +546,45 @@ describe('JoinLinkService (real Postgres, #210)', () => {
       const firstRequestId = await childRequest(link, firstParentId, `Two-${fx.run}`);
       const secondRequestId = await childRequest(link, secondParentId, `Two-${fx.run}`);
 
-      const settled = await Promise.allSettled([
-        JoinLinkService.approveRequest(club.teamId, firstRequestId, coachId, { playerId }),
-        JoinLinkService.approveRequest(club.teamId, secondRequestId, secondCoachId, { playerId }),
-      ]);
+      // Deterministic: the test holds the record's row lock, starts both
+      // approvals, waits until Postgres shows BOTH blocked on it (each has
+      // passed every unlocked read and is inside its transaction), and only
+      // then releases. So the two really contend, and the record's lock alone
+      // decides the outcome.
+      let calls: Tracked<unknown>[] = [];
+      await prisma.$transaction(
+        async (holder) => {
+          await lockUsers(holder, [playerId]);
+          const pid = await backendPid(holder);
+          calls = [
+            track(JoinLinkService.approveRequest(club.teamId, firstRequestId, coachId, { playerId })),
+            track(JoinLinkService.approveRequest(club.teamId, secondRequestId, secondCoachId, { playerId })),
+          ];
+          for (const call of calls) call.promise.catch(() => undefined);
+          // The first waiter queues on the row behind the holder; Postgres
+          // reports the second as blocked by that first waiter, so count the
+          // backends waiting on the holder directly or through one of those.
+          await waitForBlockedBy(holder, pid, { settled: calls[0] });
+          const deadline = Date.now() + 3000;
+          for (;;) {
+            await holder.$executeRaw`SELECT pg_stat_clear_snapshot()`;
+            const [{ n }] = await holder.$queryRaw<{ n: number }[]>`
+              WITH direct AS (
+                SELECT pid FROM pg_stat_activity WHERE ${pid}::int = ANY(pg_blocking_pids(pid))
+              )
+              SELECT count(*)::int AS n FROM pg_stat_activity a
+              WHERE ${pid}::int = ANY(pg_blocking_pids(a.pid))
+                 OR pg_blocking_pids(a.pid) && ARRAY(SELECT pid FROM direct)`;
+            if (n >= 2) break;
+            if (Date.now() > deadline || calls.some((call) => call.settled())) {
+              throw new Error(`expected both approvals waiting on the record lock, saw ${n}`);
+            }
+            await pause(25);
+          }
+        },
+        { timeout: 15_000 }
+      );
+      const settled = await Promise.allSettled(calls.map((call) => call.promise));
 
       expect(settled.filter((s) => s.status === 'fulfilled')).toHaveLength(1);
       const [lost] = settled.filter((s): s is PromiseRejectedResult => s.status === 'rejected');
@@ -563,6 +603,47 @@ describe('JoinLinkService (real Postgres, #210)', () => {
       const loserParentId = links[0].parentId === firstParentId ? secondParentId : firstParentId;
       expect((await prisma.user.findUniqueOrThrow({ where: { id: loserParentId } })).role).toBe('PLAYER');
       expect(await canAccessTeam(loserParentId, club.teamId)).toBe(false);
+    });
+
+    it('a removal from the team committing while the approval waits: 409 not_on_team, nothing linked', async () => {
+      const { club, coachId, link, playerId } = await setup('removed');
+      const parentId = await adult('late');
+      const requestId = await childRequest(link, parentId, `Removed-${fx.run}`);
+
+      // The test removes the record from the team (what TeamService.removePlayer
+      // does, which takes no User or Team lock) and keeps that uncommitted
+      // while the approval runs. Postgres must show the approval waiting on
+      // it holding its User and Team locks, i.e. at the membership lock; the
+      // removal then commits.
+      let approval: Tracked<unknown> | undefined;
+      let blocked: { relations: string[] }[] = [];
+      await prisma.$transaction(
+        async (holder) => {
+          await holder.teamMember.delete({ where: { teamId_playerId: { teamId: club.teamId, playerId } } });
+          const pid = await backendPid(holder);
+          approval = track(JoinLinkService.approveRequest(club.teamId, requestId, coachId, { playerId }));
+          approval.promise.catch(() => undefined);
+          blocked = await waitForBlockedBy(holder, pid, {
+            tables: ['User', 'Team', 'TeamJoinRequest'],
+            settled: approval,
+          });
+        },
+        { timeout: 15_000 }
+      );
+
+      expect(blocked).toHaveLength(1);
+      expect(blocked[0].relations).toEqual(expect.arrayContaining(['Team', 'TeamJoinRequest', 'User']));
+      await expect(approval!.promise).rejects.toMatchObject({
+        statusCode: 409,
+        code: 'join_player_unavailable',
+        details: { reason: 'not_on_team' },
+      });
+      expect(await prisma.guardian.count({ where: { childId: playerId } })).toBe(0);
+      expect(await prisma.teamJoinRequest.findUniqueOrThrow({ where: { id: requestId } })).toMatchObject({
+        status: 'PENDING',
+        childName: `Removed-${fx.run}`,
+      });
+      expect((await prisma.user.findUniqueOrThrow({ where: { id: parentId } })).role).toBe('PLAYER');
     });
 
     it('refuses a record that cannot take the request, and writes nothing', async () => {

@@ -419,6 +419,58 @@ describe('TeamJoinLinkScreen (#210)', () => {
       expect(mockShowToast).toHaveBeenCalledWith('Pat Park is now linked to riley  park', 'success');
     });
 
+    it('two records with the same name are two rows, told apart by the jersey (0 included)', async () => {
+      signIn({ id: 'coach-1', role: 'COACH' });
+      mockTeam = {
+        ...baseTeam,
+        members: [
+          member('p-twin-b', 'Riley Park'),
+          { ...member('p-twin-a', 'Riley Park'), jerseyNumber: 0 },
+        ],
+        guardianLinkedPlayerIds: [],
+      };
+      mockRequests = [childRequest];
+      mockApprove.mutateAsync.mockResolvedValueOnce(undefined);
+      const consoleError = jest.spyOn(console, 'error');
+      const { getByLabelText, getAllByRole } = render(<TeamJoinLinkScreen />);
+
+      fireEvent.press(getByLabelText('Approve Riley Park'));
+
+      const offered = getAllByRole('button')
+        .map((node) => node.props.accessibilityLabel as string)
+        .filter((label) => /^Same child as /.test(label));
+      // The numbered record sorts first (same name, then jersey, nulls last).
+      expect(offered).toEqual([
+        'Same child as Riley Park (#0), already on the roster',
+        'Same child as Riley Park, already on the roster',
+      ]);
+      // No duplicate React keys.
+      expect(consoleError.mock.calls.flat().join(' ')).not.toMatch(/same key/);
+
+      fireEvent.press(getByLabelText('Same child as Riley Park, already on the roster'));
+
+      await waitFor(() =>
+        expect(mockApprove.mutateAsync).toHaveBeenCalledWith({ teamId: 't1', request: childRequest, playerId: 'p-twin-b' })
+      );
+    });
+
+    it('keys menu rows by player id, so two identical labels are still two rows', () => {
+      signIn({ id: 'coach-1', role: 'COACH' });
+      mockTeam = {
+        ...baseTeam,
+        members: [member('p-x', 'Riley Park'), member('p-y', 'Riley Park')],
+        guardianLinkedPlayerIds: [],
+      };
+      mockRequests = [childRequest];
+      const consoleError = jest.spyOn(console, 'error');
+      const { getByLabelText, getAllByLabelText } = render(<TeamJoinLinkScreen />);
+
+      fireEvent.press(getByLabelText('Approve Riley Park'));
+
+      expect(getAllByLabelText('Same child as Riley Park, already on the roster')).toHaveLength(2);
+      expect(consoleError.mock.calls.flat().join(' ')).not.toMatch(/same key/);
+    });
+
     it('"Add as a new player" approves as before', async () => {
       signIn({ id: 'coach-1', role: 'COACH' });
       mockTeam = rosterTeam;
