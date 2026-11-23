@@ -2348,6 +2348,24 @@ describe('InvitationService', () => {
       expect(result2.guardianReason).toBe('Failed to invite guardian');
     });
 
+    it('a jersey unique-index violation is a plain 409 and the roster write is not attempted twice (#1087 backstop)', async () => {
+      const { coach, team } = setupCoachTeam();
+      // An unclaimed row holds the email, so the email-race catch would find a "winner".
+      const existing = { ...createPlayer({ email: 'jane@example.com' }), workosUserId: null, managedById: null };
+      (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(existing);
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.$transaction as jest.Mock).mockRejectedValue(uniqueViolation('TeamMember_teamId_jerseyNumber_key'));
+
+      const error = await InvitationService.addRosterPlayer(
+        team.id,
+        { name: 'Jane', playerEmail: 'jane@example.com', jerseyNumber: 8 },
+        coach.id
+      ).catch((e) => e);
+
+      expect(error).toMatchObject({ statusCode: 409, message: 'Another player on this team already wears number 8.' });
+      expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+    });
+
     it('P2002 retry: the upload is checked once for both attempts, and untagged when the race winner takes the photo (#1005)', async () => {
       const { coach, team } = setupCoachTeam();
       // The pre-read row already stores this URL (so the first attempt skips the

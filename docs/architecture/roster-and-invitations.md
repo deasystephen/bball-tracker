@@ -653,9 +653,12 @@ themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by 
   reached the index without it is mapped by `utils/jersey-number.ts#orJerseyConflict` (around Add
   Player, `addPlayer` and the edit) to a plain 409 with no holder, never a 500 and never a retry.
   The accept paths are not wrapped: their number is decided behind the lock and dropped when
-  taken. Production was checked before the migration was written (read-only one-off task,
-  2026-11-22: two pairs, both renumbered by the owner; none left among 14 members). The query, for
-  any other database where the migration fails:
+  taken. **The migration cannot fail on existing duplicates:** it first clears the number of every
+  later holder of a shared number (the member who has held it longest keeps it), because
+  `docker/entrypoint.sh` runs `migrate deploy` on every start and a failed migration would stop
+  the single API task from starting at all. Production had none (read-only one-off task,
+  2026-11-22, run after the rule was live: two pairs found earlier, both renumbered by the owner,
+  none left among 14 members), so there it changed nothing. The query that lists such pairs:
 
   ```sql
   SELECT tm."teamId", t.name AS team, tm."jerseyNumber", count(*) AS holders,

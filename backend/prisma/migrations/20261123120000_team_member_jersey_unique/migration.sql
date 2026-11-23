@@ -6,13 +6,30 @@
 -- number of members may have NULL. Prisma cannot express a partial unique
 -- index, so it is hand-written and `schema.prisma` carries only a comment.
 --
--- Production was checked for duplicates before this migration was written
--- (read-only query, 2026-11-22: none among 14 members after the owner
--- renumbered two pairs). If this statement fails on another database, find
--- the pairs with:
---   SELECT "teamId", "jerseyNumber", count(*) FROM "TeamMember"
---   WHERE "jerseyNumber" IS NOT NULL GROUP BY 1, 2 HAVING count(*) > 1;
--- and renumber one of each pair ("Edit jersey & position").
+-- Step 1 makes the migration safe on any database. `docker/entrypoint.sh` runs
+-- `prisma migrate deploy` on every start of the single API task, so a failed
+-- CREATE UNIQUE INDEX would leave a failed migration that blocks every later
+-- start, the previous image's included. Where two or more members of a team
+-- share a number, the one who has held it longest keeps it and the others are
+-- left with no number (the state the accept path already produces for a
+-- number taken meanwhile); the coach sets a new one with "Edit jersey &
+-- position". Production had no such pair when this was written (read-only
+-- check, 2026-11-22, after the rule was live), so there this step changes
+-- nothing; it matters for development databases with rows from before the rule.
+
+-- Step 1: clear the later holders of a shared number.
+UPDATE "TeamMember" AS later
+SET "jerseyNumber" = NULL
+WHERE later."jerseyNumber" IS NOT NULL
+  AND EXISTS (
+    SELECT 1
+    FROM "TeamMember" AS earlier
+    WHERE earlier."teamId" = later."teamId"
+      AND earlier."jerseyNumber" = later."jerseyNumber"
+      AND (earlier."createdAt", earlier."id") < (later."createdAt", later."id")
+  );
+
+-- Step 2: the guarantee.
 CREATE UNIQUE INDEX "TeamMember_teamId_jerseyNumber_key"
   ON "TeamMember"("teamId", "jerseyNumber")
   WHERE "jerseyNumber" IS NOT NULL;

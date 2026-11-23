@@ -37,10 +37,15 @@ import { publicAppUrl } from '../utils/urls';
 import { EMAIL_SUPPRESSION_CLEARED } from '../utils/email-suppression';
 import { emailEquals } from '../utils/email-match';
 import { USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
-import { createOrConflict, isUniqueViolation } from '../utils/prisma-errors';
+import { createOrConflict, isUniqueViolation, violatedConstraint } from '../utils/prisma-errors';
 import { keyShareUsers, lockUsers } from '../utils/user-row-lock';
 import { lockTeamOrNotFound, lockTeamRow } from '../utils/team-row-lock';
-import { assertJerseyNumberFree, findJerseyHolder, orJerseyConflict } from '../utils/jersey-number';
+import {
+  JERSEY_NUMBER_INDEX,
+  assertJerseyNumberFree,
+  findJerseyHolder,
+  orJerseyConflict,
+} from '../utils/jersey-number';
 import {
   assertOwnUploadUrl,
   checkAvatarUpload,
@@ -610,6 +615,11 @@ export class InvitationService {
     err: unknown
   ): Promise<Prisma.UserGetPayload<Record<string, never>>> {
     if (!isUniqueViolation(err)) {
+      throw err;
+    }
+    // A jersey-number violation is not an email race: running the roster
+    // write again would only fail the same way (#1087; never a retry).
+    if (violatedConstraint(err).index === JERSEY_NUMBER_INDEX) {
       throw err;
     }
     const racedUser = await prisma.user.findFirst({
