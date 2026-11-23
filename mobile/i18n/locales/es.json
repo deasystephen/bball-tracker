@@ -1171,7 +1171,19 @@
     "turnOffConfirm": "Desactivar enlace",
     "created": "Enlace para unirse creado",
     "replaced": "Enlace nuevo creado. El anterior ya no funciona.",
-    "refreshFailed": "No se pudo actualizar. Se muestra lo que ya estaba cargado."
+    "refreshFailed": "No se pudo actualizar. Se muestra lo que ya estaba cargado.",
+    "settingsTitle": "Opciones del enlace",
+    "settingsNextTitle": "Opciones para un enlace nuevo",
+    "expiryLabel": "Cuánto tiempo funciona el enlace",
+    "expiryPrefix": "El enlace funciona durante ",
+    "days_one": "{{count}} día",
+    "days_other": "{{count}} días",
+    "capLabel": "Cuántas solicitudes acepta",
+    "capPrefix": "Límite de solicitudes: ",
+    "noLimit": "Sin límite",
+    "capHint": "Las solicitudes rechazadas no cuentan para el límite.",
+    "usage_one": "{{used}} de {{count}} plaza ocupada.",
+    "usage_other": "{{used}} de {{count}} plazas ocupadas."
   },
   "join": {
     "loading": "Cargando enlace para unirse…",

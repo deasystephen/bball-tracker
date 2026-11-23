@@ -74,13 +74,16 @@ const JOIN_LINK_NOT_FOUND = 'Join link not found';
 const JOIN_REQUEST_NOT_FOUND = 'Join request not found';
 const NO_ROSTER_PERMISSION = "You do not have permission to manage this team's roster";
 
-/** Scalar fields of a link that carry no secret. */
+/**
+ * Scalar fields of a link that carry no secret. The stored `useCount` (every
+ * request ever created through the link) is deliberately not read: the cap and
+ * every payload count the requests holding a slot now (`countUses`, #1073).
+ */
 const JOIN_LINK_SELECT = {
   id: true,
   teamId: true,
   expiresAt: true,
   maxUses: true,
-  useCount: true,
   createdAt: true,
 } satisfies Prisma.TeamJoinLinkSelect;
 
@@ -100,7 +103,6 @@ const JOIN_LINK_PUBLIC_SELECT = {
   teamId: true,
   expiresAt: true,
   maxUses: true,
-  useCount: true,
   revokedAt: true,
   team: { select: { name: true } },
 } satisfies Prisma.TeamJoinLinkSelect;
@@ -151,7 +153,13 @@ export type JoinRequestSummary = Prisma.TeamJoinRequestGetPayload<{ select: type
 export type JoinRequestListItem = Prisma.TeamJoinRequestGetPayload<{ select: typeof JOIN_REQUEST_LIST_SELECT }>;
 type JoinRequestDecisionRow = Prisma.TeamJoinRequestGetPayload<{ select: typeof JOIN_REQUEST_DECISION_SELECT }>;
 
-/** The team's live link for a roster manager. `url` carries the token; there is no separate token field. */
+/**
+ * The team's live link for a roster manager. `url` carries the token; there is
+ * no separate token field. `useCount` is the number of requests that hold one
+ * of the link's `maxUses` slots now (`countUses`, pending plus approved), not
+ * the stored `TeamJoinLink.useCount` column, which counts every request ever
+ * created through the link.
+ */
 export interface JoinLinkView {
   id: string;
   teamId: string;
@@ -189,16 +197,16 @@ export interface ApproveJoinRequestResult {
   linkedExisting: boolean;
 }
 
-function toView(row: JoinLinkManagerRow): JoinLinkView {
+function toView(row: JoinLinkManagerRow, used: number): JoinLinkView {
   const { token, ...rest } = row;
-  return { ...rest, url: `${publicAppUrl()}/join/${token}` };
+  return { ...rest, useCount: used, url: `${publicAppUrl()}/join/${token}` };
 }
 
-function linkState(row: Pick<JoinLinkPublicRow, 'expiresAt' | 'maxUses' | 'useCount'>, now: Date): JoinLinkState {
+function linkState(row: Pick<JoinLinkPublicRow, 'expiresAt' | 'maxUses'>, used: number, now: Date): JoinLinkState {
   if (row.expiresAt <= now) {
     return 'expired';
   }
-  if (row.maxUses !== null && row.useCount >= row.maxUses) {
+  if (row.maxUses !== null && used >= row.maxUses) {
     return 'full';
   }
   return 'active';
@@ -207,6 +215,29 @@ function linkState(row: Pick<JoinLinkPublicRow, 'expiresAt' | 'maxUses' | 'useCo
 /** The moment before which a PENDING request has lapsed. */
 function staleBefore(now: Date = new Date()): Date {
   return new Date(now.getTime() - JOIN_REQUEST_TTL_DAYS * 24 * 60 * 60 * 1000);
+}
+
+/**
+ * The requests that hold one of a link's `maxUses` slots (#1073): PENDING and
+ * not yet lapsed, or ACCEPTED (approved). A declined (REJECTED) or lapsed
+ * (EXPIRED, or PENDING past `JOIN_REQUEST_TTL_DAYS` and not flipped yet)
+ * request frees its slot; CANCELLED is never written for a join request; a
+ * request deleted with its requester's account frees its slot too.
+ */
+function slotHoldersWhere(linkId: string, now: Date): Prisma.TeamJoinRequestWhereInput {
+  return {
+    linkId,
+    OR: [{ status: 'ACCEPTED' }, { status: 'PENDING', createdAt: { gte: staleBefore(now) } }],
+  };
+}
+
+/** How many of a link's `maxUses` slots are taken now (see `slotHoldersWhere`). */
+async function countUses(
+  client: Prisma.TransactionClient | typeof prisma,
+  linkId: string,
+  now: Date = new Date()
+): Promise<number> {
+  return client.teamJoinRequest.count({ where: slotHoldersWhere(linkId, now) });
 }
 
 /** Names compared the way a coach reads them: trimmed, inner whitespace collapsed, case ignored. */
@@ -291,7 +322,8 @@ export class JoinLinkService {
       revokedCount,
     });
 
-    return toView(link);
+    // A new link has no requests yet.
+    return toView(link, 0);
   }
 
   /**
@@ -306,7 +338,7 @@ export class JoinLinkService {
       orderBy: { createdAt: 'desc' },
       select: JOIN_LINK_MANAGER_SELECT,
     });
-    return link ? toView(link) : null;
+    return link ? toView(link, await countUses(prisma, link.id)) : null;
   }
 
   /**
@@ -374,7 +406,20 @@ export class JoinLinkService {
     if (link.revokedAt !== null) {
       throw new NotFoundError(JOIN_LINK_NOT_FOUND);
     }
-    return { linkId: link.id, teamName: link.team.name, state: linkState(link, new Date()) };
+    return { linkId: link.id, teamName: link.team.name, state: await this.currentState(link) };
+  }
+
+  /**
+   * The link's state for a holder. Counts the slots only when there is a cap
+   * and the link has not expired (an uncapped link never reads its requests).
+   */
+  private static async currentState(
+    link: Pick<JoinLinkPublicRow, 'id' | 'expiresAt' | 'maxUses'>,
+    client: Prisma.TransactionClient | typeof prisma = prisma
+  ): Promise<JoinLinkState> {
+    const now = new Date();
+    const used = link.maxUses !== null && link.expiresAt > now ? await countUses(client, link.id, now) : 0;
+    return linkState(link, used, now);
   }
 
   /**
@@ -391,9 +436,12 @@ export class JoinLinkService {
    * told to ask the coach for a new link. Only a NEW request needs a live
    * link (404 revoked, 410 expired or full), then:
    *  - the per-account cap (pending plus recently declined);
-   *  - one use of the link, taken by a single conditional UPDATE (not
-   *    revoked, not expired, under `maxUses`), so the cap holds under
-   *    concurrency;
+   *  - the link's row lock, taken by a conditional UPDATE (not revoked, not
+   *    expired) that also adds one to the stored `useCount` total; then,
+   *    behind that lock and in a statement of its own (so it sees every
+   *    request committed by a caller that held the lock before), the cap:
+   *    `maxUses` counts the link's pending plus approved requests (#1073), so
+   *    two callers asking for the last slot leave exactly one request;
    *  - the PENDING request.
    * Nothing is added to the roster here; a roster manager decides.
    */
@@ -462,7 +510,9 @@ export class JoinLinkService {
       if (link.revokedAt !== null) {
         throw new NotFoundError(JOIN_LINK_NOT_FOUND);
       }
-      const state = linkState(link, new Date());
+      // Unlocked first look, so a link that is plainly full answers 410 before
+      // the per-account cap; the authoritative count is taken under the lock.
+      const state = await this.currentState(link, tx);
       if (state !== 'active') {
         throw new JoinLinkInactiveError(state);
       }
@@ -475,24 +525,32 @@ export class JoinLinkService {
         );
       }
 
-      // One use, taken atomically: a link revoked, expired or filled since
-      // the unlocked read above matches no row. The columns are TIMESTAMP(3)
-      // holding UTC (as Prisma writes them), so the comparison is made in UTC
-      // whatever the session's time zone is.
+      // The link's row lock, taken by the UPDATE that adds to the stored
+      // total: a link revoked or expired since the unlocked read above
+      // matches no row (Postgres re-checks the row after waiting for the
+      // lock). The columns are TIMESTAMP(3) holding UTC (as Prisma writes
+      // them), so the comparison is made in UTC whatever the session's time
+      // zone is. The conflicting lock is the one another ask holds, so two
+      // asks through one link run their cap check one after the other.
       const taken = await tx.$executeRaw`
         UPDATE "TeamJoinLink"
         SET "useCount" = "useCount" + 1, "updatedAt" = (NOW() AT TIME ZONE 'UTC')
         WHERE "id" = ${link.id}
           AND "revokedAt" IS NULL
-          AND "expiresAt" > (NOW() AT TIME ZONE 'UTC')
-          AND ("maxUses" IS NULL OR "useCount" < "maxUses")`;
+          AND "expiresAt" > (NOW() AT TIME ZONE 'UTC')`;
       if (taken === 0) {
         const fresh = await tx.teamJoinLink.findUnique({ where: { id: link.id }, select: JOIN_LINK_PUBLIC_SELECT });
         if (!fresh || fresh.revokedAt !== null) {
           throw new NotFoundError(JOIN_LINK_NOT_FOUND);
         }
-        const freshState = linkState(fresh, new Date());
-        throw new JoinLinkInactiveError(freshState === 'active' ? 'full' : freshState);
+        throw new JoinLinkInactiveError('expired');
+      }
+      // The cap, behind the lock, in a new statement: under READ COMMITTED it
+      // sees every request committed by an ask that held the lock before this
+      // one. `maxUses` never changes after the link is created, so the value
+      // read above is current. A refusal rolls the stored total back with it.
+      if (link.maxUses !== null && (await countUses(tx, link.id)) >= link.maxUses) {
+        throw new JoinLinkInactiveError('full');
       }
 
       const request = await tx.teamJoinRequest.create({

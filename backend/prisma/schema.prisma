@@ -537,9 +537,12 @@ model TeamJoinLink {
   /// Null once the creating account is deleted (account-service purge).
   createdById String?
   expiresAt   DateTime
-  /// Cap on the join requests the link accepts; null = no cap.
+  /// Cap on the link's pending plus approved join requests (declined and
+  /// lapsed ones free their slot, #1073); null = no cap. Counted from the
+  /// TeamJoinRequest rows, never from `useCount`.
   maxUses     Int?
-  /// Join requests created through the link (approved or not).
+  /// Every join request ever created through the link (approved or not); a
+  /// running total for the data export, not read by the cap or any payload.
   useCount    Int       @default(0)
   revokedAt   DateTime?
   createdAt   DateTime  @default(now())

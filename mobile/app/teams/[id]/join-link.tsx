@@ -6,6 +6,12 @@
  * waits here until someone who may manage the roster approves or declines
  * it. The screen is for those callers only (`canManageRoster`); the API is
  * the authority (403).
+ *
+ * A new link takes two settings (#1073), as preset pills: how long it works
+ * (default 14 days) and how many requests it takes (default no limit). The
+ * defaults are the API's, so a coach who touches nothing gets what the link
+ * always did. The cap counts pending plus approved requests; a declined one
+ * frees its spot.
  */
 
 import React, { useState } from 'react';
@@ -20,6 +26,7 @@ import {
   LoadingSpinner,
   ErrorState,
   Card,
+  SortPills,
 } from '../../../components';
 import { QrCode } from '../../../components/QrCode';
 import { ActionMenu, type ActionMenuItem } from '../../../components/ActionMenu';
@@ -34,6 +41,9 @@ import {
   useJoinRequests,
   useApproveJoinRequest,
   useDeclineJoinRequest,
+  JOIN_LINK_DEFAULT_EXPIRES_DAYS,
+  JOIN_LINK_EXPIRY_PRESETS,
+  JOIN_LINK_MAX_USES_PRESETS,
   type JoinRequestRow,
 } from '../../../hooks/useJoinLink';
 import { useTheme } from '../../../hooks/useTheme';
@@ -49,6 +59,9 @@ import { formatCalendarDate } from '../../../utils/format-date';
 import { MIN_TOUCH_TARGET } from '../../../utils/touch-target';
 
 const QR_SIZE = 220;
+
+/** The "No limit" pill's key; every other cap pill is keyed by its number. */
+const NO_LIMIT = 'none';
 
 export default function TeamJoinLinkScreen() {
   const router = useRouter();
@@ -96,10 +109,22 @@ export default function TeamJoinLinkScreen() {
   const approve = useApproveJoinRequest();
   const decline = useDeclineJoinRequest();
 
+  // Settings for the next link created here (create, or New link).
+  const [expiresInDays, setExpiresInDays] = useState<number>(JOIN_LINK_DEFAULT_EXPIRES_DAYS);
+  const [maxUses, setMaxUses] = useState<number | null>(null);
+  const expiryOptions = JOIN_LINK_EXPIRY_PRESETS.map((days) => ({
+    key: String(days),
+    label: t('joinLink.days', { count: days }),
+  }));
+  const capOptions = [
+    { key: NO_LIMIT, label: t('joinLink.noLimit') },
+    ...JOIN_LINK_MAX_USES_PRESETS.map((cap) => ({ key: String(cap), label: String(cap) })),
+  ];
+
   const handleCreate = async () => {
     const replacing = link != null;
     try {
-      await createLink.mutateAsync({ teamId: id });
+      await createLink.mutateAsync({ teamId: id, data: { expiresInDays, maxUses } });
       toast.showToast(replacing ? t('joinLink.replaced') : t('joinLink.created'), 'success');
     } catch (err) {
       toast.showToast(getApiErrorMessage(err, t('joinLink.createFailed')), 'error');
@@ -243,6 +268,37 @@ export default function TeamJoinLinkScreen() {
   const deciding = approve.isPending || decline.isPending;
   const full = link != null && link.maxUses != null && link.useCount >= link.maxUses;
 
+  const settings = (
+    <View style={styles.settings} testID="join-link-settings">
+      <ThemedText variant="body" heading>
+        {link ? t('joinLink.settingsNextTitle') : t('joinLink.settingsTitle')}
+      </ThemedText>
+      <ThemedText variant="caption" color="textSecondary">
+        {t('joinLink.expiryLabel')}
+      </ThemedText>
+      <SortPills
+        options={expiryOptions}
+        selected={String(expiresInDays)}
+        onSelect={(key) => setExpiresInDays(Number(key))}
+        labelPrefix={t('joinLink.expiryPrefix')}
+        style={styles.pills}
+      />
+      <ThemedText variant="caption" color="textSecondary">
+        {t('joinLink.capLabel')}
+      </ThemedText>
+      <SortPills
+        options={capOptions}
+        selected={maxUses === null ? NO_LIMIT : String(maxUses)}
+        onSelect={(key) => setMaxUses(key === NO_LIMIT ? null : Number(key))}
+        labelPrefix={t('joinLink.capPrefix')}
+        style={styles.pills}
+      />
+      <ThemedText variant="caption" color="textSecondary">
+        {t('joinLink.capHint')}
+      </ThemedText>
+    </View>
+  );
+
   return (
     <ThemedView variant="background" style={styles.container}>
       <View
@@ -292,6 +348,11 @@ export default function TeamJoinLinkScreen() {
                   ? t('joinLink.full', { count: link.useCount })
                   : t('joinLink.expires', { date: formatCalendarDate(link.expiresAt) })}
               </ThemedText>
+              {link.maxUses != null && !full && (
+                <ThemedText variant="caption" color="textSecondary" style={styles.centered}>
+                  {t('joinLink.usage', { used: link.useCount, count: link.maxUses })}
+                </ThemedText>
+              )}
               <Button
                 title={t('joinLink.share')}
                 onPress={() => void handleShare(link.url, team.name)}
@@ -299,6 +360,7 @@ export default function TeamJoinLinkScreen() {
                 testID="join-link-share"
                 fullWidth
               />
+              {settings}
               <View style={styles.actionButtons}>
                 <Button
                   title={t('joinLink.newLink')}
@@ -321,14 +383,17 @@ export default function TeamJoinLinkScreen() {
               </View>
             </>
           ) : (
-            <Button
-              title={t('joinLink.create')}
-              onPress={() => void handleCreate()}
-              loading={createLink.isPending}
-              disabled={createLink.isPending}
-              testID="join-link-create"
-              fullWidth
-            />
+            <>
+              {settings}
+              <Button
+                title={t('joinLink.create')}
+                onPress={() => void handleCreate()}
+                loading={createLink.isPending}
+                disabled={createLink.isPending}
+                testID="join-link-create"
+                fullWidth
+              />
+            </>
           )}
         </Card>
 
@@ -426,6 +491,8 @@ const styles = StyleSheet.create({
   qrWrap: { alignItems: 'center', marginBottom: spacing.sm },
   centered: { textAlign: 'center', marginBottom: spacing.xs },
   primaryAction: { marginTop: spacing.md },
+  settings: { gap: spacing.xs, marginTop: spacing.lg, marginBottom: spacing.md },
+  pills: { flexWrap: 'wrap', marginBottom: spacing.xs },
   actionButtons: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
   actionButton: { flex: 1 },
   sectionHeader: {

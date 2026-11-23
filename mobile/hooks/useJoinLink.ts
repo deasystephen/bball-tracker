@@ -13,7 +13,11 @@ import { trackEvent, AnalyticsEvents } from '../services/analytics';
 import type { GuardianRelationship } from '../../shared/types';
 import { gameKeys, teamKeys } from './query-keys';
 
-/** The team's live link, as roster managers receive it. `url` is what gets shared. */
+/**
+ * The team's live link, as roster managers receive it. `url` is what gets
+ * shared. `useCount` is the requests holding one of the `maxUses` slots now
+ * (pending plus approved; a declined or lapsed request frees its slot, #1073).
+ */
 export interface JoinLink {
   id: string;
   teamId: string;
@@ -23,6 +27,18 @@ export interface JoinLink {
   useCount: number;
   createdAt: string;
 }
+
+/**
+ * Link settings a coach picks from (#1073), kept inside the API's bounds
+ * (`backend/src/api/join/schemas.ts`: `expiresInDays` 1 to 30, `maxUses` 1 to
+ * 500 or null). The defaults are the API's own: 14 days, no cap.
+ */
+export const JOIN_LINK_DEFAULT_EXPIRES_DAYS = 14;
+export const JOIN_LINK_MAX_EXPIRES_DAYS = 30;
+export const JOIN_LINK_MAX_USES = 500;
+export const JOIN_LINK_EXPIRY_PRESETS = [1, 7, 14, 30] as const;
+/** Request caps offered besides "No limit" (null). */
+export const JOIN_LINK_MAX_USES_PRESETS = [10, 20, 50] as const;
 
 export type JoinRequestKind = 'SELF' | 'CHILD';
 
@@ -108,6 +124,8 @@ export function useCreateJoinLink() {
         team_id: variables.teamId,
         link_id: link.id,
         has_max_uses: link.maxUses != null,
+        max_uses: link.maxUses,
+        expires_in_days: variables.data?.expiresInDays ?? JOIN_LINK_DEFAULT_EXPIRES_DAYS,
       });
       // The screen polls this query: a read that started before the create
       // must not land after it and put the replaced link back on screen.
