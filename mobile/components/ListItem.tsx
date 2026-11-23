@@ -25,6 +25,9 @@ interface ListItemProps extends Omit<TouchableOpacityProps, 'style'> {
    * Rendered on the subtitle's line, after it (or alone when there is no
    * subtitle), wrapping to a line of its own when both do not fit. For a
    * status chip that must not take its width from the title (#1095).
+   * For rows that are NOT pressable: with `onPress` the row is one
+   * accessibility element labelled from title and subtitle, which hides the
+   * accessory from VoiceOver and Maestro.
    */
   subtitleAccessory?: React.ReactNode;
   /** Lines the title may use before it truncates (default 1). */
@@ -77,7 +80,7 @@ export const ListItem: React.FC<ListItemProps> = ({
         </ThemedText>
         {subtitleAccessory ? (
           <View style={styles.subtitleRow}>
-            {subtitle && (
+            {subtitle ? (
               <ThemedText
                 variant="caption"
                 color="textSecondary"
@@ -86,21 +89,19 @@ export const ListItem: React.FC<ListItemProps> = ({
               >
                 {subtitle}
               </ThemedText>
-            )}
+            ) : null}
             {subtitleAccessory}
           </View>
-        ) : (
-          subtitle && (
-            <ThemedText
-              variant="caption"
-              color="textSecondary"
-              style={styles.subtitle}
-              numberOfLines={1}
-            >
-              {subtitle}
-            </ThemedText>
-          )
-        )}
+        ) : subtitle ? (
+          <ThemedText
+            variant="caption"
+            color="textSecondary"
+            style={styles.subtitle}
+            numberOfLines={1}
+          >
+            {subtitle}
+          </ThemedText>
+        ) : null}
       </View>
       {rightElement && <View style={styles.rightElement}>{rightElement}</View>}
     </View>

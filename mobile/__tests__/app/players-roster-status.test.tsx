@@ -14,6 +14,7 @@ import ManagePlayersScreen from '../../app/teams/[id]/players';
 import { useAuthStore } from '../../store/auth-store';
 import type { Team, TeamStaff } from '../../hooks/useTeams';
 import { i18n } from '../../i18n';
+import { spacing } from '../../theme';
 
 const mockRouter = { replace: jest.fn(), push: jest.fn(), back: jest.fn(), canGoBack: jest.fn(() => true) };
 const mockShowToast = jest.fn();
@@ -929,37 +930,91 @@ describe('ManagePlayersScreen — roster status and actions', () => {
         },
       });
 
-    it('Add Player shows the refusal once, on the jersey field scrolled into view, and typing clears it', async () => {
-      mockAddRosterPlayer.mutateAsync.mockRejectedValue(jerseyTaken());
-      const scrollTo = jest.spyOn(ScrollView.prototype, 'scrollTo');
-      const screen = render(<ManagePlayersScreen />);
-      const { getByTestId, getByLabelText, findByText, queryByText } = screen;
-
-      fireEvent.press(getByTestId('add-player-button'));
-      fireEvent.press(getByLabelText(AGE_YES));
-      fireEvent.changeText(getByTestId('add-player-name-input'), 'New Kid');
-      fireEvent.changeText(getByTestId('add-player-jersey-input'), '8');
-      // The card at y=40 in the scroll content, the jersey field at y=300 in the card.
-      fireEvent(getByTestId('add-player-jersey-field'), 'layout', {
+    /** Fires the layouts the scroll-into-view needs: card at y=40, the field at y=300 in it. */
+    const layOut = (screen: ReturnType<typeof render>, fieldTestId: string, viewport?: number) => {
+      fireEvent(screen.getByTestId(fieldTestId), 'layout', {
         nativeEvent: { layout: { x: 0, y: 300, width: 300, height: 90 } },
       });
-      fireEvent(getByTestId('roster-form-card'), 'layout', {
+      fireEvent(screen.getByTestId('roster-form-card'), 'layout', {
         nativeEvent: { layout: { x: 0, y: 40, width: 340, height: 900 } },
       });
-      fireEvent.press(getByTestId('add-player-submit'));
+      if (viewport != null) {
+        fireEvent(screen.UNSAFE_getByType(ScrollView), 'layout', {
+          nativeEvent: { layout: { x: 0, y: 0, width: 390, height: viewport } },
+        });
+      }
+    };
 
-      const message = 'Number 8 is already worn by Ada Active. Pick another number or leave it blank.';
-      expect(await findByText(message)).toBeTruthy();
-      // Once: no toast, it landed on top of the inline error (#1095).
-      expect(mockShowToast).not.toHaveBeenCalled();
-      // The field is brought into view, a little above its label.
-      expect(scrollTo).toHaveBeenCalledWith({ y: 340 - 16, animated: true });
-      scrollTo.mockRestore();
-      // The form stays open with what the coach typed.
-      expect(getByTestId('add-player-name-input').props.value).toBe('New Kid');
+    describe('scrolling the jersey field into view', () => {
+      let scrollTo: jest.SpyInstance;
+      beforeEach(() => {
+        scrollTo = jest.spyOn(ScrollView.prototype, 'scrollTo');
+      });
+      afterEach(() => {
+        scrollTo.mockRestore();
+      });
 
-      fireEvent.changeText(getByTestId('add-player-jersey-input'), '9');
-      expect(queryByText(message)).toBeNull();
+      it('Add Player shows the refusal once, on the jersey field scrolled into view, and typing clears it', async () => {
+        mockAddRosterPlayer.mutateAsync.mockRejectedValue(jerseyTaken());
+        const screen = render(<ManagePlayersScreen />);
+        const { getByTestId, getByLabelText, findByText, queryByText } = screen;
+
+        fireEvent.press(getByTestId('add-player-button'));
+        fireEvent.press(getByLabelText(AGE_YES));
+        fireEvent.changeText(getByTestId('add-player-name-input'), 'New Kid');
+        fireEvent.changeText(getByTestId('add-player-jersey-input'), '8');
+        // The window has not been laid out (height 0), so the field counts as out of view.
+        layOut(screen, 'add-player-jersey-field');
+        fireEvent.press(getByTestId('add-player-submit'));
+
+        const message = 'Number 8 is already worn by Ada Active. Pick another number or leave it blank.';
+        expect(await findByText(message)).toBeTruthy();
+        // Once: no toast, it landed on top of the inline error (#1095).
+        expect(mockShowToast).not.toHaveBeenCalled();
+        // The field is brought into view, a little above its label.
+        expect(scrollTo).toHaveBeenCalledWith({ y: 340 - spacing.md, animated: true });
+        // The form stays open with what the coach typed.
+        expect(getByTestId('add-player-name-input').props.value).toBe('New Kid');
+
+        fireEvent.changeText(getByTestId('add-player-jersey-input'), '9');
+        expect(queryByText(message)).toBeNull();
+      });
+
+      it('does not scroll when the jersey field is already in view', async () => {
+        mockAddRosterPlayer.mutateAsync.mockRejectedValue(jerseyTaken());
+        const screen = render(<ManagePlayersScreen />);
+
+        fireEvent.press(screen.getByTestId('add-player-button'));
+        fireEvent.press(screen.getByLabelText(AGE_YES));
+        fireEvent.changeText(screen.getByTestId('add-player-name-input'), 'New Kid');
+        fireEvent.changeText(screen.getByTestId('add-player-jersey-input'), '8');
+        // Field spans 340-430 of the content; the window shows 0-800.
+        layOut(screen, 'add-player-jersey-field', 800);
+        fireEvent.press(screen.getByTestId('add-player-submit'));
+
+        expect(
+          await screen.findByText('Number 8 is already worn by Ada Active. Pick another number or leave it blank.')
+        ).toBeTruthy();
+        expect(scrollTo).not.toHaveBeenCalled();
+      });
+
+      it('the existing-player invite form shows the refusal once, on its jersey field scrolled into view', async () => {
+        mockCreateInvitation.mutateAsync.mockRejectedValue(jerseyTaken());
+        mockPlayersList = [{ id: 'p-outsider', name: 'Zoe Existing', email: 'zoe@example.com' }];
+        const screen = render(<ManagePlayersScreen />);
+
+        fireEvent.changeText(screen.getByPlaceholderText('Search by name or email...'), 'Zoe');
+        fireEvent.press(screen.getByText('Zoe Existing'));
+        fireEvent.changeText(screen.getByPlaceholderText('e.g., 23'), '8');
+        layOut(screen, 'invite-player-jersey-field');
+        fireEvent.press(screen.getByText('Send Invitation'));
+
+        expect(
+          await screen.findByText('Number 8 is already worn by Ada Active. Pick another number or leave it blank.')
+        ).toBeTruthy();
+        expect(mockShowToast).not.toHaveBeenCalled();
+        expect(scrollTo).toHaveBeenCalledWith({ y: 340 - spacing.md, animated: true });
+      });
     });
 
     it('the edit sheet shows the refusal on the jersey field and stays open, in Spanish too', async () => {

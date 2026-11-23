@@ -64,6 +64,22 @@ describe('ListItem', () => {
       expect(getByText('Parent invited')).toBeTruthy();
     });
 
+    it('renders nothing for an empty subtitle, never a bare "" child (React Native rejects it)', () => {
+      // The test renderer drops "" from toJSON(), so look at the elements' own children props.
+      const emptyStringChildren = (ui: React.ReactElement) =>
+        render(ui).UNSAFE_root.findAll(
+          (node) => {
+            const kids = node.props?.children;
+            return Array.isArray(kids) ? kids.includes('') : kids === '';
+          },
+          { deep: true }
+        );
+      expect(emptyStringChildren(<ListItem title="Ada" subtitle="" />)).toHaveLength(0);
+      expect(
+        emptyStringChildren(<ListItem title="Ada" subtitle="" subtitleAccessory={<Text>Active</Text>} />)
+      ).toHaveLength(0);
+    });
+
     it('lets the title use the lines it is given (default one)', () => {
       const { getByText, rerender } = render(<ListItem title="Bryce James" />);
       expect(getByText('Bryce James').props.numberOfLines).toBe(1);

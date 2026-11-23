@@ -222,6 +222,10 @@ export default function ManagePlayersScreen() {
   const scrollRef = useRef<ScrollView>(null);
   const formCardY = useRef(0);
   const jerseyFieldY = useRef(0);
+  const jerseyFieldHeight = useRef(0);
+  // The visible window of the scroll content, to scroll only when the field is out of it.
+  const scrollY = useRef(0);
+  const viewportHeight = useRef(0);
   const [position, setPosition] = useState('');
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
@@ -291,14 +295,20 @@ export default function ManagePlayersScreen() {
    */
   const showJerseyError = (message: string) => {
     setJerseyError(message);
-    scrollRef.current?.scrollTo({
-      y: Math.max(0, formCardY.current + jerseyFieldY.current - spacing.md),
-      animated: true,
-    });
+    const fieldTop = formCardY.current + jerseyFieldY.current;
+    const fieldBottom = fieldTop + jerseyFieldHeight.current;
+    const inView =
+      fieldTop >= scrollY.current && fieldBottom <= scrollY.current + viewportHeight.current;
+    // Out of view the field is above the window (the submit button is below
+    // it), so scrolling up to it never runs past the end of the content.
+    if (!inView) {
+      scrollRef.current?.scrollTo({ y: Math.max(0, fieldTop - spacing.md), animated: true });
+    }
   };
 
   const trackJerseyField = (e: LayoutChangeEvent) => {
     jerseyFieldY.current = e.nativeEvent.layout.y;
+    jerseyFieldHeight.current = e.nativeEvent.layout.height;
   };
 
   /** Typing a new number clears the refusal for the old one. */
@@ -859,6 +869,13 @@ export default function ManagePlayersScreen() {
 
       <ScrollView
         ref={scrollRef}
+        onLayout={(e) => {
+          viewportHeight.current = e.nativeEvent.layout.height;
+        }}
+        onScroll={(e) => {
+          scrollY.current = e.nativeEvent.contentOffset.y;
+        }}
+        scrollEventThrottle={16}
         contentContainerStyle={[
           styles.scrollContent,
           { padding, paddingBottom: insets.bottom + spacing.xl },
@@ -961,7 +978,7 @@ export default function ManagePlayersScreen() {
 
               {selectedPlayer && (
                 <>
-                  <View onLayout={trackJerseyField}>
+                  <View onLayout={trackJerseyField} testID="invite-player-jersey-field">
                     <Input
                       label={t('players.jerseyNumber')}
                       placeholder={t('roster.jerseyPlaceholder')}
