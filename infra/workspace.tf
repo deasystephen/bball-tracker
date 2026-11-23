@@ -35,10 +35,11 @@ locals {
   # external-reporting authorization record is needed.
   dmarc_report_address = "dmarc@${var.primary_domain}"
 
-  # One policy for both DMARC records. Tighten to "quarantine" only after about
-  # 30 days of aggregate reports show nothing but aligned mail from Google
-  # (apex) and SES (`mail.`): see docs/runbooks/email-deliverability.md.
-  dmarc_policy = "none"
+  # One policy for both DMARC records. "quarantine" since 2026-11-23, after the
+  # aggregate reports showed nothing but aligned mail from Google (apex) and
+  # SES (`mail.`). Read the reports again before any move to "reject", and
+  # before adding a sender: see docs/runbooks/email-deliverability.md.
+  dmarc_policy = "quarantine"
 
   dmarc_record_with_reports = "v=DMARC1; p=${local.dmarc_policy}; rua=mailto:${local.dmarc_report_address}"
   dmarc_record_no_reports   = "v=DMARC1; p=${local.dmarc_policy}"

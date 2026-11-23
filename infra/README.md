@@ -292,15 +292,15 @@ provisions the same set for every served domain:
    ```
 4. **DMARC** for the sending subdomain:
    ```
-   _dmarc.mail.<primary_domain>  TXT  "v=DMARC1; p=none; rua=mailto:dmarc@<primary_domain>"
-   _dmarc.mail.<other domain>    TXT  "v=DMARC1; p=none"
+   _dmarc.mail.<primary_domain>  TXT  "v=DMARC1; p=quarantine; rua=mailto:dmarc@<primary_domain>"
+   _dmarc.mail.<other domain>    TXT  "v=DMARC1; p=quarantine"
    ```
    The policy and the report address are locals in `workspace.tf`, shared with the apex
    record, so the two cannot differ. Only the primary domain's record names the report
    address: for any other domain it is an external address, and receivers send nothing to it
    without an authorization record. Before `google_site_verification` is set no record
-   carries `rua`. Tightening to `p=quarantine` follows about 30 days of clean reports (#555,
-   step 5): change `local.dmarc_policy`, nothing else.
+   carries `rua`. The policy has been `p=quarantine` since 2026-11-23 (#555, step 5); to change
+   it, change `local.dmarc_policy`, nothing else.
 5. **IAM policy** (`ses_send`) grants the ECS task role `ses:SendEmail` / `ses:SendRawEmail`
    with a `ses:FromAddress` condition covering `*@mail.<domain>` for every served domain, on
    every identity **and on the configuration set** — a send that names a configuration set is
@@ -316,7 +316,7 @@ People read mail at `<primary_domain>` through Google Workspace; the application
 | `<primary_domain>` MX | `1 smtp.google.com` (`google_mx_records`) |
 | `<primary_domain>` TXT | `v=spf1 include:_spf.google.com ~all` and the domain verification value, in one record set |
 | `google._domainkey.<primary_domain>` TXT | the DKIM key, split into strings of at most 255 characters |
-| `_dmarc.<primary_domain>` TXT | `v=DMARC1; p=none; rua=mailto:dmarc@<primary_domain>` |
+| `_dmarc.<primary_domain>` TXT | `v=DMARC1; p=quarantine; rua=mailto:dmarc@<primary_domain>` |
 
 - **The two sending paths stay on separate names.** Do not add SES to the apex SPF and do not
   add Google to the `mail.` subdomain. `backend/tests/infra/workspace-mail.test.ts` fails on
