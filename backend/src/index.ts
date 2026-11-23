@@ -21,6 +21,7 @@ import { warnMissingUrlConfig } from './utils/urls';
 import { enforceReplicaGuard } from './utils/replica-guard';
 import { assertWorkOSConfig, WorkOSConfigError } from './utils/workos-client';
 import { createSesEventConsumer } from './services/mailer/ses-event-consumer';
+import { startJoinRequestSweep, stopJoinRequestSweep } from './services/join-request-sweep';
 import { createShutdown } from './utils/shutdown';
 import { refuseUnhandledUpgrades, trackConnections } from './utils/http-connections';
 import { closeRedis } from './utils/redis';
@@ -231,12 +232,17 @@ if (require.main === module) {
   const consumer = createSesEventConsumer();
   consumer?.start();
 
+  // Lapses join requests nobody decided (#1075); its first run is a minute
+  // out, so it never delays startup.
+  startJoinRequestSweep();
+
   // Graceful stop on ECS's SIGTERM (and Ctrl-C locally): utils/shutdown.ts (#747).
   const shutdown = createShutdown({
     io: {
       close: async () => {
-        // No sweep against a closing server or a disconnected Prisma (#1004).
+        // No sweep against a closing server or a disconnected Prisma (#1004, #1075).
         stopRevocationSweep();
+        stopJoinRequestSweep();
         await io.close();
       },
     },

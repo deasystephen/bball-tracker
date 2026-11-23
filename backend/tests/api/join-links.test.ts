@@ -168,6 +168,7 @@ describe('Team join links API (#210)', () => {
       mockPrisma.teamJoinRequest.count,
       mockPrisma.teamJoinRequest.create,
       mockPrisma.teamJoinRequest.updateMany,
+      mockPrisma.teamJoinRequest.deleteMany,
       mockPrisma.$queryRaw,
       mockPrisma.$executeRaw,
     ]) {
@@ -188,11 +189,10 @@ describe('Team join links API (#210)', () => {
     mockPrisma.teamJoinRequest.findMany.mockResolvedValue([]);
     // Nothing the requester sent was declined recently.
     mockPrisma.teamJoinRequest.count.mockResolvedValue(0);
-    // A decision's status-guarded update matches the row; the lazy expiry of
-    // stale requests finds none, unless a test says otherwise.
-    mockPrisma.teamJoinRequest.updateMany.mockImplementation(
-      async ({ data }: { data: { status: string } }) => ({ count: data.status === 'EXPIRED' ? 0 : 1 })
-    );
+    // A decision's status-guarded update matches the row; the lazy delete of
+    // lapsed requests finds none, unless a test says otherwise.
+    mockPrisma.teamJoinRequest.updateMany.mockResolvedValue({ count: 1 });
+    mockPrisma.teamJoinRequest.deleteMany.mockResolvedValue({ count: 0 });
     // The requester (and, on approval, the account behind the request) is a live login.
     mockPrisma.user.findFirst.mockResolvedValue({ id: PARENT_ID, role: 'PLAYER' });
     mockPrisma.teamJoinRequest.create.mockImplementation(
@@ -723,38 +723,43 @@ describe('Team join links API (#210)', () => {
       expect(res.body.status).toBe('already_member');
     });
 
-    it('lapses the requester\'s stale requests before counting them, and logs how many', async () => {
-      mockPrisma.teamJoinRequest.updateMany.mockResolvedValue({ count: 2 });
+    it('deletes the requester\'s lapsed requests before counting them, and logs how many', async () => {
+      mockPrisma.teamJoinRequest.deleteMany.mockResolvedValue({ count: 2 });
       const info = spyOnInfo();
       const before = Date.now();
 
       const res = await request(app).post(url).send({ kind: 'self' });
 
       expect(res.status).toBe(201);
-      const call = mockPrisma.teamJoinRequest.updateMany.mock.calls[0][0] as {
-        where: { teamId: string; requesterId: string; status: string; createdAt: { lt: Date } };
-        data: Record<string, unknown>;
+      const call = mockPrisma.teamJoinRequest.deleteMany.mock.calls[0][0] as {
+        where: {
+          teamId: string;
+          requesterId: string;
+          OR: [{ status: string; createdAt: { lt: Date } }, { status: string }];
+        };
       };
-      expect(call.where).toMatchObject({ teamId: TEAM_ID, requesterId: PARENT_ID, status: 'PENDING' });
+      expect(call.where).toMatchObject({ teamId: TEAM_ID, requesterId: PARENT_ID });
+      // Lapsed: PENDING past the TTL, or a row the pre-#1075 lazy path flipped to EXPIRED.
+      const [stale, legacy] = call.where.OR;
+      expect(stale.status).toBe('PENDING');
       const cutoff = before - JOIN_REQUEST_TTL_DAYS * DAY_MS;
-      expect(Math.abs(call.where.createdAt.lt.getTime() - cutoff)).toBeLessThan(5000);
-      // The typed name goes with the lapse.
-      expect(call.data).toEqual({ status: 'EXPIRED', decidedAt: expect.any(Date), childName: null });
-      expect(mockPrisma.teamJoinRequest.updateMany.mock.invocationCallOrder[0]).toBeLessThan(
+      expect(Math.abs(stale.createdAt.lt.getTime() - cutoff)).toBeLessThan(5000);
+      expect(legacy).toEqual({ status: 'EXPIRED' });
+      expect(mockPrisma.teamJoinRequest.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(
         mockPrisma.teamJoinRequest.findMany.mock.invocationCallOrder[0]
       );
-      expect(domainEvent(info, 'Join requests expired')).toEqual({ teamId: TEAM_ID, expiredCount: 2 });
+      expect(domainEvent(info, 'Join requests deleted')).toEqual({ teamId: TEAM_ID, deletedCount: 2 });
     });
 
-    it('lapses stale requests in a statement of its own, before the transaction a refusal rolls back', async () => {
+    it('deletes lapsed requests in a statement of its own, before the transaction a refusal rolls back', async () => {
       mockPrisma.teamJoinLink.findUnique.mockResolvedValue(linkRow({ expiresAt: new Date(Date.now() - 1000) }));
 
       const res = await request(app).post(url).send({ kind: 'self' });
 
       expect(res.status).toBe(410);
-      // The expiry ran, and ran before the transaction opened.
-      expect(mockPrisma.teamJoinRequest.updateMany).toHaveBeenCalledTimes(1);
-      expect(mockPrisma.teamJoinRequest.updateMany.mock.invocationCallOrder[0]).toBeLessThan(
+      // The delete ran, and ran before the transaction opened.
+      expect(mockPrisma.teamJoinRequest.deleteMany).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.teamJoinRequest.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(
         mockPrisma.$transaction.mock.invocationCallOrder[0]
       );
     });
@@ -831,11 +836,14 @@ describe('Team join links API (#210)', () => {
       expect(mockPrisma.teamJoinRequest.findMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: { teamId: TEAM_ID, status: 'PENDING' }, orderBy: { createdAt: 'asc' } })
       );
-      // Requests nobody decided in time lapse before the list is read.
-      expect(mockPrisma.teamJoinRequest.updateMany).toHaveBeenCalledWith({
-        where: { teamId: TEAM_ID, status: 'PENDING', createdAt: { lt: expect.any(Date) } },
-        data: { status: 'EXPIRED', decidedAt: expect.any(Date), childName: null },
+      // Requests nobody decided in time are deleted before the list is read.
+      expect(mockPrisma.teamJoinRequest.deleteMany).toHaveBeenCalledWith({
+        where: {
+          teamId: TEAM_ID,
+          OR: [{ status: 'PENDING', createdAt: { lt: expect.any(Date) } }, { status: 'EXPIRED' }],
+        },
       });
+      expect(mockPrisma.teamJoinRequest.updateMany).not.toHaveBeenCalled();
     });
 
     it('refuses everyone else with 403 without reading the requests', async () => {
@@ -987,17 +995,35 @@ describe('Team join links API (#210)', () => {
       expect(pushSpy).not.toHaveBeenCalled();
     });
 
-    it('refuses a request that lapsed but was not flipped yet', async () => {
+    it('deletes and refuses a request that lapsed but was not swept yet; a retry finds nothing', async () => {
       givenTeam();
-      mockPrisma.teamJoinRequest.findFirst.mockResolvedValue(
+      mockPrisma.teamJoinRequest.findFirst.mockResolvedValueOnce(
         requestRow({ createdAt: new Date(Date.now() - (JOIN_REQUEST_TTL_DAYS + 1) * DAY_MS) })
       );
+      // The database holds it as lapsed: the lazy delete removes exactly this row.
+      mockPrisma.teamJoinRequest.deleteMany.mockResolvedValueOnce({ count: 1 });
+      const info = spyOnInfo();
 
       const res = await request(app).post(url);
 
       expect(res.status).toBe(400);
-      expect(res.body.error).toBe('Cannot approve a join request with status: EXPIRED');
+      expect(res.body.error).toBe(`Cannot approve this join request: it lapsed after ${JOIN_REQUEST_TTL_DAYS} days`);
+      expect(mockPrisma.teamJoinRequest.deleteMany).toHaveBeenCalledWith({
+        where: {
+          teamId: TEAM_ID,
+          id: REQUEST_ID,
+          OR: [{ status: 'PENDING', createdAt: { lt: expect.any(Date) } }, { status: 'EXPIRED' }],
+        },
+      });
+      expect(domainEvent(info, 'Join requests deleted')).toEqual({ teamId: TEAM_ID, deletedCount: 1 });
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+      expect(mockPrisma.teamJoinRequest.updateMany).not.toHaveBeenCalled();
       expect(mockPrisma.teamMember.upsert).not.toHaveBeenCalled();
+      expect(pushSpy).not.toHaveBeenCalled();
+
+      // The row is gone: a second tap is a 404, never a 500.
+      mockPrisma.teamJoinRequest.findFirst.mockResolvedValueOnce(null);
+      expect((await request(app).post(url)).status).toBe(404);
     });
 
     it('CHILD: a coach who is also a parent keeps the COACH role', async () => {
@@ -1118,6 +1144,20 @@ describe('Team join links API (#210)', () => {
         requesterId: PARENT_ID,
         userId: COACH_ID,
       });
+    });
+
+    it('deletes and refuses a lapsed request on decline too, writing no decision', async () => {
+      givenTeam();
+      mockPrisma.teamJoinRequest.findFirst.mockResolvedValue(
+        requestRow({ createdAt: new Date(Date.now() - (JOIN_REQUEST_TTL_DAYS + 1) * DAY_MS) })
+      );
+      mockPrisma.teamJoinRequest.deleteMany.mockResolvedValueOnce({ count: 1 });
+
+      const res = await request(app).post(url);
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe(`Cannot decline this join request: it lapsed after ${JOIN_REQUEST_TTL_DAYS} days`);
+      expect(mockPrisma.teamJoinRequest.updateMany).not.toHaveBeenCalled();
     });
 
     it('answers 400 when the request was decided meanwhile and 403 for a non-manager', async () => {
