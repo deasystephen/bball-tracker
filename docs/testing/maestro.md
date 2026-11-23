@@ -189,3 +189,15 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   (#671) and `invite-deep-link.yaml` (#972, #973, seeded with `SEED_MAESTRO_INVITE_TOKEN=true`).
   The "Share game" absence checks (#731) in `game-lifecycle.yaml` and `player-no-tracking.yaml`
   passed too. The suite is 27 flows.
+- **Run record, 2026-11-22.** 32 of 32 flows passed, every one on its first attempt, on the iPhone 17 /
+  iOS 26.5 simulator (Maestro 2.11.0) against `main` at `ba82a1ff`: the 1.7.0 Debug build installed
+  earlier that day with Metro serving the current JavaScript, the local stack, and
+  `SEED_MAESTRO_INVITE_TOKEN=true npx prisma db seed` before each flow. No flow needed a change.
+  About 28 minutes of flow time; the longest are `game-tracking.yaml` (109 s), `spanish-locale.yaml`
+  (108 s) and `roster-management.yaml` (103 s). First simulator runs of that day's edits: the taken
+  jersey number refused on "Edit jersey & position" and the "Parent invited" chip (#1087, #1082, both
+  in `roster-management.yaml`), plus `join-link.yaml` after the later merges. The suite is 32 flows.
+  Before the run, 36 rows left by interrupted `test-leftovers.db.test.ts` runs were deleted by hand
+  from the local `User` table (`Frank Vogel <hex>`, `Same Run <hex>`, `hex-<hex>` and friends: the
+  seed does not sweep them, and the ones with `@example.com` addresses sort among the seeded logins
+  on the developer login list).
