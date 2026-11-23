@@ -1,3 +1,27 @@
+// Packages in pdfkit's dependency tree that ship ES modules with no CommonJS
+// entry. When a pdfkit bump fails with "Cannot use import statement outside a
+// module", the file named in the error belongs to a package missing from here.
+// @noble/* (PDF encryption) and brotli (WOFF2 fonts) load only on paths no test
+// reaches today; they are listed because they are ES modules only as well.
+const ESM_ONLY_PACKAGES = [
+  '@noble/ciphers',
+  '@noble/hashes',
+  'brotli',
+  'dfa',
+  'fontkit',
+  'linebreak',
+  'unicode-properties',
+  'unicode-trie',
+];
+
+const ESM_PACKAGE_TSCONFIG = {
+  allowJs: true,
+  module: 'commonjs',
+  target: 'ES2022',
+  esModuleInterop: true,
+  isolatedModules: true,
+};
+
 module.exports = {
   preset: 'ts-jest',
   testEnvironment: 'node',
@@ -10,7 +34,14 @@ module.exports = {
   testPathIgnorePatterns: ['/node_modules/', '\\.redis\\.test\\.ts$'],
   transform: {
     '^.+\\.ts$': 'ts-jest',
+    // pdfkit 0.21 depends on fontkit 3, which is published as ES modules only,
+    // like several packages under it. Node 22 can require() those, so the
+    // server needs nothing; Jest's CommonJS runtime cannot, so the packages in
+    // ESM_ONLY_PACKAGES are compiled to CommonJS for the tests. This keeps the
+    // real PDF code under test instead of a mock.
+    '^.+\\.m?js$': ['ts-jest', { tsconfig: ESM_PACKAGE_TSCONFIG, diagnostics: false }],
   },
+  transformIgnorePatterns: [`/node_modules/(?!(?:${ESM_ONLY_PACKAGES.join('|')})/)`],
   // Setup file for global mocks
   setupFilesAfterEnv: ['<rootDir>/tests/setup.ts'],
   collectCoverageFrom: [
@@ -59,6 +90,10 @@ module.exports = {
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',
     '^expo-server-sdk$': '<rootDir>/tests/__mocks__/expo-server-sdk.js',
+    // unicode-properties picks its trie loader through a `#binary-trie`
+    // subpath import; the Node variant reads `import.meta.url`, which does not
+    // exist in CommonJS. The browser variant decodes the same data from base64.
+    '^#binary-trie$': '<rootDir>/node_modules/unicode-properties/binaryTrie.browser.js',
   },
   // Force Jest to exit after tests complete
   forceExit: true,
