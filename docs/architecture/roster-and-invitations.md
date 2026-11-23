@@ -676,7 +676,8 @@ themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by 
   `displayName` (a deleted account reads as the localized label); typing in the field clears it.
   The refusal shows once, never also as a toast (a toast landed on top of the inline text, #1095):
   the two add forms, whose submit button sits below the fold, scroll the jersey field back into view
-  (the form card's and the field's `onLayout` offsets); the edit sheet shows it inline as well. An API without the rule never sends the
+  when it is outside the visible window (the form card's and the field's `onLayout` offsets against
+  the ScrollView's `onScroll` offset and height); the edit sheet shows it inline as well. An API without the rule never sends the
   code, so the app is safe in either deploy order. A refused add leaves the photo it uploaded
   first unreferenced in S3 (as any failed add does); the pending-upload expiry removes it.
 - **Tests:** `backend/tests/integration/jersey-number.db.test.ts` (real Postgres: refusals on add,
