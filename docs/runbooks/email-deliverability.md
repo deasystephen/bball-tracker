@@ -17,7 +17,7 @@ Mail that people read, at `hooplings.com` itself, is a separate path through Goo
 | --- | --- |
 | Sender | `noreply@mail.hooplings.com`, SES v2, `us-east-1`; display name `Hooplings` or `<person> via Hooplings` (`docs/architecture/email.md`, Sender) |
 | Reply-To | `support@hooplings.com` on every message (#450). The sender's domain has one MX, the SES bounce handler, so without it a reply reaches nobody. Every footer names the address and says that a reply goes to support, not to the coach |
-| Identity | `mail.hooplings.com` — Easy DKIM (RSA-2048), custom MAIL FROM `bounce.mail.hooplings.com` (SPF aligned), DMARC `p=none` with reports to `dmarc@hooplings.com` |
+| Identity | `mail.hooplings.com` — Easy DKIM (RSA-2048), custom MAIL FROM `bounce.mail.hooplings.com` (SPF aligned), DMARC `p=quarantine` with reports to `dmarc@hooplings.com` |
 | What is sent | Transactional only: team and guardian invitations, RSVP confirmations, team announcements, and reply notifications to an announcement's author (#34; opt-out via the Profile reply-notifications toggle, `User.notifyOnReplies`; send rules in `docs/architecture/email.md`, "Reply email"). No marketing. |
 | Suppression | SES **account-level suppression list**, reasons `BOUNCE` and `COMPLAINT` |
 | Configuration set | `bball-tracker-production-transactional` — named on every send |
@@ -232,20 +232,29 @@ After the deploy:
 ## DMARC
 
 `_dmarc.hooplings.com` and `_dmarc.mail.hooplings.com` both read
-`v=DMARC1; p=none; rua=mailto:dmarc@hooplings.com`: monitor only, with the aggregate reports
-sent to `dmarc@hooplings.com`. The policy is `local.dmarc_policy` in
+`v=DMARC1; p=quarantine; rua=mailto:dmarc@hooplings.com`: a receiver sends mail that fails
+DMARC to spam, and the aggregate reports go to `dmarc@hooplings.com`. The policy is `local.dmarc_policy` in
 [`infra/workspace.tf`](../../infra/workspace.tf), one value for both records.
 
 | Step | Owner | State |
 | --- | --- | --- |
 | The `rua` tag on both DMARC records | #555 (Google Workspace on `hooplings.com`) | done, applied 2026-09-29 |
-| Tighten to `p=quarantine`, after about 30 days of reports show only aligned mail | #555, step 5 | not started; earliest 2026-10-29 |
+| Tighten to `p=quarantine` | #555, step 5 | done, applied 2026-11-23 |
 
 Every source in the reports must be one of ours (Google Workspace for `hooplings.com`, Amazon
 SES for `mail.hooplings.com`) and must pass DKIM or SPF **aligned**.
 
-Do not tighten the policy without the reports: `p=quarantine` on a domain with an unknown
-legitimate sender sends that sender's mail to spam.
+The policy was tightened on the first reports that carried real mail, not after 30 days of
+them: Google's reports for 2026-11-22 showed one message from Google Workspace for
+`hooplings.com` and three from Amazon SES for `mail.hooplings.com`, all passing DKIM and SPF
+aligned, and no other source. Real mail only began on 2026-11-22 (SES production access, the
+first `support@` send), so earlier reports did not exist.
+
+Keep reading the reports. Before adding any new sender for either name (a marketing tool, a
+help desk, a second mail provider), set up its aligned DKIM or SPF first: under
+`p=quarantine` an unaligned legitimate sender goes to spam. To roll back, set
+`local.dmarc_policy` to `none` and apply the two DMARC records. Do not move to `p=reject`
+without several weeks of reports from more than one receiver.
 
 ## Mail at the apex: Google Workspace
 

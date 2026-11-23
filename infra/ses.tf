@@ -8,8 +8,7 @@
 #   - `_dmarc.mail.<domain>` TXT. The policy and the report address are the
 #     locals in workspace.tf, shared with the apex record (#555). The primary
 #     domain's record carries the `rua` tag once Google Workspace receives
-#     mail at the apex; tightening to `p=quarantine` follows about 30 days of
-#     clean reports.
+#     mail at the apex. The policy is `p=quarantine` since 2026-11-23.
 #
 # After apply, `MailFromAttributes.MailFromDomainStatus` must read SUCCESS for
 # each identity. SES sandbox → production access is account-wide (#23).
