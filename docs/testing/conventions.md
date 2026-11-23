@@ -47,6 +47,17 @@ When adding new features or fixing bugs, always write tests that verify behavior
 
 The global Jest timeout stays at 10 s and is never raised to quiet a flake. A test that legitimately issues many sequential requests (`invitation-lookup-rate-limit.test.ts` sends 601) passes a per-test timeout (the third `it` argument) derived from its request count (`(count + 1) * per-request budget`), with a comment showing the arithmetic. Prefer shortening the work first: order-independent requests go out in bounded concurrent chunks. A timeout in a test that does not loop is usually a request that never ends or a reused supertest agent against a closed server; on a saturated machine, rerun it alone first, and fix the synchronisation, not the clock.
 
+## ES-module-only dependencies in backend Jest (pdfkit)
+
+Backend Jest runs CommonJS and does not transform `node_modules`. Since pdfkit 0.21 (fontkit 3),
+part of pdfkit's dependency tree is published as ES modules only. Node 22 can `require()` those,
+so the server needs nothing, but Jest fails with "Cannot use import statement outside a module"
+in every suite that loads the app (the export service imports pdfkit). `backend/jest.config.js`
+therefore compiles the packages in `ESM_ONLY_PACKAGES` to CommonJS with ts-jest, and maps
+`#binary-trie` (unicode-properties) to its browser variant because the Node one reads
+`import.meta.url`. The real PDF code stays under test; do not replace it with a mock. When a
+pdfkit bump fails the same way, add the package named in the error to that list.
+
 ## Validation Schemas
 - **Add schema validation tests** (in `tests/schemas/`) for Zod schemas
 - Test edge cases: empty strings, invalid formats, boundary values, required vs optional fields
