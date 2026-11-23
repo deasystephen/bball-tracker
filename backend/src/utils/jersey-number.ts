@@ -17,20 +17,25 @@
  *   without a lock: it writes no member row, and a number taken by accept
  *   time is dropped there (`InvitationService.acceptedJerseyNumber`, which
  *   runs behind the lock and never refuses).
- * - Keeping one's own number is not checked, so a pair that predates the
- *   rule can still edit its position.
+ * - Keeping one's own number is not checked: the mobile edit sheet always
+ *   sends the number, so a position-only edit must save.
  * - Season rollover copies the source roster's numbers as they are
- *   (`createMany`), pre-rule pairs included: it creates no new collision.
+ *   (`createMany`): they are unique on the source team, so on the copy too.
  *
- * So the rule holds for every number written since it shipped, but not for
- * rows from before it. There is no unique index on
- * `(teamId, jerseyNumber)` yet: production had duplicate pairs before this
- * rule, and the index follows once they are resolved
- * (`docs/architecture/roster-and-invitations.md`, Jersey numbers).
+ * Behind the check stands a partial unique index,
+ * `TeamMember_teamId_jerseyNumber_key` ON (teamId, jerseyNumber) WHERE
+ * jerseyNumber IS NOT NULL (hand-written migration; Prisma cannot express
+ * it). The locked check is what answers a coach, with the holder's name; the
+ * index is the guarantee. A write that somehow reached the index without the
+ * check (`orJerseyConflict`) answers a plain 409 with no holder, never a 500.
  */
 
 import type { Prisma } from '@prisma/client';
-import { JerseyNumberTakenError } from './errors';
+import { ConflictError, JerseyNumberTakenError } from './errors';
+import { isUniqueViolation, violatedConstraint } from './prisma-errors';
+
+/** The partial unique index behind the rule (migration 20261123120000_team_member_jersey_unique). */
+export const JERSEY_NUMBER_INDEX = 'TeamMember_teamId_jerseyNumber_key';
 
 /** Who holds a number: the `jersey_number_taken` body's `playerId`, `playerName` and `playerDeletedAt`. */
 export interface JerseyHolder {
@@ -79,5 +84,26 @@ export async function assertJerseyNumberFree(
   const holder = await findJerseyHolder(db, teamId, jerseyNumber, exceptPlayerId);
   if (holder && jerseyNumber != null) {
     throw new JerseyNumberTakenError({ jerseyNumber, ...holder });
+  }
+}
+
+/**
+ * Run a write that sets a member's jersey number. The locked check
+ * (`assertJerseyNumberFree`) refuses a taken number before the write, with the
+ * holder's name; this is the backstop for a write that reaches the unique
+ * index anyway: a 409 instead of a 500. It is not a retry.
+ */
+export async function orJerseyConflict<T>(jerseyNumber: number | null | undefined, run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (err) {
+    if (isUniqueViolation(err) && violatedConstraint(err).index === JERSEY_NUMBER_INDEX) {
+      throw new ConflictError(
+        jerseyNumber != null
+          ? `Another player on this team already wears number ${jerseyNumber}.`
+          : 'Another player on this team already wears that number.'
+      );
+    }
+    throw err;
   }
 }

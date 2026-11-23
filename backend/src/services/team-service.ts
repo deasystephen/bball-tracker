@@ -56,7 +56,7 @@ import { lockLeagueRow } from '../utils/league-row-lock';
 import { USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
 import { createOrConflict, orNotFound } from '../utils/prisma-errors';
 import { lockTeamOrNotFound, lockTeamRow } from '../utils/team-row-lock';
-import { assertJerseyNumberFree } from '../utils/jersey-number';
+import { assertJerseyNumberFree, orJerseyConflict } from '../utils/jersey-number';
 import { keyShareUsers, lockUsers } from '../utils/user-row-lock';
 import { findOrCreateSeason, findSeasonByName, type SeasonByName } from './season-service';
 
@@ -1335,7 +1335,7 @@ export class TeamService {
     // Add player to team; a lost race on @@unique([teamId, playerId]) answers
     // the pre-check's 400 (#727). The jersey number is checked behind the
     // team row lock, so two concurrent adds of one number cannot both win (#1087).
-    const teamMember = await createOrConflict(
+    const teamMember = await orJerseyConflict(data.jerseyNumber, () => createOrConflict(
       () =>
         prisma.$transaction(async (tx) => {
           // User before Team (utils/team-row-lock.ts): the insert key-shares
@@ -1359,7 +1359,7 @@ export class TeamService {
         }),
       'Player is already on this team',
       'TeamMember_teamId_playerId_key'
-    );
+    ));
 
     logger.info('Roster player added', { teamId, playerId: data.playerId, userId, via: 'existing-user' });
 
@@ -1485,10 +1485,9 @@ export class TeamService {
     // Update team member. A number is checked behind the team row lock
     // (#1087), against the member row read again under that lock (the read
     // above is unlocked and may be stale). Keeping the number the member wears
-    // now is never refused, even when another member shares it from before
-    // the rule, so a position-only edit always saves (the mobile sheet always
-    // sends the number). Clearing it takes no lock.
-    const updatedMember = await prisma.$transaction(async (tx) => {
+    // now is never refused or looked up, so a position-only edit always saves
+    // (the mobile sheet always sends the number). Clearing it takes no lock.
+    const updatedMember = await orJerseyConflict(data.jerseyNumber, () => prisma.$transaction(async (tx) => {
       if (data.jerseyNumber != null) {
         await lockTeamOrNotFound(tx, teamId);
         const current = await tx.teamMember.findUnique({
@@ -1517,7 +1516,7 @@ export class TeamService {
           }),
         new NotFoundError('Player is not on this team')
       );
-    });
+    }));
 
     logger.info('Roster member updated', { teamId, playerId, userId });
 

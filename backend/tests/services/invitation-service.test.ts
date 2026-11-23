@@ -41,6 +41,8 @@ jest.mock('../../src/utils/user-row-lock', () => {
   };
 });
 jest.mock('../../src/utils/jersey-number', () => ({
+  // The index backstop stays real: it only maps one unique violation.
+  ...jest.requireActual('../../src/utils/jersey-number'),
   findJerseyHolder: jest.fn().mockResolvedValue(null),
   assertJerseyNumberFree: jest.fn().mockResolvedValue(undefined),
 }));

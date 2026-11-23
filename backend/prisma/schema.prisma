@@ -398,6 +398,12 @@ model TeamMember {
   team   Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
   player User @relation(fields: [playerId], references: [id], onDelete: Cascade)
 
+  // One jersey number per team (#1087) is enforced by a hand-written PARTIAL
+  // unique index that Prisma cannot express:
+  // "TeamMember_teamId_jerseyNumber_key" ON (teamId, jerseyNumber)
+  // WHERE "jerseyNumber" IS NOT NULL — see migration
+  // 20261123120000_team_member_jersey_unique. Do not add a plain @@unique here
+  // (it would also forbid two members with no number).
   @@unique([teamId, playerId])
   @@index([teamId])
   @@index([playerId])

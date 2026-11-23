@@ -40,7 +40,7 @@ import { USER_SUMMARY_WITH_EMAIL_SELECT } from '../utils/user-select';
 import { createOrConflict, isUniqueViolation } from '../utils/prisma-errors';
 import { keyShareUsers, lockUsers } from '../utils/user-row-lock';
 import { lockTeamOrNotFound, lockTeamRow } from '../utils/team-row-lock';
-import { assertJerseyNumberFree, findJerseyHolder } from '../utils/jersey-number';
+import { assertJerseyNumberFree, findJerseyHolder, orJerseyConflict } from '../utils/jersey-number';
 import {
   assertOwnUploadUrl,
   checkAvatarUpload,
@@ -1159,6 +1159,16 @@ export class InvitationService {
    * reason instead of failing the whole add.
    */
   static async addRosterPlayer(
+    teamId: string,
+    data: AddRosterPlayerInput,
+    userId: string
+  ): Promise<AddRosterPlayerResult> {
+    // The locked check inside answers a taken number with the holder's name;
+    // this maps a write that reached the unique index anyway to a 409 (#1087).
+    return orJerseyConflict(data.jerseyNumber, () => this.addRosterPlayerChecked(teamId, data, userId));
+  }
+
+  private static async addRosterPlayerChecked(
     teamId: string,
     data: AddRosterPlayerInput,
     userId: string

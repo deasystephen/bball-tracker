@@ -16,7 +16,9 @@ import { randomBytes } from 'node:crypto';
 import prisma from '../../src/models';
 import { InvitationService } from '../../src/services/invitation-service';
 import { TeamService } from '../../src/services/team-service';
-import { JerseyNumberTakenError } from '../../src/utils/errors';
+import { ConflictError, JerseyNumberTakenError } from '../../src/utils/errors';
+import { JERSEY_NUMBER_INDEX, orJerseyConflict } from '../../src/utils/jersey-number';
+import { isUniqueViolation, violatedConstraint } from '../../src/utils/prisma-errors';
 import { backendPid, pause, track, waitForBlockedBy, type Tracked } from '../support/db-locks';
 import { DbFixtures, type Org } from '../support/db-fixtures';
 import { spyOnInfo } from '../support/domain-events';
@@ -328,14 +330,14 @@ describe('Edit jersey & position (PATCH /teams/:id/players/:playerId)', () => {
     expect(updated.position).toBe('Center');
   });
 
-  it('a pair that predates the rule can still edit its position, and the number stays', async () => {
-    const org = await team('edit-legacy');
-    await wearer('legacy-a', org, 8);
-    const legacyB = await wearer('legacy-b', org, 8);
+  it('a position-only edit that resends the member\'s own number saves (the app always sends it)', async () => {
+    const org = await team('edit-own-position');
+    await wearer('own-pos-other', org, 9);
+    const player = await wearer('own-pos', org, 8);
 
     const updated = await TeamService.updateTeamMember(
       org.teamId,
-      legacyB,
+      player,
       { jerseyNumber: 8, position: 'Guard' },
       coachId
     );
@@ -432,5 +434,57 @@ describe('accepting an invitation whose number was taken meanwhile', () => {
     const result = await InvitationService.acceptInvitation(sent.id, sent.playerId);
 
     expect(result.teamMember.jerseyNumber).toBe(11);
+  });
+});
+
+describe('the unique index behind the rule (TeamMember_teamId_jerseyNumber_key)', () => {
+  it('refuses a second holder written straight to the table, and names itself on the error', async () => {
+    const org = await team('index-direct');
+    await wearer('index-a', org, 8);
+    const second = await fx.user('index-b', 'PLAYER');
+
+    const error = await prisma.teamMember
+      .create({ data: { teamId: org.teamId, playerId: second, jerseyNumber: 8 } })
+      .then(
+        () => null,
+        (err: unknown) => err
+      );
+
+    expect(isUniqueViolation(error)).toBe(true);
+    expect(isUniqueViolation(error) && violatedConstraint(error).index).toBe(JERSEY_NUMBER_INDEX);
+    expect(await wearers(org, 8)).toBe(1);
+  });
+
+  it('is partial: members with no number never collide, and another team may use the number', async () => {
+    const org = await team('index-partial');
+    const other = await team('index-partial-other');
+    await wearer('index-null-a', org, null);
+    await wearer('index-null-b', org, null);
+    await wearer('index-seven-a', org, 7);
+    await wearer('index-seven-b', other, 7);
+
+    expect(await prisma.teamMember.count({ where: { teamId: org.teamId, jerseyNumber: null } })).toBe(2);
+    expect(await wearers(org, 7)).toBe(1);
+    expect(await wearers(other, 7)).toBe(1);
+  });
+
+  it('a write that reaches the index without the locked check answers a 409, not a 500', async () => {
+    const org = await team('index-backstop');
+    await wearer('backstop-a', org, 4);
+    const second = await fx.user('backstop-b', 'PLAYER');
+
+    await expect(
+      orJerseyConflict(4, () =>
+        prisma.teamMember.create({ data: { teamId: org.teamId, playerId: second, jerseyNumber: 4 } })
+      )
+    ).rejects.toMatchObject({ statusCode: 409, message: 'Another player on this team already wears number 4.' });
+    await expect(
+      orJerseyConflict(4, () =>
+        prisma.teamMember.create({ data: { teamId: org.teamId, playerId: second, jerseyNumber: 4 } })
+      )
+    ).rejects.toBeInstanceOf(ConflictError);
+    // Any other failure passes through untouched.
+    const boom = new Error('boom');
+    await expect(orJerseyConflict(4, () => Promise.reject(boom))).rejects.toBe(boom);
   });
 });
