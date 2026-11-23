@@ -3,6 +3,7 @@
  */
 
 import React from 'react';
+import { StyleSheet } from 'react-native';
 import { render, fireEvent } from '@testing-library/react-native';
 import { Button } from '../../components/Button';
 
@@ -104,6 +105,13 @@ describe('Button', () => {
 
       fireEvent.press(getByText('Disabled'));
       expect(onPressMock).not.toHaveBeenCalled();
+    });
+
+    it('keeps a filled shape when a gradient variant is disabled', () => {
+      const { getByTestId } = render(<Button title="Off" onPress={jest.fn()} disabled testID="off-btn" />);
+      expect(StyleSheet.flatten(getByTestId('off-btn').props.style)).toMatchObject({
+        backgroundColor: expect.any(String),
+      });
     });
 
     it('should not call onPress when loading', () => {

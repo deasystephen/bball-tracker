@@ -133,7 +133,8 @@ export const Button: React.FC<ButtonProps> = ({
     width: fullWidth ? '100%' : 'auto',
     opacity: disabled ? 0.6 : 1,
     ...getBorderStyle(),
-    ...(useGradient ? {} : { backgroundColor: getBackgroundColor() }),
+    // A disabled gradient variant renders on the flat path, so it needs its fill too.
+    ...(useGradient && !disabled ? {} : { backgroundColor: getBackgroundColor() }),
   };
 
   const content = loading ? (
