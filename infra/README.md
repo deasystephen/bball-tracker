@@ -344,7 +344,11 @@ per domain):
    dead address: SES accepts the send, does not deliver it, and does not count it toward the
    bounce rate.
 2. **Configuration set** `<prefix>-transactional`, named by the API on every send
-   (`SES_CONFIGURATION_SET`). A send without it publishes no events.
+   (`SES_CONFIGURATION_SET`). A send without it publishes no events. The resource ignores
+   `delivery_options`: since 2026-11-18 SES reports a `SharedPoolDeliveryMode` the provider does
+   not model, which planned a removal on every run (#1078,
+   hashicorp/terraform-provider-aws#51115). Drop the `lifecycle` block once the provider fix
+   ships and a plan without it is clean.
 3. **Event destination** publishing `BOUNCE`, `COMPLAINT`, `DELIVERY` and `REJECT` to the SNS
    topic `<prefix>-ses-events`. This is a separate topic from the alerts topic on purpose: that
    one has a person subscribed by email.

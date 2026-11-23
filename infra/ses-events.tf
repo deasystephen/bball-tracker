@@ -59,6 +59,18 @@ resource "aws_sesv2_configuration_set" "transactional" {
   tags = {
     Name = "${local.name_prefix}-transactional"
   }
+
+  # Since 2026-11-18 SES answers GetConfigurationSet with
+  # DeliveryOptions { SharedPoolDeliveryMode = "ACCOUNT" } on a set that never
+  # configured delivery options. The provider (6.73.0) does not know the field,
+  # reads an all-defaults delivery_options block, and plans to remove it on
+  # every run; that also re-renders the two policies that reference this set.
+  # The block cannot be declared to match (max_delivery_seconds = 0 fails
+  # validation). This set declares no delivery options, so ignoring the block
+  # loses nothing. Remove once hashicorp/terraform-provider-aws#51115 ships.
+  lifecycle {
+    ignore_changes = [delivery_options]
+  }
 }
 
 locals {
