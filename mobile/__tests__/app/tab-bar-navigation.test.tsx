@@ -9,6 +9,9 @@
  * `CustomTabBar` with the props the SDK 58 navigator passes.
  */
 
+import { existsSync, readFileSync } from 'fs';
+import { join } from 'path';
+
 import React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react-native';
 import type { BottomTabBarProps } from 'expo-router/js-tabs';
@@ -77,5 +80,20 @@ describe('custom tab bar', () => {
 
     fireEvent.press(tab('Home tab'));
     expect(mockNavigateToTab).toHaveBeenCalledWith('home-key');
+  });
+});
+
+// The bar finds each button's route by name. A name with no screen file under
+// app/(tabs)/ would render a button that can never navigate.
+describe('tab bar configuration', () => {
+  it('names only tabs that have a screen file', () => {
+    const tabsDir = join(__dirname, '..', '..', 'app', '(tabs)');
+    const config = readFileSync(join(tabsDir, '_layout.tsx'), 'utf8').match(/const TAB_CONFIGS = \[([\s\S]*?)\] as const;/)?.[1];
+    const names = [...(config ?? '').matchAll(/name: '([^']+)'/g)].map((m) => m[1]);
+
+    expect(names).toEqual(['home', 'teams', 'games', 'stats', 'profile']);
+    for (const name of names) {
+      expect(existsSync(join(tabsDir, `${name}.tsx`))).toBe(true);
+    }
   });
 });

@@ -14,6 +14,7 @@ import { useTheme } from '../../hooks/useTheme';
 import { TAB_BAR_HEIGHT } from '../../hooks/useTabBarPadding';
 import { borderRadius, MAX_FONT_SCALE } from '../../theme';
 import { useTranslation } from '../../i18n';
+import { log } from '../../services/log';
 // expo-router carries its own fork of the tab navigator since SDK 56; the
 // `@react-navigation/bottom-tabs` package is no longer installed.
 import type { BottomTabBarProps } from 'expo-router/js-tabs';
@@ -47,7 +48,12 @@ function CustomTabBar({ state, navigateToTab }: BottomTabBarProps) {
 
   const handlePress = useCallback(
     (index: number, routeKey: string | undefined, isFocused: boolean) => {
-      if (!isFocused && routeKey) {
+      if (!routeKey) {
+        // A TAB_CONFIGS name with no route file: the button would be dead.
+        log.warn('[TabBar] no route for tab', { index });
+        return;
+      }
+      if (!isFocused) {
         pillPosition.set(
           withSpring(index, {
             damping: 18,

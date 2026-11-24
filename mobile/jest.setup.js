@@ -3,7 +3,7 @@
  * Sets up mocks for native modules and common dependencies
  */
 
-// Polyfill TextEncoder/TextDecoder for jsdom. Expo's winter runtime lazily
+// Polyfill TextEncoder/TextDecoder where the test environment lacks them. Expo's winter runtime lazily
 // loads whatwg-url on first `URLSearchParams`/`URL` access, which requires
 // these globals. Without them, hooks that touch URLSearchParams (useGames,
 // useGameEvents, useSeasons, etc.) throw ReferenceError inside the query fn.
