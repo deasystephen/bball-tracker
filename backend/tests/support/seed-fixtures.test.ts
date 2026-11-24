@@ -243,9 +243,11 @@ describe('the Maestro invitation token (#972, #973)', () => {
 
     it('is what the seed writes and what the flow opens', () => {
       expect(SEED_SOURCE).toMatch(/token:\s*joinLinkFixtureToken\(\s*process\.env\s*,/);
-      const flow = fs.readFileSync(path.resolve(__dirname, '..', '..', '..', '.maestro', 'join-link.yaml'), 'utf8');
-      expect(flow).toContain(`hooplings://join/${MAESTRO_JOIN_TOKEN}?src=web`);
-      expect(flow).toContain(`${MAESTRO_INVITE_TOKEN_FLAG}=true`);
+      for (const name of ['join-link.yaml', 'join-link-existing-player.yaml']) {
+        const flow = fs.readFileSync(path.resolve(__dirname, '..', '..', '..', '.maestro', name), 'utf8');
+        expect(flow).toContain(`hooplings://join/${MAESTRO_JOIN_TOKEN}?src=web`);
+        expect(flow).toContain(`${MAESTRO_INVITE_TOKEN_FLAG}=true`);
+      }
     });
   });
 
