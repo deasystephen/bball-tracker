@@ -368,27 +368,6 @@ export default function TeamJoinLinkScreen() {
                 testID="join-link-share"
                 fullWidth
               />
-              {settings}
-              <View style={styles.actionButtons}>
-                <Button
-                  title={t('joinLink.newLink')}
-                  onPress={confirmNewLink}
-                  variant="outline"
-                  loading={createLink.isPending}
-                  disabled={createLink.isPending || revokeLink.isPending}
-                  style={styles.actionButton}
-                  testID="join-link-rotate"
-                />
-                <Button
-                  title={t('joinLink.turnOff')}
-                  onPress={confirmTurnOff}
-                  variant="outline"
-                  loading={revokeLink.isPending}
-                  disabled={createLink.isPending || revokeLink.isPending}
-                  style={styles.actionButton}
-                  testID="join-link-revoke"
-                />
-              </View>
             </>
           ) : (
             <>
@@ -472,6 +451,34 @@ export default function TeamJoinLinkScreen() {
             );
           })
         )}
+
+        {/* Replacing or turning off the link comes after the requests: a coach
+            opens this screen to answer them, and these are rare. */}
+        {link != null && (
+          <Card variant="elevated" style={styles.manageCard}>
+          {settings}
+          <View style={styles.actionButtons}>
+            <Button
+              title={t('joinLink.newLink')}
+              onPress={confirmNewLink}
+              variant="outline"
+              loading={createLink.isPending}
+              disabled={createLink.isPending || revokeLink.isPending}
+              style={styles.actionButton}
+              testID="join-link-rotate"
+            />
+            <Button
+              title={t('joinLink.turnOff')}
+              onPress={confirmTurnOff}
+              variant="outline"
+              loading={revokeLink.isPending}
+              disabled={createLink.isPending || revokeLink.isPending}
+              style={styles.actionButton}
+              testID="join-link-revoke"
+            />
+          </View>
+          </Card>
+        )}
       </ScrollView>
       <ActionMenu
         visible={choosingFor !== null}
@@ -495,11 +502,12 @@ const styles = StyleSheet.create({
   headerContent: { flex: 1 },
   scrollContent: { paddingTop: spacing.lg },
   linkCard: { marginBottom: spacing.lg },
+  manageCard: { marginTop: spacing.lg },
   explain: { marginBottom: spacing.md },
   qrWrap: { alignItems: 'center', marginBottom: spacing.sm },
   centered: { textAlign: 'center', marginBottom: spacing.xs },
   primaryAction: { marginTop: spacing.md },
-  settings: { gap: spacing.xs, marginTop: spacing.lg, marginBottom: spacing.md },
+  settings: { gap: spacing.xs, marginBottom: spacing.md },
   pills: { flexWrap: 'wrap', marginBottom: spacing.xs },
   actionButtons: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
   actionButton: { flex: 1 },

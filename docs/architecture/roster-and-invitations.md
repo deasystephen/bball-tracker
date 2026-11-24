@@ -626,7 +626,11 @@ themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by 
   gives, and the screen always sends both as `{ expiresInDays, maxUses }`; the presets live in
   `hooks/useJoinLink.ts` with a test pinning them inside the API's bounds; a line under the pills
   says declined requests do not count), "N of M spots taken" under a capped link that is not
-  full (the payload's `useCount`), and the pending requests with Approve and Decline icons
+  full (the payload's `useCount`), and the pending requests with Approve and Decline icons. Order
+  on the screen while a link is live: the link card (QR code, Share), then the requests, then a
+  second card with the settings for a new link and **New link** / **Turn off**, because a coach
+  opens the screen to answer requests and replaces a link rarely. With no link, the settings and
+  **Create** are in the first card. The requests carry Approve and Decline icons
   (Decline confirms); each request shows who would be added, who asked, and the asker's email on
   a line of its own. **Approve on a CHILD request** (#1072) opens an `ActionMenu` ("Add <child> to
   the roster") when the roster has records it could be: **Add as a new player** (the request as
