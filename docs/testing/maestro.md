@@ -201,3 +201,10 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   from the local `User` table (`Frank Vogel <hex>`, `Same Run <hex>`, `hex-<hex>` and friends: the
   seed does not sweep them, and the ones with `@example.com` addresses sort among the seeded logins
   on the developer login list).
+- **Run record, 2026-11-23.** `join-link-existing-player.yaml` (#1109) passed twice in a row on the
+  same simulator and 1.7.0 Debug build, Metro serving `main` at `44c9138`, with
+  `SEED_MAESTRO_INVITE_TOKEN=true npx prisma db seed` before each run. Only this flow was run. The
+  suite is 33 flows. The status chips (`"<player> status: <label>"`) are on the Roster screen that
+  "Add Player" opens, not on the team screen's player grid, and "Share join link" sits below the
+  player count there. Its "11 players" assertion is the seeded Lakers roster: a new seeded Lakers
+  player changes that number.

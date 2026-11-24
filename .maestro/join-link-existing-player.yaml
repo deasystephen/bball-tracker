@@ -1,0 +1,179 @@
+appId: com.bballtracker.mobile
+---
+# Team join link, approved onto an existing roster player (#1072, #1109; E2E
+# plan D.14): a parent asks to join for a child the coach already typed in,
+# and the coach approves the request onto that record instead of adding a
+# second one. join-link.yaml takes the other choice ("Add as a new player").
+#
+#   1. Gloria James opens the Lakers' join link, signs in and asks to join
+#      for her child, typed as "Ethan W.".
+#   2. Frank Vogel (Lakers head coach) taps Approve. The Lakers have managed
+#      players with no parent linked, so the menu asks which record it is; he
+#      picks "Same child as Ethan Williams (#14), already on the roster".
+#   3. The team has the same number of players as before, no "Ethan W.",
+#      and on the Roster screen Ethan Williams reads "Parent connected".
+#
+# Token: the Lakers' seeded join link with the fixed MAESTRO_JOIN_TOKEN, as
+# in join-link.yaml. Seed before this flow with:
+#   cd backend && SEED_MAESTRO_INVITE_TOKEN=true npx prisma db seed
+#
+# MUTATES DATA: links Gloria James as guardian of the seeded managed player
+# Ethan Williams. The seed deletes that link (and the join request, with the
+# team's links), so re-seed before every run: a second run without it finds
+# Ethan no longer offered in the menu.
+#
+# Needs a dev client that registers `hooplings://` (docs/testing/maestro.md,
+# "openLink").
+- launchApp:
+    clearState: true
+# Dismiss the intro carousel first (see join-link.yaml).
+- tapOn: "Skip"
+- assertVisible: "Hooplings"
+
+# --- 1. The parent asks to join for a child already on the roster ------------
+- openLink: "hooplings://join/maestro-fixture-lakers-join-link?src=web"
+- runFlow:
+    when:
+      visible: "Open"
+    commands:
+      - tapOn: "Open"
+- extendedWaitUntil:
+    visible: "Join Lakers"
+    timeout: 15000
+- assertNotVisible: "Join link not found"
+- tapOn:
+    id: "join-login"
+- assertVisible: "Developer login with test users"
+- tapOn: "Developer login with test users"
+- assertVisible: "Select Test User"
+# Parents come after every coach in the list.
+- scrollUntilVisible:
+    element:
+      text: "Gloria James, .*"
+    direction: DOWN
+    timeout: 20000
+    visibilityPercentage: 60
+- tapOn: "Gloria James, .*"
+- extendedWaitUntil:
+    visible: "Who is joining?"
+    timeout: 15000
+- tapOn: "Who is joining? My child"
+- tapOn:
+    id: "join-child-name"
+# Not the roster's spelling: the coach, not a name match, decides which
+# record this is, and a new player by this name would be easy to spot.
+- inputText: "Ethan W."
+# Never hideKeyboard (Maestro 2.11); Enter dismisses it.
+- pressKey: Enter
+- tapOn: "Guardian"
+- tapOn:
+    id: "join-submit"
+- extendedWaitUntil:
+    visible: "Request sent"
+    timeout: 10000
+- tapOn: "Done"
+- extendedWaitUntil:
+    visible: "Your Teams"
+    timeout: 10000
+
+# Sign out: a parent's profile needs the swipes to the end (join-link.yaml).
+- tapOn: "Profile tab"
+- assertVisible: "Account"
+- swipe:
+    start: 50%, 60%
+    end: 50%, 20%
+    duration: 500
+- swipe:
+    start: 50%, 60%
+    end: 50%, 20%
+    duration: 500
+- swipe:
+    start: 50%, 60%
+    end: 50%, 20%
+    duration: 500
+- swipe:
+    start: 50%, 60%
+    end: 50%, 20%
+    duration: 500
+- tapOn: "Logout"
+- tapOn:
+    text: "Logout"
+    index: 1
+- assertVisible: "Hooplings"
+
+# --- 2. The coach approves onto the existing record ---------------------------
+- tapOn: "Developer login with test users"
+- assertVisible: "Select Test User"
+- tapOn: "Frank Vogel, .*"
+- assertVisible: "Your Teams"
+- tapOn: "Teams tab"
+- extendedWaitUntil:
+    visible: "Lakers"
+    timeout: 10000
+- tapOn: "Lakers"
+# The roster before the approval: eleven players.
+- scrollUntilVisible:
+    element:
+      text: "11 players"
+    direction: DOWN
+    timeout: 10000
+    visibilityPercentage: 60
+- scrollUntilVisible:
+    element:
+      id: "team-join-link"
+    direction: DOWN
+    timeout: 10000
+    centerElement: true
+- assertVisible: "Join link · 1 request"
+- tapOn:
+    id: "team-join-link"
+- extendedWaitUntil:
+    visible:
+      id: "join-link-qr"
+    timeout: 10000
+- scrollUntilVisible:
+    element:
+      text: "Approve Ethan W."
+    direction: DOWN
+    timeout: 10000
+    visibilityPercentage: 60
+- assertVisible: "Added by Gloria James, the player's guardian"
+- tapOn: "Approve Ethan W."
+# The menu: a new player first, then the roster records with no parent.
+- assertVisible: "Add Ethan W. to the roster"
+- assertVisible: "Add as a new player"
+- tapOn: "Same child as Ethan Williams \\(#14\\), already on the roster"
+# Only an approval onto an existing record shows this toast.
+- extendedWaitUntil:
+    visible: "Gloria James is now linked to Ethan Williams"
+    timeout: 10000
+- extendedWaitUntil:
+    visible: "No requests are waiting.*"
+    timeout: 10000
+- assertNotVisible: "Approve Ethan W."
+
+# --- 3. The roster: same players, Ethan's parent connected --------------------
+- tapOn: "Go back"
+- scrollUntilVisible:
+    element:
+      text: "11 players"
+    direction: DOWN
+    timeout: 10000
+    visibilityPercentage: 60
+- assertNotVisible: "Ethan W\\..*"
+# The status chips are on the Roster screen, which "Add Player" opens. The
+# chip's label is row-anchored ("<player> status: <label>").
+- scrollUntilVisible:
+    element:
+      text: "Add Player"
+    direction: DOWN
+    timeout: 10000
+- tapOn: "Add Player"
+- assertVisible: "Roster"
+- scrollUntilVisible:
+    element:
+      text: "Ethan Williams status: Parent connected"
+    direction: DOWN
+    timeout: 10000
+    visibilityPercentage: 60
+- assertNotVisible: "Ethan Williams status: Not invited"

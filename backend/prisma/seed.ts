@@ -466,6 +466,18 @@ async function main() {
   });
   console.log(`  Gloria James -> Bryce James (Mother, managed child)`);
 
+  // .maestro/join-link-existing-player.yaml approves a join request onto the
+  // seeded managed player Ethan Williams, which links the requesting parent as
+  // his guardian (#1072, #1109). He is seeded with no guardian (Marcus Johnson
+  // too): the approve menu only offers such records, so the links go on every
+  // seed.
+  const clearedJoinGuardians = await prisma.guardian.deleteMany({
+    where: { childId: { in: [LAKERS_MANAGED_IDS.MARCUS_JOHNSON, LAKERS_MANAGED_IDS.ETHAN_WILLIAMS] } },
+  });
+  if (clearedJoinGuardians.count > 0) {
+    console.log(`  Removed ${clearedJoinGuardians.count} guardian link(s) a join approval left on seeded Lakers players`);
+  }
+
   // =========================================================================
   // LEAGUE & SEASON
   // =========================================================================
