@@ -193,8 +193,78 @@ describe('TeamJoinLinkScreen (#210)', () => {
 
     fireEvent.press(getByTestId('join-link-create'));
 
-    await waitFor(() => expect(mockCreate.mutateAsync).toHaveBeenCalledWith({ teamId: 't1' }));
+    // Untouched settings are the API's defaults: 14 days, no cap (what the link always did).
+    await waitFor(() =>
+      expect(mockCreate.mutateAsync).toHaveBeenCalledWith({ teamId: 't1', data: { expiresInDays: 14, maxUses: null } })
+    );
     await waitFor(() => expect(mockShowToast).toHaveBeenCalledWith('Join link created', 'success'));
+  });
+
+  it('creates a link with a custom expiry and request limit picked from the presets (#1073)', async () => {
+    signIn({ id: 'coach-1', role: 'COACH' });
+    mockCreate.mutateAsync.mockResolvedValueOnce({ ...link, maxUses: 20 });
+    const { getByText, getByLabelText, getByTestId } = render(<TeamJoinLinkScreen />);
+
+    expect(getByText('Link settings')).toBeTruthy();
+    expect(getByText('How long the link works')).toBeTruthy();
+    expect(getByText('How many requests it takes')).toBeTruthy();
+    expect(getByText("Declined requests don't count toward the limit.")).toBeTruthy();
+    // The defaults are selected, and "No limit" is a choice of its own.
+    expect(getByLabelText('Link works for 14 days').props.accessibilityState).toEqual({ selected: true });
+    expect(getByLabelText('Request limit: No limit').props.accessibilityState).toEqual({ selected: true });
+    expect(getByLabelText('Link works for 1 day').props.accessibilityState).toEqual({ selected: false });
+
+    fireEvent.press(getByLabelText('Link works for 7 days'));
+    fireEvent.press(getByLabelText('Request limit: 20'));
+    expect(getByLabelText('Link works for 7 days').props.accessibilityState).toEqual({ selected: true });
+    expect(getByLabelText('Link works for 14 days').props.accessibilityState).toEqual({ selected: false });
+    expect(getByLabelText('Request limit: 20').props.accessibilityState).toEqual({ selected: true });
+
+    fireEvent.press(getByTestId('join-link-create'));
+
+    await waitFor(() =>
+      expect(mockCreate.mutateAsync).toHaveBeenCalledWith({ teamId: 't1', data: { expiresInDays: 7, maxUses: 20 } })
+    );
+
+    // Back to no limit: the cap is sent as null.
+    fireEvent.press(getByLabelText('Request limit: No limit'));
+    fireEvent.press(getByLabelText('Link works for 30 days'));
+    fireEvent.press(getByTestId('join-link-create'));
+    await waitFor(() =>
+      expect(mockCreate.mutateAsync).toHaveBeenLastCalledWith({
+        teamId: 't1',
+        data: { expiresInDays: 30, maxUses: null },
+      })
+    );
+  });
+
+  it('New link uses the settings picked for it, in Spanish too', async () => {
+    await i18n.changeLanguage('es');
+    try {
+      signIn({ id: 'coach-1', role: 'COACH' });
+      mockLink = link;
+      mockCreate.mutateAsync.mockResolvedValueOnce({ ...link, id: 'link-2' });
+      const alertSpy = jest.spyOn(Alert, 'alert');
+      const { getByText, getByLabelText, getByTestId } = render(<TeamJoinLinkScreen />);
+
+      expect(getByText('Opciones para un enlace nuevo')).toBeTruthy();
+      fireEvent.press(getByLabelText('El enlace funciona durante 1 día'));
+      fireEvent.press(getByLabelText('Límite de solicitudes: 50'));
+      fireEvent.press(getByTestId('join-link-rotate'));
+      await pressAlertButton(alertSpy, alertSpy.mock.calls[0][2]?.[1]?.text as string);
+
+      expect(mockCreate.mutateAsync).toHaveBeenCalledWith({ teamId: 't1', data: { expiresInDays: 1, maxUses: 50 } });
+    } finally {
+      await i18n.changeLanguage('en');
+    }
+  });
+
+  it('shows how many spots of a capped link are taken (pending plus approved, from the server)', () => {
+    signIn({ id: 'coach-1', role: 'COACH' });
+    mockLink = { ...link, maxUses: 10, useCount: 4 };
+    const { getByText } = render(<TeamJoinLinkScreen />);
+
+    expect(getByText('4 of 10 spots taken.')).toBeTruthy();
   });
 
   it('with a link: shows the QR code of the URL and shares the URL, which is never printed as text', async () => {
@@ -233,7 +303,7 @@ describe('TeamJoinLinkScreen (#210)', () => {
     );
     expect(mockCreate.mutateAsync).not.toHaveBeenCalled();
     await pressAlertButton(alertSpy, 'Create new link');
-    expect(mockCreate.mutateAsync).toHaveBeenCalledWith({ teamId: 't1' });
+    expect(mockCreate.mutateAsync).toHaveBeenCalledWith({ teamId: 't1', data: { expiresInDays: 14, maxUses: null } });
     await waitFor(() =>
       expect(mockShowToast).toHaveBeenCalledWith('New link created. The old one no longer works.', 'success')
     );

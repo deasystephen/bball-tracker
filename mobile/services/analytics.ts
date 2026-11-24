@@ -170,7 +170,15 @@ export interface AnalyticsEventProps {
   staff_invited: { team_id: string; invitation_id: string; role_type: string; resend: boolean; email_sent: boolean };
   staff_invitation_cancelled: { team_id: string; invitation_id: string };
   /** A team join link (#210) was created; creating one replaces the live link. Never the link or its token. */
-  join_link_created: { team_id: string; link_id: string; has_max_uses: boolean };
+  join_link_created: {
+    team_id: string;
+    link_id: string;
+    has_max_uses: boolean;
+    /** The request cap the coach picked (#1073), null for no limit. A number, never the link. */
+    max_uses: number | null;
+    /** How many days the link works (#1073); 14 when the coach kept the default. */
+    expires_in_days: number;
+  };
   join_link_revoked: { team_id: string };
   /**
    * Someone asked to join through a join link: for themself or for a child

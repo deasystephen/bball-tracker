@@ -451,13 +451,16 @@ themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by 
   403. **Every link expires**: 14 days by
   default (`JOIN_LINK_DEFAULT_EXPIRES_DAYS`), 1 to 30 on request; `maxUses` is 1 to 500 or `null`
   (no cap, the default). 201 `{ link: { id, teamId, url, expiresAt, maxUses, useCount, createdAt } }`.
+  **`useCount` in every payload is the slots taken now** (pending plus approved, below), never the
+  stored column of that name; the mobile screen shows "full" from `useCount >= maxUses`.
 - **`GET /teams/:teamId/join-link`** (`canManageRoster`): the live link (not revoked, not expired)
   or `link: null`. A link at its cap is still returned so the coach sees why nobody can use it.
   **`POST /teams/:teamId/join-link/revoke`**: revokes every live link, `{ revoked }`, behind the
   same team row lock as create, so a revoke racing a create waits and then revokes the link that
   create inserted. Pending requests stay for the coach to decide.
 - **`GET /join/:token`** (public): `{ link: { teamName, state } }`, `state` one of `active`,
-  `expired`, `full`. No roster, no coach, no counts, no team id. Logs `Join link viewed` (`linkId`,
+  `expired`, `full` (`full` by the same pending-plus-approved count; an uncapped link reads no
+  request). No roster, no coach, no counts, no team id. Logs `Join link viewed` (`linkId`,
   `state`, `client`). Like the invitation lookup it is exempt from the global IP limit
   (`skipGlobalApiLimit`) and has its own `joinLinkLookupIpRateLimit` (600 / 15 min per IP).
   **There is deliberately no per-token budget** (the invitation lookup has one): a join link is
@@ -481,11 +484,28 @@ themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by 
     that are pending or were declined (`decidedAt`) in the last 30 days, 400 beyond. Declined ones count so that
     an account told "no" cannot keep asking (each ask is a push to the coaches and a use of the
     link); approved ones never count.
-  - **One use of the link**, taken by a single conditional `UPDATE … SET "useCount" = "useCount" + 1
-    WHERE not revoked AND not expired AND ("maxUses" IS NULL OR "useCount" < "maxUses")`, so
-    `maxUses` holds under concurrency (zero rows → 404 or 410 from a re-read). The comparison is
-    made in UTC (`NOW() AT TIME ZONE 'UTC'`), as the columns are stored. **`maxUses` counts
-    requests, approved or not.**
+  - **The link's row lock**, taken by a conditional `UPDATE … SET "useCount" = "useCount" + 1
+    WHERE not revoked AND not expired` (zero rows → 404 when revoked, else 410 `expired`, from a
+    re-read). The comparison is made in UTC (`NOW() AT TIME ZONE 'UTC'`), as the columns are stored.
+  - **The cap, behind that lock** (#1073, owner's decision 2026-11-23). **`maxUses` counts the
+    link's pending plus approved requests**: `PENDING` not yet past `JOIN_REQUEST_TTL_DAYS`, and
+    `ACCEPTED`. A declined (`REJECTED`) request frees its slot, and so does a lapsed one: it is
+    deleted (#1075), and a `PENDING` row past the TTL that the delete has not reached yet (or a
+    legacy `EXPIRED` row) already does not count; `CANCELLED` is never written for a join request; a request
+    deleted with its requester's account (below) frees its slot too. The count
+    (`join-link-service.ts#countUses`, `slotHoldersWhere`) is a statement of its own after the
+    `UPDATE`, so under READ COMMITTED it sees every request committed by an ask that held the lock
+    before it: two asks for the last slot leave exactly one request, the other gets **410
+    `join_link_inactive`, `reason: 'full'`** and the whole transaction (the stored total included)
+    rolls back. `maxUses` never changes after the link is created, so the value read before the
+    lock is current. Decisions do not take the link lock; a decline or lapse racing an ask can only
+    make the ask see one slot fewer free, never more. An unlocked first look (only for a capped
+    link) answers 410 `full` before the per-account cap, as before. Chosen over approvals-only,
+    which would let pending requests pile up past the cap; it replaces the first rule (every
+    request counted, so declines used up a capped link).
+  - **The stored `TeamJoinLink.useCount`** is kept in step as a running total of every request
+    ever created through the link (the data export carries it). Nothing reads it for the cap, the
+    preview or a payload.
   - The PENDING row. 201 `{ status: 'pending', created: true, teamName, request: { id, kind,
     status, createdAt } }` (no team id: a requester is not a member yet).
   After commit: `Join request created` (ids and `kind`) and a best-effort push to the team's staff
@@ -599,7 +619,18 @@ themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by 
   explanation, the QR code of `link.url` (`components/QrCode`), **Share link** (React Native's
   `Share`, the system sheet, which has Copy; there is no clipboard module in the binary), **New
   link** and **Turn off** (each behind a confirm whose button reads differently from the screen's,
-  "Create new link" / "Turn off link"), and the pending requests with Approve and Decline icons
+  "Create new link" / "Turn off link"), **the settings for the next link** (#1073: two `SortPills`
+  rows, `testID` `join-link-settings`, headed "Link settings" or, while a link is live, "Settings
+  for a new link": how long it works, 1, 7, **14** or 30 days, and how many requests it takes,
+  **No limit**, 10, 20 or 50; the bold ones are selected by default, which is exactly what `{}`
+  gives, and the screen always sends both as `{ expiresInDays, maxUses }`; the presets live in
+  `hooks/useJoinLink.ts` with a test pinning them inside the API's bounds; a line under the pills
+  says declined requests do not count), "N of M spots taken" under a capped link that is not
+  full (the payload's `useCount`), and the pending requests with Approve and Decline icons. Order
+  on the screen while a link is live: the link card (QR code, Share), then the requests, then a
+  second card with the settings for a new link and **New link** / **Turn off**, because a coach
+  opens the screen to answer requests and replaces a link rarely. With no link, the settings and
+  **Create** are in the first card. The requests carry Approve and Decline icons
   (Decline confirms); each request shows who would be added, who asked, and the asker's email on
   a line of its own. **Approve on a CHILD request** (#1072) opens an `ActionMenu` ("Add <child> to
   the roster") when the roster has records it could be: **Add as a new player** (the request as

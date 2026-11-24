@@ -105,7 +105,7 @@ on the same path do not repeat it. Stats views (`/(tabs)/stats`, `/teams/[id]/st
 | `staff_removed` | a staff member is removed | `team_id` | `hooks/useTeamStaff.ts` |
 | `staff_invited` | a staff invitation is sent to an address, or re-sent (#460) | `team_id`, `invitation_id`, `role_type`, `resend`, `email_sent` | `hooks/useTeamStaff.ts` |
 | `staff_invitation_cancelled` | a head coach cancels a pending staff invitation (#460) | `team_id`, `invitation_id` | `hooks/useTeamStaff.ts` |
-| `join_link_created` | a roster manager creates the team's join link, which also replaces a live one (#210) | `team_id`, `link_id`, `has_max_uses` | `hooks/useJoinLink.ts` |
+| `join_link_created` | a roster manager creates the team's join link, which also replaces a live one (#210) | `team_id`, `link_id`, `has_max_uses`, `max_uses` (number or null, #1073), `expires_in_days` (#1073) | `hooks/useJoinLink.ts` |
 | `join_link_revoked` | a roster manager turns the team's join link off (#210) | `team_id` | `hooks/useJoinLink.ts` |
 | `join_request_sent` | someone asks to join through a join link, on `/join/[token]` (#210) | `kind`: `self` / `child`, `outcome`: `pending` / `already_member`, `created` | `hooks/useJoinLink.ts` |
 | `join_request_approved` | a roster manager approves a join request (#210) | `team_id`, `request_id`, `kind`: `self` / `child`, `linked_existing` (a child request linked to a record already on the roster instead of a new one, #1072) | `hooks/useJoinLink.ts` |

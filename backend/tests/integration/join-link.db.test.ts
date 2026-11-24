@@ -8,7 +8,9 @@
  *  - a join request grants NOTHING until a coach approves it: the requester
  *    cannot read the team (`canAccessTeam`) while it is pending or after a
  *    decline;
- *  - the conditional use-count UPDATE holds `maxUses` under concurrency;
+ *  - `maxUses` holds under concurrency, judged behind the link's row lock;
+ *    it counts pending plus approved requests, so a declined or lapsed one
+ *    frees its slot and two asks for the last slot leave exactly one (#1073);
  *  - an expired link is refused (410) and a revoked one reads as unknown (404),
  *    but a retry by an account whose request already exists is answered with
  *    that request whatever happened to the link since;
@@ -160,7 +162,7 @@ describe('JoinLinkService (real Postgres, #210)', () => {
     expect((await prisma.teamJoinLink.findUniqueOrThrow({ where: { id: link.id } })).useCount).toBe(1);
   });
 
-  it('holds maxUses under concurrency: the conditional UPDATE lets exactly that many through', async () => {
+  it('holds maxUses under concurrency: the count behind the link lock lets exactly that many through', async () => {
     const { org: club, coachId } = await team('cap');
     const link = await JoinLinkService.createLink(club.teamId, { maxUses: 2 }, coachId);
     const requesters = await Promise.all([adult('cap'), adult('cap'), adult('cap'), adult('cap')]);
@@ -181,6 +183,58 @@ describe('JoinLinkService (real Postgres, #210)', () => {
     await expect(JoinLinkService.previewByToken(tokenOf(link))).resolves.toMatchObject({ state: 'full' });
     // The coach still sees the full link, to understand why nobody can use it.
     expect(await JoinLinkService.getLink(club.teamId, coachId)).toMatchObject({ useCount: 2, maxUses: 2 });
+  });
+
+  it('maxUses counts pending plus approved: a declined or lapsed request frees its slot (#1073)', async () => {
+    const { org: club, coachId } = await team('slots');
+    const link = await JoinLinkService.createLink(club.teamId, { maxUses: 2 }, coachId);
+    const [a, b, c, d, e] = await Promise.all([
+      adult('slot'),
+      adult('slot'),
+      adult('slot'),
+      adult('slot'),
+      adult('slot'),
+    ]);
+    const ask = (id: string): ReturnType<typeof JoinLinkService.requestToJoin> => JoinLinkService.requestToJoin(tokenOf(link), { kind: 'self' }, id);
+
+    await ask(a);
+    await ask(b);
+    // At its limit: refused with the existing error.
+    await expect(ask(c)).rejects.toMatchObject({ statusCode: 410, details: { reason: 'full' } });
+    await expect(JoinLinkService.previewByToken(tokenOf(link))).resolves.toMatchObject({ state: 'full' });
+
+    // A decline frees A's slot: the link is open again and C gets in.
+    const requestOf = async (id: string): Promise<{ id: string }> =>
+      prisma.teamJoinRequest.findFirstOrThrow({ where: { teamId: club.teamId, requesterId: id } });
+    await JoinLinkService.declineRequest(club.teamId, (await requestOf(a)).id, coachId);
+    await expect(JoinLinkService.previewByToken(tokenOf(link))).resolves.toMatchObject({ state: 'active' });
+    expect(await JoinLinkService.getLink(club.teamId, coachId)).toMatchObject({ useCount: 1, maxUses: 2 });
+    await expect(ask(c)).resolves.toMatchObject({ status: 'pending', created: true });
+    await expect(ask(d)).rejects.toMatchObject({ statusCode: 410, details: { reason: 'full' } });
+
+    // An approved request keeps its slot.
+    await JoinLinkService.approveRequest(club.teamId, (await requestOf(c)).id, coachId);
+    await expect(ask(d)).rejects.toMatchObject({ statusCode: 410, details: { reason: 'full' } });
+
+    // B lapses (nobody decided it within the TTL, not flipped yet): its slot is free.
+    await prisma.teamJoinRequest.update({
+      where: { id: (await requestOf(b)).id },
+      data: { createdAt: new Date(Date.now() - (JOIN_REQUEST_TTL_DAYS + 1) * 24 * 60 * 60 * 1000) },
+    });
+    expect(await JoinLinkService.getLink(club.teamId, coachId)).toMatchObject({ useCount: 1 });
+
+    // Two asks for that last slot at once: exactly one gets it.
+    const settled = await Promise.allSettled([ask(d), ask(e)]);
+    expect(settled.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    const [refused] = settled.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+    expect(refused.reason).toBeInstanceOf(JoinLinkInactiveError);
+    expect((refused.reason as JoinLinkInactiveError).details.reason).toBe('full');
+    expect(
+      await prisma.teamJoinRequest.count({ where: { linkId: link.id, requesterId: { in: [d, e] } } })
+    ).toBe(1);
+    expect(await JoinLinkService.getLink(club.teamId, coachId)).toMatchObject({ useCount: 2, maxUses: 2 });
+    // The stored column is the running total of requests created: A, B, C and the winner.
+    expect((await prisma.teamJoinLink.findUniqueOrThrow({ where: { id: link.id } })).useCount).toBe(4);
   });
 
   it('refuses an expired link (410) and treats a revoked one as unknown (404)', async () => {

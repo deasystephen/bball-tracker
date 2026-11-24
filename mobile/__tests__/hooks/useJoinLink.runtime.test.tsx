@@ -116,6 +116,8 @@ describe('useJoinLink runtime', () => {
         team_id: 't1',
         link_id: 'link-1',
         has_max_uses: false,
+        max_uses: null,
+        expires_in_days: 14,
       });
       expectNoSecretsTracked();
     });
@@ -130,7 +132,14 @@ describe('useJoinLink runtime', () => {
       });
 
       expect(mockedPost).toHaveBeenCalledWith('/teams/t1/join-link', { expiresInDays: 7, maxUses: 20 });
-      expect(mockedTrack).toHaveBeenCalledWith('join_link_created', expect.objectContaining({ has_max_uses: true }));
+      expect(mockedTrack).toHaveBeenCalledWith('join_link_created', {
+        team_id: 't1',
+        link_id: 'link-1',
+        has_max_uses: true,
+        max_uses: 20,
+        expires_in_days: 7,
+      });
+      expectNoSecretsTracked();
     });
 
     it('useRevokeJoinLink posts and clears the cached link', async () => {

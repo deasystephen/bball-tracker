@@ -145,13 +145,20 @@ appId: com.bballtracker.mobile
 - assertVisible: "Join link · 1 request"
 - tapOn:
     id: "team-join-link"
-- extendedWaitUntil:
-    visible: "Requests to join"
-    timeout: 10000
 # The seeded link is live: the QR code and Share are there.
-- assertVisible:
-    id: "join-link-qr"
+- extendedWaitUntil:
+    visible:
+      id: "join-link-qr"
+    timeout: 10000
 - assertVisible: "Share link"
+# The requests come right after the link card; scroll in case the heading
+# starts below the first screen.
+- scrollUntilVisible:
+    element:
+      text: "Requests to join"
+    direction: DOWN
+    timeout: 10000
+    visibilityPercentage: 60
 # The request row: who would be added, who asked, and their address, each a
 # text element of its own (the row is not pressable; its buttons are).
 - scrollUntilVisible:
@@ -174,12 +181,13 @@ appId: com.bballtracker.mobile
 - assertNotVisible: "Approve Maestro Joiner"
 
 # --- 4. A new link kills the old one -----------------------------------------
+# The link settings and New link / Turn off sit below the requests (#1073).
 - scrollUntilVisible:
     element:
       id: "join-link-rotate"
-    direction: UP
+    direction: DOWN
     timeout: 10000
-    centerElement: true
+    visibilityPercentage: 60
 - tapOn:
     id: "join-link-rotate"
 - assertVisible: "Create a new link?"
@@ -189,8 +197,12 @@ appId: com.bballtracker.mobile
 - extendedWaitUntil:
     visible: "New link created. The old one no longer works."
     timeout: 10000
-- assertVisible:
-    id: "join-link-qr"
+# The QR code is at the top of the screen, above the requests.
+- scrollUntilVisible:
+    element:
+      id: "join-link-qr"
+    direction: UP
+    timeout: 10000
 
 # The player the approval added is on the roster.
 - tapOn: "Go back"

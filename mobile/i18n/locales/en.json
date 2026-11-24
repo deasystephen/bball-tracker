@@ -1172,7 +1172,19 @@
     "turnOffConfirm": "Turn off link",
     "created": "Join link created",
     "replaced": "New link created. The old one no longer works.",
-    "refreshFailed": "Couldn't refresh. Showing what was loaded before."
+    "refreshFailed": "Couldn't refresh. Showing what was loaded before.",
+    "settingsTitle": "Link settings",
+    "settingsNextTitle": "Settings for a new link",
+    "expiryLabel": "How long the link works",
+    "expiryPrefix": "Link works for ",
+    "days_one": "{{count}} day",
+    "days_other": "{{count}} days",
+    "capLabel": "How many requests it takes",
+    "capPrefix": "Request limit: ",
+    "noLimit": "No limit",
+    "capHint": "Declined requests don't count toward the limit.",
+    "usage_one": "{{used}} of {{count}} spot taken.",
+    "usage_other": "{{used}} of {{count}} spots taken."
   },
   "join": {
     "loading": "Loading join link…",

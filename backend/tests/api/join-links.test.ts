@@ -133,6 +133,26 @@ function givenTeam(options: { callerManagesRoster?: boolean } = {}): void {
   mockPrisma.guardian.findFirst.mockResolvedValue(null);
 }
 
+/**
+ * The link's slots taken now (#1073): the `count` of its pending plus approved
+ * requests answers `taken`; every other count (the requester's recently
+ * declined ones) answers `otherCount`.
+ */
+function givenSlotsTaken(taken: number | number[], otherCount = 0): void {
+  const answers = Array.isArray(taken) ? [...taken] : null;
+  mockPrisma.teamJoinRequest.count.mockImplementation(async ({ where }: { where: Record<string, unknown> }) => {
+    if (where.linkId !== LINK_ID) return otherCount;
+    if (answers === null) return taken as number;
+    return answers.length > 1 ? (answers.shift() as number) : answers[0];
+  });
+}
+
+/** The `where` the slot count must use: pending and not lapsed, or approved. */
+const SLOT_HOLDERS_WHERE = {
+  linkId: LINK_ID,
+  OR: [{ status: 'ACCEPTED' }, { status: 'PENDING', createdAt: { gte: expect.any(Date) } }],
+};
+
 function asParent(): void {
   mockCaller = { id: PARENT_ID, email: 'pat@example.com', role: 'PLAYER' };
 }
@@ -304,13 +324,17 @@ describe('Team join links API (#210)', () => {
     it('returns the live link to a roster manager, the token only inside the URL', async () => {
       givenTeam();
       mockPrisma.teamJoinLink.findFirst.mockImplementation(
-        async ({ select }: { select: Record<string, unknown> }) => applySelect(linkRow({ useCount: 4 }), select)
+        async ({ select }: { select: Record<string, unknown> }) =>
+          applySelect(linkRow({ maxUses: 10, useCount: 9 }), select)
       );
+      // The stored total says 9; only 4 requests hold a slot (#1073).
+      givenSlotsTaken(4);
 
       const res = await request(app).get(url);
 
       expect(res.status).toBe(200);
-      expect(res.body.link).toMatchObject({ id: LINK_ID, useCount: 4 });
+      expect(res.body.link).toMatchObject({ id: LINK_ID, maxUses: 10, useCount: 4 });
+      expect(mockPrisma.teamJoinRequest.count).toHaveBeenCalledWith({ where: SLOT_HOLDERS_WHERE });
       expect(res.body.link.url).toMatch(new RegExp(`/join/${SECRET_TOKEN}$`));
       expect(res.body.link).not.toHaveProperty('token');
       expect(mockPrisma.teamJoinLink.findFirst).toHaveBeenCalledWith(
@@ -399,16 +423,21 @@ describe('Team join links API (#210)', () => {
       // The lookup selects no roster, no coach and no token.
       const select = mockPrisma.teamJoinLink.findUnique.mock.calls[0][0].select as Record<string, unknown>;
       expect(Object.keys(select).sort()).toEqual(
-        ['expiresAt', 'id', 'maxUses', 'revokedAt', 'team', 'teamId', 'useCount'].sort()
+        ['expiresAt', 'id', 'maxUses', 'revokedAt', 'team', 'teamId'].sort()
       );
       expect(select.team).toEqual({ select: { name: true } });
+      // No cap, so the preview reads no request at all.
+      expect(mockPrisma.teamJoinRequest.count).not.toHaveBeenCalled();
     });
 
     it.each([
-      ['expired', { expiresAt: new Date(Date.now() - 1000) }],
-      ['full', { maxUses: 5, useCount: 5 }],
-    ])('reports a link that is %s', async (state, overrides) => {
+      ['expired', { expiresAt: new Date(Date.now() - 1000) }, 0],
+      ['full', { maxUses: 5 }, 5],
+      // Many requests went through, but declined and lapsed ones freed their slots.
+      ['active', { maxUses: 5, useCount: 40 }, 4],
+    ])('reports a link that is %s', async (state, overrides, taken) => {
       mockPrisma.teamJoinLink.findUnique.mockResolvedValue(linkRow(overrides));
+      givenSlotsTaken(taken);
 
       const res = await request(app).get(url);
 
@@ -632,9 +661,10 @@ describe('Team join links API (#210)', () => {
 
     it.each([
       ['expired', { expiresAt: new Date(Date.now() - 1000) }],
-      ['full', { maxUses: 3, useCount: 3 }],
+      ['full', { maxUses: 3 }],
     ])('refuses a link that is %s with 410 join_link_inactive', async (reason, overrides) => {
       mockPrisma.teamJoinLink.findUnique.mockResolvedValue(linkRow(overrides));
+      givenSlotsTaken(3);
 
       const res = await request(app).post(url).send({ kind: 'self' });
 
@@ -654,16 +684,44 @@ describe('Team join links API (#210)', () => {
       expect(mockPrisma.teamJoinRequest.create).not.toHaveBeenCalled();
     });
 
-    it('refuses when the last use was taken between the read and the write (410 full)', async () => {
-      mockPrisma.$executeRaw.mockResolvedValue(0);
-      mockPrisma.teamJoinLink.findUnique
-        .mockResolvedValueOnce(linkRow({ maxUses: 3, useCount: 2 }))
-        .mockResolvedValueOnce(linkRow({ maxUses: 3, useCount: 3 }));
+    it('refuses when the last slot was taken between the read and the lock (410 full)', async () => {
+      mockPrisma.teamJoinLink.findUnique.mockResolvedValue(linkRow({ maxUses: 3 }));
+      // Two slots free at the unlocked look, none behind the lock.
+      givenSlotsTaken([2, 3]);
 
       const res = await request(app).post(url).send({ kind: 'self' });
 
       expect(res.status).toBe(410);
       expect(res.body).toMatchObject({ code: 'join_link_inactive', reason: 'full' });
+      // The cap is judged after the lock-taking UPDATE, never before it.
+      expect(mockPrisma.$executeRaw).toHaveBeenCalledTimes(1);
+      const lastCount = mockPrisma.teamJoinRequest.count.mock.invocationCallOrder.at(-1) as number;
+      expect(mockPrisma.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(lastCount);
+      expect(mockPrisma.teamJoinRequest.create).not.toHaveBeenCalled();
+    });
+
+    it('counts pending plus approved requests only: a capped link with a free slot takes the request (#1073)', async () => {
+      // The stored total is far past the cap; declined and lapsed requests do not hold a slot.
+      mockPrisma.teamJoinLink.findUnique.mockResolvedValue(linkRow({ maxUses: 3, useCount: 12 }));
+      givenSlotsTaken(2);
+
+      const res = await request(app).post(url).send({ kind: 'self' });
+
+      expect(res.status).toBe(201);
+      expect(mockPrisma.teamJoinRequest.count).toHaveBeenCalledWith({ where: SLOT_HOLDERS_WHERE });
+      expect(mockPrisma.teamJoinRequest.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('refuses with 410 expired when the link expired between the read and the lock', async () => {
+      mockPrisma.$executeRaw.mockResolvedValue(0);
+      mockPrisma.teamJoinLink.findUnique
+        .mockResolvedValueOnce(linkRow())
+        .mockResolvedValueOnce(linkRow({ expiresAt: new Date(Date.now() - 1000) }));
+
+      const res = await request(app).post(url).send({ kind: 'self' });
+
+      expect(res.status).toBe(410);
+      expect(res.body).toMatchObject({ code: 'join_link_inactive', reason: 'expired' });
       expect(mockPrisma.teamJoinRequest.create).not.toHaveBeenCalled();
     });
 
