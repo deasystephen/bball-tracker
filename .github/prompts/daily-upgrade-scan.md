@@ -34,9 +34,10 @@ NEVER bump these. Surface them in the deferred tracking issue + daily log only.
     - jest, @types/jest          (waiting for v30 perf regression fix)
     - prisma-client generator    (migration from prisma-client-js; needs import path changes)
 
-  Mobile (RN ecosystem — pinned by the Expo SDK, currently SDK 57 / RN 0.86;
+  Mobile (RN ecosystem — pinned by the Expo SDK, currently SDK 58 / RN 0.88;
   defer all until the next Expo SDK upgrade):
-    - react-native, @react-native-async-storage/async-storage
+    - react-native, @react-native/jest-preset (same minor as react-native)
+    - @react-native-async-storage/async-storage
     - @react-native-community/datetimepicker
     - react-native-gesture-handler, react-native-reanimated
     - react-native-safe-area-context, react-native-screens

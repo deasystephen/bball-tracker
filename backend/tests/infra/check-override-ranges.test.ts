@@ -10,8 +10,8 @@
  *
  * Fixtures run in a temp directory named `backend` with their own accept list (through
  * `ACCEPTED_OVERRIDES_FILE`), so they do not move when the real list changes. The real-list tests
- * read the real list and the real backend and mobile lockfiles; they are expected to go red when a
- * Prisma release declares deepmerge-ts 8.x, or expo's @expo/cli declares zod 4 (see
+ * read the real list and the real backend and mobile lockfiles; the backend one is expected to go red
+ * when a Prisma release declares deepmerge-ts 8.x (see
  * docs/automation/daily-upgrade-scan.md, "Accepted cross-major overrides"). `semver` is linked from this package's node_modules.
  */
 import { execFileSync } from 'child_process';
@@ -139,9 +139,11 @@ describe('accepted-overrides.json (the real list)', () => {
     expect(result.stdout).toMatch(/0 cross-major mismatch\(es\), 1 accepted/);
   });
 
-  // GHSA-mrhx-c7xc-m3w5: red here means the `zod@^3` override stopped working (a regenerated
-  // lockfile brought a zod 3.x copy back). Restore the override; never retire it for this.
-  it("mobile's zod@^3 override still lifts every zod in the real lockfile to >=4.6.6 (security floor, not a retire signal)", () => {
+  // GHSA-mrhx-c7xc-m3w5 covers every zod below 4.6.6. The `zod@^3` override that lifted
+  // @expo/cli's copy retired with Expo SDK 58 (#922), whose @expo/cli no longer declares zod 3.
+  // Red here means a regenerated lockfile brought a vulnerable copy back: find the declarer
+  // (`node ../.github/scripts/check-override-ranges.mjs zod` from mobile/) and lift it.
+  it('every zod in the real mobile lockfile is >=4.6.6 (security floor)', () => {
     const lock = JSON.parse(readFileSync(path.join(ROOT, 'mobile/package-lock.json'), 'utf8')) as {
       packages: Record<string, LockEntry>;
     };
@@ -151,17 +153,8 @@ describe('accepted-overrides.json (the real list)', () => {
     expect(below).toEqual([]);
   });
 
-  // Red with "gets" still >=4.6.6 means one of two things: expo's @expo/cli now declares zod 4
-  // (retire the override, its accepted-overrides.json entry and this test, see the docs), or npm
-  // hoisted @expo/cli to another path (update the entry's `consumer`), or a new package declares
-  // zod 3 and is being forced across the major (the mismatch line names it; scope or rethink).
-  it("mobile's zod@^3 override is accepted for @expo/cli and forces no other consumer across a major", () => {
-    const entry = (realAcceptList.mobile as AcceptEntry[]).find((e) => e.override === 'zod@^3');
-    expect(entry).toBeDefined();
-    const result = run(path.join(ROOT, 'mobile'), ['zod']);
-    expect(result.stdout).toContain(`accepted ${entry?.consumer} declares zod@^3`);
-    expect(result.stdout).toMatch(/0 cross-major mismatch\(es\), 1 accepted/);
-    expect(result.status).toBe(0);
+  it('mobile has no accepted cross-major override', () => {
+    expect(realAcceptList.mobile).toEqual([]);
   });
 });
 

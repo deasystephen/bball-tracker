@@ -112,7 +112,6 @@
     },
     "moment": "^2.31.0",
     "joi": "^17.13.8",
-    "zod@^3": "^4.6.6",
     "expo-router": {
       "@testing-library/react-native": "^13.3.3"
     },

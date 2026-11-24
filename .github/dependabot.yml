@@ -72,6 +72,9 @@ updates:
       # RN / Expo major bumps + Jest 30 are deferred; see
       # docs/automation/daily-upgrade-scan.md for the full deferral list.
       - dependency-name: "react-native"
+      # jest-expo's peer; must stay on the react-native minor (0.x minors are
+      # Dependabot "minor" updates, so the major rule below does not hold it).
+      - dependency-name: "@react-native/jest-preset"
       - dependency-name: "expo"
       - dependency-name: "jest"
         versions: [">=30"]
