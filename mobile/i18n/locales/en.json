@@ -1161,6 +1161,7 @@
     "approveAsNewPlayer": "Add as a new player",
     "approveOntoPlayer": "Same child as {{player}}, already on the roster",
     "approveOntoPlayerNumber": "Same child as {{player}} (#{{number}}), already on the roster",
+    "approveAmbiguous": "More than one player on the roster is named {{player}}. Give each a jersey number to tell them apart, then approve again.",
     "linkedToPlayer": "{{parent}} is now linked to {{player}}",
     "decline": "Decline",
     "declineLabel": "Decline {{name}}",

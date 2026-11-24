@@ -9,9 +9,9 @@ import React, { useState } from 'react';
 import { Modal, Platform, Text, TouchableOpacity } from 'react-native';
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
 
-import { ActionMenu, WAIT_FOR_CLOSE_FALLBACK_MS, type ActionMenuItem } from '../../components/ActionMenu';
+import { ActionMenu, WAIT_FOR_CLOSE_FALLBACK_MS, type ActionMenuEntry, type ActionMenuItem } from '../../components/ActionMenu';
 
-function Harness({ items }: { items: ActionMenuItem[] }) {
+function Harness({ items }: { items: ActionMenuEntry[] }) {
   const [visible, setVisible] = useState(false);
   return (
     <>
@@ -63,6 +63,16 @@ describe('ActionMenu', () => {
       fireEvent.press(screen.getByLabelText('Rename'));
       expect(plain).toHaveBeenCalledTimes(1);
       expect(modal().props.visible).toBe(false);
+    });
+
+    it('a note is text among the items: no button role, and a tap neither runs anything nor closes', () => {
+      render(<Harness items={[...items, { note: 'Two players share this name.' }]} />);
+      open();
+      const note = screen.getByLabelText('Two players share this name.');
+      expect(note.props.accessibilityRole).toBe('text');
+      fireEvent.press(note);
+      expect(plain).not.toHaveBeenCalled();
+      expect(modal().props.visible).toBe(true);
     });
 
     it('Close, the backdrop and Back close without running anything', () => {

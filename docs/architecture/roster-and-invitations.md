@@ -637,7 +637,10 @@ themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by 
   before) and one "Same child as <player>, already on the roster" item per candidate (with
   "(#N)" after the name when the record has a jersey, jersey 0 included, as the roster row shows
   it; each item is keyed by the player id through `ActionMenuItem.key`, so two records with the
-  same name are two rows; two same-named records without a jersey still read alike), from
+  same name are two rows. Records that would read exactly alike (same name, no jersey) are not
+  offered: one non-pressable line, an `ActionMenuNote`, says more than one player has that name
+  and to give each a jersey number, and "Add as a new player" stays; rows that read differently
+  from every other get nothing extra, #1110), from
   `utils/join-request-targets.ts#attachablePlayers` (members that are managed, not deleted and not
   in `team.guardianLinkedPlayerIds`; a record with the typed name first, then by name via
   `sortRosterMembers`). A SELF request, or a roster without such a record, approves at once as
