@@ -50,8 +50,8 @@ import { NotFoundError } from './errors';
  * team. Deleting the coach who manages that record (`deleteAccount`: the coach
  * FOR UPDATE, their head-coach teams, then `updateMany({ managedById })`, which
  * needs the record's row) can wait on it in a cycle. PostgreSQL's deadlock
- * detector aborts one side with 40P01, which `classifyDbError` does not map:
- * that side answers a 500, not the retryable 503. The approval without
+ * detector aborts one side with 40P01, which `classifyDbError` answers as the
+ * retryable 503 `transaction_timeout`; nothing was written. The approval without
  * `playerId` locks only the requester and the approver (logins, never a
  * managed record), so it is not part of this cycle. Not reordered: locking
  * the record after the team would cycle with a guardian accept by the same

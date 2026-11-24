@@ -9,7 +9,7 @@ import { app, httpServer } from '../../src/index';
 import { WorkOSService } from '../../src/services/workos-service';
 import { DB_BUSY_RETRY_AFTER_SECONDS } from '../../src/models/pool-config';
 import { mockPrisma } from '../setup';
-import { lockTimeout, transactionClosed } from '../factories';
+import { deadlockDetected, lockTimeout, transactionClosed } from '../factories';
 import { logger } from '../../src/utils/logger';
 
 jest.mock('../../src/services/workos-service');
@@ -53,6 +53,16 @@ describe('database pool timeout through the central error handler', () => {
 
   it("answers PostgreSQL's lock_timeout (55P03) as 503 transaction_timeout (#908)", async () => {
     (mockPrisma.user.findUnique as jest.Mock).mockRejectedValueOnce(lockTimeout());
+
+    const res = await request(app).get('/api/v1/teams').set('Authorization', 'Bearer signed.jwt.token');
+
+    expect(res.status).toBe(503);
+    expect(res.headers['retry-after']).toBe(String(DB_BUSY_RETRY_AFTER_SECONDS));
+    expect(res.body.code).toBe('transaction_timeout');
+  });
+
+  it('answers a deadlock PostgreSQL broke (40P01) as 503 transaction_timeout', async () => {
+    (mockPrisma.user.findUnique as jest.Mock).mockRejectedValueOnce(deadlockDetected());
 
     const res = await request(app).get('/api/v1/teams').set('Authorization', 'Bearer signed.jwt.token');
 
