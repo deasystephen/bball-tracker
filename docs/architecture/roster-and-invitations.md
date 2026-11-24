@@ -597,8 +597,9 @@ themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by 
   `updateMany({ managedById })`, which needs the record's row) can wait on it in a cycle, for
   example while a second head coach approves onto a record the departing coach created.
   PostgreSQL's deadlock detector (1 s by default, before the 4 s `lock_timeout`) aborts one side
-  with 40P01, which `classifyDbError` does not map: that side (the approval or the deletion)
-  answers **500**, not the retryable 503; nothing was written and a retry succeeds. An approval
+  with 40P01, which `classifyDbError` maps like a lock timeout: that side (the approval or the
+  deletion) answers the retryable **503** `transaction_timeout`; nothing was written and a retry
+  succeeds. An approval
   without `playerId` locks only logins and is not part of this cycle. Not reordered: the record
   after the team would cycle with a guardian accept by the same parent for the same record.
   **`…/decline`**: one status-guarded update, `childName` cleared, nothing written to the roster,

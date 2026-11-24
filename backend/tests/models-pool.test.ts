@@ -27,7 +27,7 @@ import {
 } from '../src/models/pool-config';
 import { FINALIZE_LOCK_TIMEOUT_MS, FINALIZE_TRANSACTION_TIMEOUT_MS } from '../src/services/stats-service';
 import { REVOCATION_SWEEP_STALL_MS } from '../src/websocket/revocation';
-import { lockTimeout, transactionClosed } from './factories';
+import { deadlockDetected, lockTimeout, serializationFailure, transactionClosed } from './factories';
 
 const TASK_DEFINITION = JSON.parse(
   readFileSync(path.resolve(__dirname, '../../infra/task-definition.json'), 'utf8')
@@ -235,6 +235,14 @@ describe('classifyDbError (#908)', () => {
   it("classifies PostgreSQL's lock_timeout (55P03) behind P2039 or P2010 as lock_wait", () => {
     expect(classifyDbError(lockTimeout('P2039'))).toBe('lock_wait');
     expect(classifyDbError(lockTimeout('P2010'))).toBe('lock_wait');
+  });
+
+  it('classifies a deadlock PostgreSQL broke (40P01) as lock_wait, and not as a lock timeout', () => {
+    expect(classifyDbError(deadlockDetected('P2034'))).toBe('lock_wait');
+    expect(classifyDbError(new Error('wrapper', { cause: deadlockDetected('P2010') }))).toBe('lock_wait');
+    expect(isLockTimeoutError(deadlockDetected())).toBe(false);
+    // P2034 is also a serialization failure, which is not a lock wait.
+    expect(classifyDbError(serializationFailure())).toBeUndefined();
   });
 
   it('isLockTimeoutError tells the PostgreSQL cancel from a Prisma expiry, also behind a cause (#934)', () => {

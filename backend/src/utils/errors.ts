@@ -480,8 +480,9 @@ export class ConvertRefusedError extends DetailedError<Record<string, unknown>> 
 
 /**
  * 503 — a transaction was cancelled while it waited on a row lock (#908):
- * Prisma's interactive-transaction timeout (P2028) or PostgreSQL's
- * `lock_timeout` (55P03). Nothing was written, so the user can safely retry.
+ * Prisma's interactive-transaction timeout (P2028), PostgreSQL's
+ * `lock_timeout` (55P03), or a deadlock PostgreSQL broke by aborting this
+ * transaction (40P01). Nothing was written, so the user can safely retry.
  * The central error handler and `respondWithError` render it with
  * `Retry-After`; `models/pool-config.ts#classifyDbError` makes one from the raw
  * database error, which rides on `cause` with its timing.
