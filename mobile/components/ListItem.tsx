@@ -8,6 +8,8 @@ import {
   TouchableOpacityProps,
   View,
   StyleSheet,
+  type StyleProp,
+  type ViewStyle,
 } from 'react-native';
 import { ThemedText } from './ThemedText';
 import { ThemedView } from './ThemedView';
@@ -36,7 +38,7 @@ interface ListItemProps extends Omit<TouchableOpacityProps, 'style'> {
   leftElement?: React.ReactNode;
   onPress?: () => void;
   variant?: 'default' | 'card';
-  style?: TouchableOpacityProps['style'];
+  style?: StyleProp<ViewStyle>;
 }
 
 export const ListItem: React.FC<ListItemProps> = ({

@@ -43,6 +43,9 @@ jest.mock('expo-router', () => ({
 
 // Mock expo-linking
 jest.mock('expo-linking', () => ({
+  // The real one: expo-router's path extraction calls it on every URL since
+  // SDK 58, and tests that drive the real router parser need its behaviour.
+  unwrapDevLaunchURL: jest.requireActual('expo-linking').unwrapDevLaunchURL,
   createURL: jest.fn((path) => `myapp://${path}`),
   parse: jest.fn(),
   openURL: jest.fn(),
@@ -121,6 +124,7 @@ jest.mock('react-native-reanimated', () => {
       bezier: () => (v) => v,
     },
     FadeIn: { duration: () => ({ delay: () => ({}) }) },
+    FadeInDown: { duration: () => ({ delay: () => ({}) }) },
     FadeInLeft: { duration: () => ({}) },
     FadeOut: { duration: () => ({}) },
     Layout: { duration: () => ({}) },
@@ -174,16 +178,6 @@ jest.mock('react-native-confetti-cannon', () => {
   return React.forwardRef(function MockConfettiCannon(props, ref) {
     return React.createElement('View', { ...props, ref });
   });
-});
-
-// Mock moti
-jest.mock('moti', () => {
-  const React = require('react');
-  return {
-    MotiView: ({ children, ...props }) =>
-      React.createElement('View', props, children),
-    AnimatePresence: ({ children }) => children,
-  };
 });
 
 // Mock react-native-svg

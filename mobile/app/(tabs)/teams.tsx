@@ -211,7 +211,7 @@ export default function TeamsScreen() {
               variant="ghost"
               onPress={() => fetchNextPage()}
             />
-          ) : null
+          ) : undefined
         }
         refreshControl={
           <RefreshControl

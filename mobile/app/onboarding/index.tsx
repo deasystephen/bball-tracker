@@ -49,7 +49,7 @@ export default function OnboardingScreen() {
   const router = useRouter();
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<React.ComponentRef<typeof ScrollView>>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
 
   const handleScroll = (event: { nativeEvent: { contentOffset: { x: number } } }) => {

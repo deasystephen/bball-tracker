@@ -558,7 +558,7 @@ export default function InvitationsScreen() {
               {staffInvitations.map(renderStaffInvitation)}
               {guardianInvitations.map(renderGuardianInvitation)}
             </View>
-          ) : null
+          ) : undefined
         }
         contentContainerStyle={{
           paddingHorizontal: padding,

@@ -239,7 +239,7 @@ export default function AnnouncementThreadScreen() {
               message={t('announcements.noRepliesMessage')}
             />
           }
-          ListFooterComponent={isFetchingNextPage ? <LoadingSpinner message={t('announcements.loadingMore')} /> : null}
+          ListFooterComponent={isFetchingNextPage ? <LoadingSpinner message={t('announcements.loadingMore')} /> : undefined}
           onEndReached={handleEndReached}
           onEndReachedThreshold={0.5}
           refreshControl={

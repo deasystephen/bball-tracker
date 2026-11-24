@@ -5,13 +5,13 @@
 import React, { useEffect } from 'react';
 import { View, StyleSheet, Pressable } from 'react-native';
 import Animated, {
+  FadeInDown,
   useSharedValue,
   useAnimatedStyle,
   withSpring,
   withTiming,
   withRepeat,
 } from 'react-native-reanimated';
-import { MotiView } from 'moti';
 import { ThemedText } from '../ThemedText';
 import { Card } from '../Card';
 import { useTheme } from '../../hooks/useTheme';
@@ -101,15 +101,7 @@ const GameCardInner: React.FC<GameCardProps> = ({ game, onPress, index = 0 }) =>
   };
 
   return (
-    <MotiView
-      from={{ opacity: 0, translateY: 20 }}
-      animate={{ opacity: 1, translateY: 0 }}
-      transition={{
-        type: 'timing',
-        duration: 350,
-        delay: index * 80,
-      }}
-    >
+    <Animated.View entering={FadeInDown.duration(350).delay(index * 80)}>
       <Animated.View style={[pressAnimatedStyle]}>
         <Pressable
           onPress={onPress}
@@ -187,7 +179,7 @@ const GameCardInner: React.FC<GameCardProps> = ({ game, onPress, index = 0 }) =>
           </Animated.View>
         </Pressable>
       </Animated.View>
-    </MotiView>
+    </Animated.View>
   );
 };
 

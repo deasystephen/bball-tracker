@@ -348,7 +348,7 @@ export default function Games() {
                 variant="ghost"
                 onPress={() => fetchNextPage()}
               />
-            ) : null
+            ) : undefined
           }
           refreshControl={
             <RefreshControl

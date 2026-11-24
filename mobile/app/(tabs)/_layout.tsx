@@ -28,7 +28,7 @@ const TAB_CONFIGS = [
 
 const TRACK_INDEX = 2;
 
-function CustomTabBar({ state, navigation }: BottomTabBarProps) {
+function CustomTabBar({ state, navigateToTab }: BottomTabBarProps) {
   const { colors, colorScheme } = useTheme();
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
@@ -46,8 +46,8 @@ function CustomTabBar({ state, navigation }: BottomTabBarProps) {
   );
 
   const handlePress = useCallback(
-    (index: number, routeName: string, isFocused: boolean) => {
-      if (!isFocused) {
+    (index: number, routeKey: string | undefined, isFocused: boolean) => {
+      if (!isFocused && routeKey) {
         pillPosition.set(
           withSpring(index, {
             damping: 18,
@@ -60,10 +60,12 @@ function CustomTabBar({ state, navigation }: BottomTabBarProps) {
             withSpring(1, { damping: 8, stiffness: 200 })
           )
         );
-        navigation.navigate(routeName);
+        // SDK 58's router fork hands the tab bar `navigateToTab(route.key)`;
+        // the `navigation` prop it replaced is gone (#922).
+        navigateToTab(routeKey);
       }
     },
-    [navigation, pillPosition, scales]
+    [navigateToTab, pillPosition, scales]
   );
 
   const pillStyle = useAnimatedStyle(() => {
@@ -133,16 +135,12 @@ function CustomTabBar({ state, navigation }: BottomTabBarProps) {
             const isTrackTab = index === TRACK_INDEX;
             const label = t(tab.labelKey);
 
-            const routeIndex = state.routes.findIndex(
-              (r) => r.name === tab.name
-            );
-            const routeName =
-              routeIndex >= 0 ? state.routes[routeIndex].name : tab.name;
+            const routeKey = state.routes.find((r) => r.name === tab.name)?.key;
 
             return (
               <TouchableOpacity
                 key={tab.name}
-                onPress={() => handlePress(index, routeName, isFocused)}
+                onPress={() => handlePress(index, routeKey, isFocused)}
                 style={styles.tabItem}
                 accessibilityRole="button"
                 accessibilityState={{ selected: isFocused }}

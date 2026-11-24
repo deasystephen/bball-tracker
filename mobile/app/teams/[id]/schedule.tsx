@@ -267,7 +267,7 @@ export default function TeamScheduleScreen() {
               style={styles.addButton}
               testID="schedule-add-practice"
             />
-          ) : null
+          ) : undefined
         }
         ListEmptyComponent={
           <EmptyState
