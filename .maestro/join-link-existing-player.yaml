@@ -160,7 +160,6 @@ appId: com.bballtracker.mobile
     direction: DOWN
     timeout: 10000
     visibilityPercentage: 60
-- assertNotVisible: "Ethan W\\..*"
 # The status chips are on the Roster screen, which "Add Player" opens. The
 # chip's label is row-anchored ("<player> status: <label>").
 - scrollUntilVisible:
@@ -177,3 +176,6 @@ appId: com.bballtracker.mobile
     timeout: 10000
     visibilityPercentage: 60
 - assertNotVisible: "Ethan Williams status: Not invited"
+# Only the rows on screen: the unchanged player count above is what proves no
+# player was added.
+- assertNotVisible: "Ethan W\\..*"

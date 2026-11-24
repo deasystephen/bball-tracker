@@ -1504,7 +1504,7 @@ After testing, optionally tear down:
   - `guardian-rsvp.yaml` — "My kids" + "Responding for" RSVP as a pure guardian (I.5, Sonya Curry)
   - `practice-schedule.yaml` — D.11/D.12: a weekly series of three on the Lakers, then cancel one occurrence with a reason (#33, Frank Vogel; mutates: the seed removes practices titled "E2E Practice")
   - `join-link.yaml` — D.14: a parent asks to join the Lakers through the seeded join link, Frank approves and replaces the link (#210; needs `SEED_MAESTRO_INVITE_TOKEN=true` on the seed; mutates: the seed rewrites the Lakers' join link and removes the added player). Passed 2026-11-22
-  - `join-link-existing-player.yaml` — D.14: a parent asks to join for a child the coach already typed in, and Frank approves the request onto the seeded Ethan Williams instead of adding a player (#1072, #1109; needs `SEED_MAESTRO_INVITE_TOKEN=true` on the seed; mutates: the seed deletes the guardian link on Ethan Williams and rewrites the Lakers' join link). Passed 2026-11-23
+  - `join-link-existing-player.yaml` — D.14: a parent asks to join for a child the coach already typed in, and Frank approves the request onto the seeded Ethan Williams instead of adding a player (#1072, #1109; needs `SEED_MAESTRO_INVITE_TOKEN=true` on the seed; mutates: the seed deletes the guardian links on the seeded managed Lakers players other than Bryce James and rewrites the Lakers' join link). Passed 2026-11-23
   - Not covered: completing an invite accept (E.5; the deep-link flow stops at the confirmation alert), exports (M), push (N), any WorkOS sign-in
 
 ### C. Sandbox SES recipient management

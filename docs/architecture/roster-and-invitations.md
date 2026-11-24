@@ -690,8 +690,8 @@ themselves. `services/join-link-service.ts`, routes in `api/join/routes.ts` (by 
   Lakers' join links and requests and writes one fresh link. `.maestro/join-link-existing-player.yaml`
   (#1109) takes the other choice on the approve menu: Gloria's request for "Ethan W." is approved
   onto the seeded Ethan Williams (#14), the player count stays and his chip reads "Parent
-  connected"; the seed deletes the guardian links on Ethan Williams and Marcus Johnson, the two
-  seeded managed players with no parent. `join-link.yaml` was first run and passed on
+  connected"; the seed deletes the guardian links on every seeded managed Lakers player but Bryce
+  James (the menu offers all five, and a manual run can pick any). `join-link.yaml` was first run and passed on
   2026-11-22 (iPhone 17 / iOS 26.5 simulator, fresh 1.7.0 Debug build). It scrolls to Gloria in
   the developer login list and matches `"Frank Vogel, .*"`, because interrupted runs of
   `test-leftovers.db.test.ts` leave `Frank Vogel <id>` coach rows that the seed keeps by design.
