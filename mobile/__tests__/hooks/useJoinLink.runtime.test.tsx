@@ -179,8 +179,42 @@ describe('useJoinLink runtime', () => {
         team_id: 't1',
         request_id: 'req-1',
         kind: 'child',
+        linked_existing: false,
       });
       expectNoSecretsTracked();
+    });
+
+    it('useApproveJoinRequest with playerId sends it and tracks linked_existing, never the name (#1072)', async () => {
+      mockedPost.mockResolvedValueOnce({ data: { success: true } });
+      const { wrapper } = createQueryWrapper();
+      const { result } = renderHook(() => useApproveJoinRequest(), { wrapper });
+
+      await act(async () => {
+        await result.current.mutateAsync({ teamId: 't1', request, playerId: 'p-typed' });
+      });
+
+      expect(mockedPost).toHaveBeenCalledWith('/teams/t1/join-requests/req-1/approve', { playerId: 'p-typed' });
+      expect(mockedTrack).toHaveBeenCalledWith('join_request_approved', {
+        team_id: 't1',
+        request_id: 'req-1',
+        kind: 'child',
+        linked_existing: true,
+      });
+      expectNoSecretsTracked();
+    });
+
+    it('useApproveJoinRequest re-reads the team when linking onto a record fails (taken meanwhile)', async () => {
+      mockedPost.mockRejectedValueOnce(new Error('409'));
+      const { wrapper, client } = createQueryWrapper();
+      const invalidateSpy = jest.spyOn(client, 'invalidateQueries');
+      const { result } = renderHook(() => useApproveJoinRequest(), { wrapper });
+
+      await act(async () => {
+        await expect(result.current.mutateAsync({ teamId: 't1', request, playerId: 'p-typed' })).rejects.toThrow('409');
+      });
+
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: teamKeys.detail('t1') });
+      expect(mockedTrack).not.toHaveBeenCalled();
     });
 
     it('useDeclineJoinRequest posts and refreshes the requests only', async () => {

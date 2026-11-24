@@ -1,9 +1,11 @@
 /**
  * Schema validation for team join links (#210):
- * `POST /teams/:teamId/join-link` and `POST /join/:token`.
+ * `POST /teams/:teamId/join-link`, `POST /join/:token` and
+ * `POST /teams/:teamId/join-requests/:requestId/approve` (#1072).
  */
 
 import {
+  approveJoinRequestSchema,
   createJoinLinkSchema,
   joinRequestSchema,
   JOIN_LINK_MAX_EXPIRES_DAYS,
@@ -118,6 +120,46 @@ describe('joinRequestSchema', () => {
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data).toEqual({ kind: 'child', childName: 'Riley', relationship: 'GUARDIAN' });
+    }
+  });
+});
+
+describe('approveJoinRequestSchema (#1072)', () => {
+  const PLAYER_ID = 'c8d9e0f1-a2b3-4567-a901-cdef01234567';
+
+  it('accepts an empty body: approve as before (SELF joins, CHILD creates a new record)', () => {
+    const result = approveJoinRequestSchema.safeParse({});
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).toEqual({});
+    }
+  });
+
+  it('accepts the existing roster record to link a CHILD request to', () => {
+    const result = approveJoinRequestSchema.safeParse({ playerId: PLAYER_ID });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).toEqual({ playerId: PLAYER_ID });
+    }
+  });
+
+  it('strips unknown keys', () => {
+    const result = approveJoinRequestSchema.safeParse({ playerId: PLAYER_ID, childName: 'Riley', isPrimary: false });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).toEqual({ playerId: PLAYER_ID });
+    }
+  });
+
+  it.each(['not-a-uuid', '', 42, null])('rejects playerId %p', (playerId) => {
+    expect(approveJoinRequestSchema.safeParse({ playerId }).success).toBe(false);
+  });
+
+  it('names the field in the message', () => {
+    const result = approveJoinRequestSchema.safeParse({ playerId: 'nope' });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0].message).toBe('playerId must be a valid UUID');
     }
   });
 });

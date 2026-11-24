@@ -51,6 +51,17 @@ const GUARDIAN_INVITATION_SELECT = {
   acceptedAt: true,
 } satisfies Prisma.GuardianInvitationSelect;
 
+/** A guardian link as the accept and a join request's approval read it. */
+const GUARDIAN_LINK_SELECT = {
+  id: true,
+  parentId: true,
+  childId: true,
+  relationship: true,
+  isPrimary: true,
+} satisfies Prisma.GuardianSelect;
+
+export type GuardianLink = Prisma.GuardianGetPayload<{ select: typeof GUARDIAN_LINK_SELECT }>;
+
 /** Which invitations a Resend may see: one child + address, within one team lineage (the club across seasons). */
 interface GuardianResendScope {
   childId: string;
@@ -995,6 +1006,44 @@ export class GuardianService {
     }
   }
 
+  /**
+   * Link an adult as guardian of a child, inside the caller's transaction.
+   * The caller must already hold the child's `User` row lock (`lockUsers`):
+   * primacy is a count-then-insert, and the child lock is what keeps two
+   * links from both being primary (#664). An existing link is returned as it
+   * is. Then the derived-role rule: only a bare PLAYER account (no team
+   * memberships, no staff rows) becomes PARENT; a coach who is also a parent
+   * stays COACH. Shared by the guardian accept and a join request approved
+   * onto an existing roster record (#1072).
+   */
+  static async linkGuardianLocked(
+    tx: Prisma.TransactionClient,
+    link: { parentId: string; childId: string; relationship: GuardianRelationship },
+    parentRole: UserRole
+  ): Promise<{ guardian: GuardianLink; existed: boolean }> {
+    const { parentId, childId, relationship } = link;
+    const existing = await tx.guardian.findUnique({
+      where: { parentId_childId: { parentId, childId } },
+      select: GUARDIAN_LINK_SELECT,
+    });
+    const guardian =
+      existing ??
+      (await tx.guardian.create({
+        data: {
+          parentId,
+          childId,
+          relationship,
+          // Exactly one primary per child: the first link.
+          isPrimary: (await tx.guardian.count({ where: { childId } })) === 0,
+        },
+        select: GUARDIAN_LINK_SELECT,
+      }));
+    if (parentRole === 'PLAYER') {
+      await GuardianService.promoteBareAccountToParent(tx, parentId);
+    }
+    return { guardian, existed: existing !== null };
+  }
+
   private static async accept(
     invitation: Prisma.GuardianInvitationGetPayload<object>,
     verifiedParentId?: string
@@ -1050,30 +1099,14 @@ export class GuardianService {
         select: GUARDIAN_INVITATION_SELECT,
       });
 
-      const existingLink = await tx.guardian.findUnique({
-        where: { parentId_childId: { parentId, childId: invitation.childId } },
-      });
-
-      const guardian =
-        existingLink ??
-        (await tx.guardian.create({
-          data: {
-            parentId,
-            childId: invitation.childId,
-            relationship: invitation.relationship,
-            // Exactly one primary per child: the first link.
-            isPrimary: (await tx.guardian.count({ where: { childId: invitation.childId } })) === 0,
-          },
-        }));
-
-      // Role is derived: only a bare PLAYER account (no team memberships, no
-      // staff rows) becomes PARENT. A coach who is also a parent stays COACH.
-      if (parent.role === 'PLAYER') {
-        await GuardianService.promoteBareAccountToParent(tx, parentId);
-      }
+      const { guardian, existed } = await GuardianService.linkGuardianLocked(
+        tx,
+        { parentId, childId: invitation.childId, relationship: invitation.relationship },
+        parent.role
+      );
 
       return {
-        linked: { existed: !!existingLink },
+        linked: { existed },
         result: {
           kind: 'guardian' as const,
           invitation: updatedInvitation,

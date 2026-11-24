@@ -259,12 +259,33 @@ export const TRANSACTION_EXPIRED_MESSAGE = 'The timeout for this transaction was
 /** PostgreSQL SQLSTATE for `lock_timeout` ("canceling statement due to lock timeout"). */
 export const LOCK_TIMEOUT_SQLSTATE = '55P03';
 
+/**
+ * PostgreSQL SQLSTATE for a detected deadlock ("deadlock detected"): two
+ * transactions wait on each other's row locks and the detector (1 s by
+ * default, so before `lock_timeout`) aborts one. The aborted side wrote
+ * nothing and a retry succeeds, the same contract as a lock timeout.
+ */
+export const DEADLOCK_SQLSTATE = '40P01';
+
 export type DbErrorKind = 'lock_wait' | 'busy';
 
 /** The pg driver adapter's SQLSTATE, which Prisma 7 puts on `meta` (P2010 for raw queries, P2039 for the ORM). */
 function driverSqlState(candidate: unknown): unknown {
   const meta = (candidate as { meta?: { driverAdapterError?: { cause?: { code?: unknown } } } }).meta;
   return meta?.driverAdapterError?.cause?.code;
+}
+
+/**
+ * Whether PostgreSQL aborted this transaction to break a deadlock (40P01).
+ * The adapter maps that to its own `TransactionWriteConflict` kind, which
+ * carries the SQLSTATE on `originalCode` and no `code`; Prisma raises it as
+ * P2010 from a raw query and P2034 from an ORM one (captured against
+ * Postgres 18, 2026-11-23, `tests/integration/pool-lock-timeout.db.test.ts`).
+ * P2034 alone is not enough: it is also a serialization failure (40001).
+ */
+function isDeadlock(candidate: unknown): boolean {
+  const meta = (candidate as { meta?: { driverAdapterError?: { cause?: { originalCode?: unknown } } } }).meta;
+  return meta?.driverAdapterError?.cause?.originalCode === DEADLOCK_SQLSTATE;
 }
 
 /**
@@ -288,7 +309,10 @@ export function isLockTimeoutError(err: unknown): boolean {
  *   another request. Either Prisma `P2028` for an interactive transaction that
  *   outlived its timeout, or PostgreSQL's `lock_timeout` (55P03,
  *   `DB_LOCK_TIMEOUT_MS`), which Prisma wraps as P2010 or P2039 with the SQLSTATE
- *   on `meta.driverAdapterError.cause.code`.
+ *   on `meta.driverAdapterError.cause.code`. A deadlock PostgreSQL broke by
+ *   aborting this transaction (40P01, `isDeadlock`) is the same kind: it
+ *   waited on a lock, wrote nothing, and a retry succeeds. It is still logged
+ *   at error, so a deadlock stays visible.
  * - `busy`: a pg pool wait/connect timeout, or P2028 for `maxWait`
  *   exhaustion. Answered with `DB_BUSY_BODY`.
  *
@@ -300,7 +324,11 @@ export function classifyDbError(err: unknown): DbErrorKind | undefined {
   for (const candidate of causeChain(err)) {
     const message = messageOf(candidate);
     const isP2028 = (candidate as { code?: unknown }).code === 'P2028';
-    if ((isP2028 && message.includes(TRANSACTION_EXPIRED_MESSAGE)) || driverSqlState(candidate) === LOCK_TIMEOUT_SQLSTATE) {
+    if (
+      (isP2028 && message.includes(TRANSACTION_EXPIRED_MESSAGE)) ||
+      driverSqlState(candidate) === LOCK_TIMEOUT_SQLSTATE ||
+      isDeadlock(candidate)
+    ) {
       return 'lock_wait';
     }
     if ((isP2028 && message.includes(TRANSACTION_START_MESSAGE)) || matchesPoolTimeout(candidate)) {

@@ -24,6 +24,8 @@ import { useTranslation } from '../i18n';
 
 export interface ActionMenuItem {
   label: string;
+  /** Stable React key when two items could share a label (e.g. a player id); defaults to the label. */
+  key?: string;
   destructive?: boolean;
   onPress: () => void;
   /** Run only after the sheet has finished closing (see the file comment). */
@@ -130,7 +132,7 @@ export function ActionMenu({ visible, title, items, onClose }: ActionMenuProps) 
           </ThemedText>
           {items.map((item) => (
             <TouchableOpacity
-              key={item.label}
+              key={item.key ?? item.label}
               onPress={() => pressItem(item)}
               accessibilityRole="button"
               accessibilityLabel={item.label}

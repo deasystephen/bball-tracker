@@ -42,6 +42,23 @@ import { NotFoundError } from './errors';
  * coach who manages it, which rewrites `managedById` after locking their
  * teams; PostgreSQL then aborts one side (40P01).
  *
+ * Second known residual, the same shape (#1072): approving a CHILD join
+ * request onto an existing record (`JoinLinkService.approveRequest` with
+ * `playerId`) locks that managed record with the requester and approver
+ * (`lockUsers`, `FOR NO KEY UPDATE`) and then waits for this team row. It is
+ * the only writer that holds a managed player's row and then waits for a
+ * team. Deleting the coach who manages that record (`deleteAccount`: the coach
+ * FOR UPDATE, their head-coach teams, then `updateMany({ managedById })`, which
+ * needs the record's row) can wait on it in a cycle. PostgreSQL's deadlock
+ * detector aborts one side with 40P01, which `classifyDbError` answers as the
+ * retryable 503 `transaction_timeout`; nothing was written. The approval without
+ * `playerId` locks only the requester and the approver (logins, never a
+ * managed record), so it is not part of this cycle. Not reordered: locking
+ * the record after the team would cycle with a guardian accept by the same
+ * parent for the same record (`lockUsers([child, parent])`, while the
+ * approval holds the parent and the team), and no record lock at all loses
+ * the per-child lock that keeps a child to one primary guardian.
+ *
  * `FOR NO KEY UPDATE`, not `FOR UPDATE`: it conflicts with itself, which is
  * all the serialisation needs, but not with the `FOR KEY SHARE` that every
  * foreign-key insert naming the team takes, so a game, roster or staff insert
@@ -61,6 +78,30 @@ export async function lockTeamOrNotFound(tx: Prisma.TransactionClient, teamId: s
   if (!(await lockTeamRow(tx, teamId))) {
     throw new NotFoundError('Team not found');
   }
+}
+
+/**
+ * `SELECT … FOR UPDATE` on one `TeamMember` row (#1072): a membership check
+ * that stays true until the caller commits. `TeamService.removePlayer` takes
+ * no User or Team lock, so a plain read of the row could be followed by a
+ * removal committing before the caller's writes; behind this lock a removal
+ * that committed first reads as no row, and one that comes second waits for
+ * the caller. Taken after the team row lock (User → Team → TeamMember); no
+ * writer of a `TeamMember` row takes a User or Team lock after touching it
+ * (`removePlayer` deletes it and then practice answers; `updateTeamMember`
+ * takes the team lock first for a number, and no lock for a position-only
+ * edit), so this adds no cycle.
+ *
+ * Returns whether the row exists.
+ */
+export async function lockTeamMemberRow(
+  tx: Prisma.TransactionClient,
+  teamId: string,
+  playerId: string
+): Promise<boolean> {
+  const rows = await tx.$queryRaw<{ id: string }[]>`
+    SELECT "id" FROM "TeamMember" WHERE "teamId" = ${teamId} AND "playerId" = ${playerId} FOR UPDATE`;
+  return rows.length > 0;
 }
 
 /**

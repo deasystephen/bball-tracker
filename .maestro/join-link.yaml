@@ -164,6 +164,10 @@ appId: com.bballtracker.mobile
 - assertVisible: "Added by Gloria James, the player's guardian"
 - assertVisible: "gloria.james@example.com"
 - tapOn: "Approve Maestro Joiner"
+# The Lakers have typed roster records with no parent linked, so a child
+# request asks which record it is (#1072). This flow adds a new player.
+- assertVisible: "Add Maestro Joiner to the roster"
+- tapOn: "Add as a new player"
 - extendedWaitUntil:
     visible: "No requests are waiting.*"
     timeout: 10000

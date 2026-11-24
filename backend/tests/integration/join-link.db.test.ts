@@ -20,6 +20,9 @@
  *  - approval writes the roster: SELF adds the member; CHILD creates a managed
  *    record with no login, its membership and the primary guardian link, and
  *    makes a bare PLAYER a PARENT; two concurrent approvals write it once;
+ *  - a CHILD request approved onto an existing managed record (#1072) links
+ *    the parent as its primary guardian and creates nothing; two approvals
+ *    onto one record at once (one request or two) leave exactly one link;
  *  - account deletion removes the requester's requests (so the row can be
  *    erased) and un-owns the links a deleted coach created.
  *
@@ -32,8 +35,15 @@ import { AccountService } from '../../src/services/account-service';
 import { NotificationService } from '../../src/services/notification-service';
 import { sweepLapsedJoinRequests } from '../../src/services/join-request-sweep';
 import { canAccessTeam } from '../../src/utils/permissions';
-import { BadRequestError, JoinLinkInactiveError, NotFoundError } from '../../src/utils/errors';
+import {
+  BadRequestError,
+  JoinLinkInactiveError,
+  JoinPlayerUnavailableError,
+  NotFoundError,
+} from '../../src/utils/errors';
 import { DbFixtures, type Org } from '../support/db-fixtures';
+import { backendPid, pause, track, waitForBlockedBy, type Tracked } from '../support/db-locks';
+import { lockUsers } from '../../src/utils/user-row-lock';
 
 jest.setTimeout(30000);
 
@@ -530,6 +540,240 @@ describe('JoinLinkService (real Postgres, #210)', () => {
     expect(await prisma.user.count({ where: { name: childName } })).toBe(1);
     expect(await prisma.teamMember.count({ where: { teamId: club.teamId } })).toBe(1);
     expect(await prisma.guardian.count({ where: { parentId } })).toBe(1);
+  });
+
+  describe('approving a CHILD request onto an existing roster record (#1072)', () => {
+    /** A managed roster record (no login, no email) the coach typed in, on the team. */
+    async function typedPlayer(label: string, club: Org, coachId: string): Promise<string> {
+      counter += 1;
+      const id = await fx.user(`typed-${label}${counter}`, 'PLAYER');
+      await prisma.user.update({ where: { id }, data: { isManaged: true, managedById: coachId, email: null } });
+      await fx.member(id, club);
+      return id;
+    }
+
+    /** A team with two roster managers, a link, and one typed player. */
+    async function setup(label: string): Promise<{
+      club: Org;
+      coachId: string;
+      secondCoachId: string;
+      link: JoinLinkView;
+      playerId: string;
+    }> {
+      const { org: club, coachId } = await team(label);
+      const secondCoachId = await fx.user(`second-${label}${counter}`, 'COACH');
+      await fx.staff(secondCoachId, club);
+      const link = await JoinLinkService.createLink(club.teamId, {}, coachId);
+      const playerId = await typedPlayer(label, club, coachId);
+      return { club, coachId, secondCoachId, link, playerId };
+    }
+
+    async function childRequest(link: JoinLinkView, parentId: string, childName: string): Promise<string> {
+      const asked = await JoinLinkService.requestToJoin(
+        tokenOf(link),
+        { kind: 'child', childName, relationship: 'MOTHER' },
+        parentId
+      );
+      if (asked.status !== 'pending') throw new Error('expected a pending request');
+      return asked.request.id;
+    }
+
+    it('links the parent as primary guardian of the existing record and creates no duplicate', async () => {
+      const { club, coachId, link, playerId } = await setup('attach');
+      const parentId = await adult('mum');
+      const requestId = await childRequest(link, parentId, `Typed-${fx.run}`);
+
+      const approved = await JoinLinkService.approveRequest(club.teamId, requestId, coachId, { playerId });
+
+      expect(approved).toMatchObject({ playerId, linkedExisting: true, request: { status: 'ACCEPTED', kind: 'CHILD' } });
+      expect(await prisma.teamMember.count({ where: { teamId: club.teamId } })).toBe(1);
+      expect(await prisma.user.count({ where: { name: `Typed-${fx.run}` } })).toBe(0);
+      expect(await prisma.guardian.findMany({ where: { childId: playerId } })).toEqual([
+        expect.objectContaining({ parentId, relationship: 'MOTHER', isPrimary: true }),
+      ]);
+      // The coach's record is untouched: still managed by them, still no login.
+      expect(await prisma.user.findUniqueOrThrow({ where: { id: playerId } })).toMatchObject({
+        isManaged: true,
+        managedById: coachId,
+        email: null,
+      });
+      expect((await prisma.user.findUniqueOrThrow({ where: { id: parentId } })).role).toBe('PARENT');
+      expect(await canAccessTeam(parentId, club.teamId)).toBe(true);
+      expect(await prisma.teamJoinRequest.findUniqueOrThrow({ where: { id: requestId } })).toMatchObject({
+        status: 'ACCEPTED',
+        childName: null,
+      });
+    });
+
+    it('two coaches approving one request onto one record at once: one link, the loser gets 400', async () => {
+      const { club, coachId, secondCoachId, link, playerId } = await setup('same');
+      const parentId = await adult('dad');
+      const requestId = await childRequest(link, parentId, `Same-${fx.run}`);
+
+      // What this proves: whichever order the two calls run in, the request's
+      // status guard lets exactly one through and the other answers 400; it
+      // does not by itself prove the record's lock (the next test does).
+      const settled = await Promise.allSettled([
+        JoinLinkService.approveRequest(club.teamId, requestId, coachId, { playerId }),
+        JoinLinkService.approveRequest(club.teamId, requestId, secondCoachId, { playerId }),
+      ]);
+
+      expect(settled.filter((s) => s.status === 'fulfilled')).toHaveLength(1);
+      const [lost] = settled.filter((s): s is PromiseRejectedResult => s.status === 'rejected');
+      expect(lost.reason).toBeInstanceOf(BadRequestError);
+      expect(await prisma.guardian.count({ where: { childId: playerId } })).toBe(1);
+      expect(await prisma.teamMember.count({ where: { teamId: club.teamId } })).toBe(1);
+    });
+
+    it('two coaches approving two requests onto one record at once: one guardian, the loser gets 409 and stays pending', async () => {
+      const { club, coachId, secondCoachId, link, playerId } = await setup('two');
+      const firstParentId = await adult('first');
+      const secondParentId = await adult('second');
+      const firstRequestId = await childRequest(link, firstParentId, `Two-${fx.run}`);
+      const secondRequestId = await childRequest(link, secondParentId, `Two-${fx.run}`);
+
+      // Deterministic: the test holds the record's row lock, starts both
+      // approvals, waits until Postgres shows BOTH blocked on it (each has
+      // passed every unlocked read and is inside its transaction), and only
+      // then releases. So the two really contend, and the record's lock alone
+      // decides the outcome.
+      let calls: Tracked<unknown>[] = [];
+      await prisma.$transaction(
+        async (holder) => {
+          await lockUsers(holder, [playerId]);
+          const pid = await backendPid(holder);
+          calls = [
+            track(JoinLinkService.approveRequest(club.teamId, firstRequestId, coachId, { playerId })),
+            track(JoinLinkService.approveRequest(club.teamId, secondRequestId, secondCoachId, { playerId })),
+          ];
+          for (const call of calls) call.promise.catch(() => undefined);
+          // The first waiter queues on the row behind the holder; Postgres
+          // reports the second as blocked by that first waiter, so count the
+          // backends waiting on the holder directly or through one of those.
+          await waitForBlockedBy(holder, pid, { settled: calls[0] });
+          const deadline = Date.now() + 3000;
+          for (;;) {
+            await holder.$executeRaw`SELECT pg_stat_clear_snapshot()`;
+            const [{ n }] = await holder.$queryRaw<{ n: number }[]>`
+              WITH direct AS (
+                SELECT pid FROM pg_stat_activity WHERE ${pid}::int = ANY(pg_blocking_pids(pid))
+              )
+              SELECT count(*)::int AS n FROM pg_stat_activity a
+              WHERE ${pid}::int = ANY(pg_blocking_pids(a.pid))
+                 OR pg_blocking_pids(a.pid) && ARRAY(SELECT pid FROM direct)`;
+            if (n >= 2) break;
+            if (Date.now() > deadline || calls.some((call) => call.settled())) {
+              throw new Error(`expected both approvals waiting on the record lock, saw ${n}`);
+            }
+            await pause(25);
+          }
+        },
+        { timeout: 15_000 }
+      );
+      const settled = await Promise.allSettled(calls.map((call) => call.promise));
+
+      expect(settled.filter((s) => s.status === 'fulfilled')).toHaveLength(1);
+      const [lost] = settled.filter((s): s is PromiseRejectedResult => s.status === 'rejected');
+      expect(lost.reason).toBeInstanceOf(JoinPlayerUnavailableError);
+      expect(lost.reason).toMatchObject({ statusCode: 409, details: { reason: 'has_guardian' } });
+      const links = await prisma.guardian.findMany({ where: { childId: playerId } });
+      expect(links).toHaveLength(1);
+      expect(links[0].isPrimary).toBe(true);
+      // The loser rolled back whole: its request waits for the coach, its name intact.
+      const statuses = await prisma.teamJoinRequest.findMany({
+        where: { id: { in: [firstRequestId, secondRequestId] } },
+        select: { status: true, childName: true },
+      });
+      expect(statuses.map((s) => s.status).sort()).toEqual(['ACCEPTED', 'PENDING']);
+      expect(statuses.find((s) => s.status === 'PENDING')?.childName).toBe(`Two-${fx.run}`);
+      const loserParentId = links[0].parentId === firstParentId ? secondParentId : firstParentId;
+      expect((await prisma.user.findUniqueOrThrow({ where: { id: loserParentId } })).role).toBe('PLAYER');
+      expect(await canAccessTeam(loserParentId, club.teamId)).toBe(false);
+    });
+
+    it('a removal from the team committing while the approval waits: 409 not_on_team, nothing linked', async () => {
+      const { club, coachId, link, playerId } = await setup('removed');
+      const parentId = await adult('late');
+      const requestId = await childRequest(link, parentId, `Removed-${fx.run}`);
+
+      // The test removes the record from the team (what TeamService.removePlayer
+      // does, which takes no User or Team lock) and keeps that uncommitted
+      // while the approval runs. Postgres must show the approval waiting on
+      // it holding its User and Team locks, i.e. at the membership lock; the
+      // removal then commits.
+      let approval: Tracked<unknown> | undefined;
+      let blocked: { relations: string[] }[] = [];
+      await prisma.$transaction(
+        async (holder) => {
+          await holder.teamMember.delete({ where: { teamId_playerId: { teamId: club.teamId, playerId } } });
+          const pid = await backendPid(holder);
+          approval = track(JoinLinkService.approveRequest(club.teamId, requestId, coachId, { playerId }));
+          approval.promise.catch(() => undefined);
+          blocked = await waitForBlockedBy(holder, pid, {
+            tables: ['User', 'Team', 'TeamJoinRequest'],
+            settled: approval,
+          });
+        },
+        { timeout: 15_000 }
+      );
+
+      expect(blocked).toHaveLength(1);
+      expect(blocked[0].relations).toEqual(expect.arrayContaining(['Team', 'TeamJoinRequest', 'User']));
+      await expect(approval!.promise).rejects.toMatchObject({
+        statusCode: 409,
+        code: 'join_player_unavailable',
+        details: { reason: 'not_on_team' },
+      });
+      expect(await prisma.guardian.count({ where: { childId: playerId } })).toBe(0);
+      expect(await prisma.teamJoinRequest.findUniqueOrThrow({ where: { id: requestId } })).toMatchObject({
+        status: 'PENDING',
+        childName: `Removed-${fx.run}`,
+      });
+      expect((await prisma.user.findUniqueOrThrow({ where: { id: parentId } })).role).toBe('PLAYER');
+    });
+
+    it('refuses a record that cannot take the request, and writes nothing', async () => {
+      const { club, coachId, link, playerId } = await setup('refuse');
+      const { org: other, coachId: otherCoachId } = await team('elsewhere');
+      const elsewhereId = await typedPlayer('elsewhere', other, otherCoachId);
+      const loginId = await adult('login');
+      await fx.member(loginId, club);
+      const guardedId = await typedPlayer('guarded', club, coachId);
+      const existingGuardianId = await adult('existing');
+      await fx.guardian(existingGuardianId, guardedId);
+
+      const parentId = await adult('asker');
+      const requestId = await childRequest(link, parentId, `Refused-${fx.run}`);
+
+      await expect(
+        JoinLinkService.approveRequest(club.teamId, requestId, coachId, { playerId: elsewhereId })
+      ).rejects.toMatchObject({ statusCode: 409, details: { reason: 'not_on_team' } });
+      await expect(
+        JoinLinkService.approveRequest(club.teamId, requestId, coachId, { playerId: loginId })
+      ).rejects.toMatchObject({ statusCode: 409, details: { reason: 'not_managed' } });
+      await expect(
+        JoinLinkService.approveRequest(club.teamId, requestId, coachId, { playerId: guardedId })
+      ).rejects.toMatchObject({ statusCode: 409, details: { reason: 'has_guardian' } });
+
+      expect(await prisma.guardian.count({ where: { parentId } })).toBe(0);
+      expect(await prisma.teamJoinRequest.findUniqueOrThrow({ where: { id: requestId } })).toMatchObject({
+        status: 'PENDING',
+      });
+
+      // A SELF request cannot be linked to a record.
+      const selfId = await adult('self');
+      await JoinLinkService.requestToJoin(tokenOf(link), { kind: 'self' }, selfId);
+      const selfRequest = (await JoinLinkService.listRequests(club.teamId, coachId)).find((r) => r.kind === 'SELF')!;
+      await expect(
+        JoinLinkService.approveRequest(club.teamId, selfRequest.id, coachId, { playerId })
+      ).rejects.toBeInstanceOf(BadRequestError);
+      expect(await prisma.teamMember.count({ where: { teamId: club.teamId, playerId: selfId } })).toBe(0);
+
+      // The record is still free: the original request can go onto it.
+      await expect(
+        JoinLinkService.approveRequest(club.teamId, requestId, coachId, { playerId })
+      ).resolves.toMatchObject({ linkedExisting: true });
+    });
   });
 
   it('a request id from another team is not found, whoever asks', async () => {

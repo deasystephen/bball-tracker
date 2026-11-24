@@ -719,6 +719,54 @@ export function transactionClosed(
  * `meta.driverAdapterError.cause` (a raw query is P2010, same meta; verified
  * against Postgres 18, 2026-10-18).
  */
+/**
+ * A deadlock PostgreSQL broke by aborting this transaction (40P01), as Prisma 7
+ * with the pg driver adapter surfaces it: P2010 from a raw query, P2034 from an
+ * ORM one, with the SQLSTATE on `originalCode` only (shape captured from a real
+ * deadlock against Postgres 18, 2026-11-23; `pool-lock-timeout.db.test.ts`
+ * keeps it honest).
+ */
+export function deadlockDetected(code: 'P2034' | 'P2010' = 'P2034'): Prisma.PrismaClientKnownRequestError {
+  const message =
+    code === 'P2010'
+      ? 'Raw query failed. Code: `40P01`. Message: `deadlock detected`'
+      : 'Transaction failed due to a write conflict or a deadlock. Please retry your transaction';
+  return new Prisma.PrismaClientKnownRequestError(message, {
+    code,
+    clientVersion: 'test',
+    meta: {
+      driverAdapterError: {
+        name: 'DriverAdapterError',
+        cause: { originalCode: '40P01', originalMessage: 'deadlock detected', kind: 'TransactionWriteConflict' },
+      },
+    },
+  });
+}
+
+/**
+ * A serialization failure (40001): the other thing Prisma raises as P2034. Not
+ * a lock wait, so it must stay unclassified.
+ */
+export function serializationFailure(): Prisma.PrismaClientKnownRequestError {
+  return new Prisma.PrismaClientKnownRequestError(
+    'Transaction failed due to a write conflict or a deadlock. Please retry your transaction',
+    {
+      code: 'P2034',
+      clientVersion: 'test',
+      meta: {
+        driverAdapterError: {
+          name: 'DriverAdapterError',
+          cause: {
+            originalCode: '40001',
+            originalMessage: 'could not serialize access due to concurrent update',
+            kind: 'TransactionWriteConflict',
+          },
+        },
+      },
+    }
+  );
+}
+
 export function lockTimeout(code: 'P2039' | 'P2010' = 'P2039'): Prisma.PrismaClientKnownRequestError {
   return new Prisma.PrismaClientKnownRequestError('Database error. Code: `55P03`. Message: `canceling statement due to lock timeout`', {
     code,
