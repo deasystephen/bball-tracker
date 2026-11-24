@@ -524,7 +524,40 @@ describe('TeamJoinLinkScreen (#210)', () => {
       );
     });
 
-    it('keys menu rows by player id, so two identical labels are still two rows', () => {
+    it('records that would read alike are not offered: one line says why, and the rest of the menu is unchanged (#1110)', async () => {
+      signIn({ id: 'coach-1', role: 'COACH' });
+      mockTeam = {
+        ...baseTeam,
+        members: [member('p-x', 'Riley Park'), member('p-y', 'Riley Park'), member('p-z', 'Alex Kim')],
+        guardianLinkedPlayerIds: [],
+      };
+      mockRequests = [childRequest];
+      mockApprove.mutateAsync.mockResolvedValue(undefined);
+      const consoleError = jest.spyOn(console, 'error');
+      const { getByLabelText, getAllByLabelText, queryByLabelText, getAllByRole } = render(<TeamJoinLinkScreen />);
+
+      fireEvent.press(getByLabelText('Approve Riley Park'));
+
+      // Neither twin is a choice; one note stands in for both.
+      expect(queryByLabelText('Same child as Riley Park, already on the roster')).toBeNull();
+      const note =
+        'More than one player on the roster is named Riley Park. Give each a jersey number to tell them apart, then approve again.';
+      expect(getAllByLabelText(note)).toHaveLength(1);
+      // The note is text, not a button, and pressing it approves nothing.
+      expect(getByLabelText(note).props.accessibilityRole).toBe('text');
+      expect(getAllByRole('button').map((node) => node.props.accessibilityLabel as string)).not.toContain(note);
+      fireEvent.press(getByLabelText(note));
+      expect(mockApprove.mutateAsync).not.toHaveBeenCalled();
+      expect(consoleError.mock.calls.flat().join(' ')).not.toMatch(/same key/);
+
+      // A record that reads differently from every other is offered as before, with nothing added.
+      fireEvent.press(getByLabelText('Same child as Alex Kim, already on the roster'));
+      await waitFor(() =>
+        expect(mockApprove.mutateAsync).toHaveBeenCalledWith({ teamId: 't1', request: childRequest, playerId: 'p-z' })
+      );
+    });
+
+    it('with only look-alike records, the menu still offers a new player', async () => {
       signIn({ id: 'coach-1', role: 'COACH' });
       mockTeam = {
         ...baseTeam,
@@ -532,13 +565,14 @@ describe('TeamJoinLinkScreen (#210)', () => {
         guardianLinkedPlayerIds: [],
       };
       mockRequests = [childRequest];
-      const consoleError = jest.spyOn(console, 'error');
-      const { getByLabelText, getAllByLabelText } = render(<TeamJoinLinkScreen />);
+      mockApprove.mutateAsync.mockResolvedValueOnce(undefined);
+      const { getByLabelText } = render(<TeamJoinLinkScreen />);
 
       fireEvent.press(getByLabelText('Approve Riley Park'));
+      fireEvent.press(getByLabelText('Add as a new player'));
 
-      expect(getAllByLabelText('Same child as Riley Park, already on the roster')).toHaveLength(2);
-      expect(consoleError.mock.calls.flat().join(' ')).not.toMatch(/same key/);
+      await waitFor(() => expect(mockApprove.mutateAsync).toHaveBeenCalledTimes(1));
+      expect(mockApprove.mutateAsync.mock.calls[0][0].playerId).toBeUndefined();
     });
 
     it('"Add as a new player" approves as before', async () => {

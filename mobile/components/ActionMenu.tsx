@@ -32,13 +32,30 @@ export interface ActionMenuItem {
   waitForClose?: boolean;
 }
 
+/**
+ * A line of explanation among the items, not a choice: plain text, no button
+ * role, nothing happens on a tap. For the rare case where a choice cannot be
+ * offered and the reader needs to know why (#1110).
+ */
+export interface ActionMenuNote {
+  note: string;
+  /** Stable React key; defaults to the note text. */
+  key?: string;
+}
+
+export type ActionMenuEntry = ActionMenuItem | ActionMenuNote;
+
+function isNote(entry: ActionMenuEntry): entry is ActionMenuNote {
+  return 'note' in entry;
+}
+
 /** Longer than the fade-out; reached only if iOS never calls onDismiss. */
 export const WAIT_FOR_CLOSE_FALLBACK_MS = 1000;
 
 export interface ActionMenuProps {
   visible: boolean;
   title: string;
-  items: ActionMenuItem[];
+  items: ActionMenuEntry[];
   onClose: () => void;
 }
 
@@ -130,22 +147,36 @@ export function ActionMenu({ visible, title, items, onClose }: ActionMenuProps) 
           <ThemedText variant="h4" heading style={styles.title}>
             {title}
           </ThemedText>
-          {items.map((item) => (
-            <TouchableOpacity
-              key={item.key ?? item.label}
-              onPress={() => pressItem(item)}
-              accessibilityRole="button"
-              accessibilityLabel={item.label}
-              style={[styles.item, { borderTopColor: colors.border }]}
-            >
-              <ThemedText
-                variant="body"
-                style={item.destructive ? { color: colors.error } : undefined}
+          {items.map((item) =>
+            isNote(item) ? (
+              <View
+                key={item.key ?? item.note}
+                style={[styles.item, { borderTopColor: colors.border }]}
+                accessible
+                accessibilityRole="text"
+                accessibilityLabel={item.note}
               >
-                {item.label}
-              </ThemedText>
-            </TouchableOpacity>
-          ))}
+                <ThemedText variant="caption" color="textSecondary">
+                  {item.note}
+                </ThemedText>
+              </View>
+            ) : (
+              <TouchableOpacity
+                key={item.key ?? item.label}
+                onPress={() => pressItem(item)}
+                accessibilityRole="button"
+                accessibilityLabel={item.label}
+                style={[styles.item, { borderTopColor: colors.border }]}
+              >
+                <ThemedText
+                  variant="body"
+                  style={item.destructive ? { color: colors.error } : undefined}
+                >
+                  {item.label}
+                </ThemedText>
+              </TouchableOpacity>
+            )
+          )}
           <TouchableOpacity
             onPress={dismiss}
             accessibilityRole="button"

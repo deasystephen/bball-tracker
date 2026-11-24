@@ -29,7 +29,7 @@ import {
   SortPills,
 } from '../../../components';
 import { QrCode } from '../../../components/QrCode';
-import { ActionMenu, type ActionMenuItem } from '../../../components/ActionMenu';
+import { ActionMenu, type ActionMenuEntry } from '../../../components/ActionMenu';
 import { BackButton } from '../../../components/BackButton';
 import { useToast } from '../../../components/Toast';
 import { useTeam, hasTeamPermission, type TeamMember } from '../../../hooks/useTeams';
@@ -207,10 +207,9 @@ export default function TeamJoinLinkScreen() {
     }
   };
 
-  const approveChoices = (row: JoinRequestRow): ActionMenuItem[] => [
-    { label: t('joinLink.approveAsNewPlayer'), onPress: () => void handleApprove(row) },
-    ...targetsFor(row).map((member) => ({
-      key: member.playerId,
+  const approveChoices = (row: JoinRequestRow): ActionMenuEntry[] => {
+    const targets = targetsFor(row).map((member) => ({
+      member,
       // The jersey tells apart two records with the same name, as on the roster row (`#N`).
       label:
         member.jerseyNumber != null
@@ -219,9 +218,32 @@ export default function TeamJoinLinkScreen() {
               number: member.jerseyNumber,
             })
           : t('joinLink.approveOntoPlayer', { player: displayName(member.player) }),
-      onPress: () => void handleApprove(row, member),
-    })),
-  ];
+    }));
+    const timesOffered = new Map<string, number>();
+    for (const { label } of targets) {
+      timesOffered.set(label, (timesOffered.get(label) ?? 0) + 1);
+    }
+    // Records that would read exactly alike (same name, no jersey) are not
+    // offered: the coach could not tell which child the parent is linked to.
+    // One line says why and what fixes it (#1110). Nothing changes for a row
+    // that reads differently from every other.
+    const explained = new Set<string>();
+    const choices: ActionMenuEntry[] = [
+      { label: t('joinLink.approveAsNewPlayer'), onPress: () => void handleApprove(row) },
+    ];
+    for (const { member, label } of targets) {
+      if ((timesOffered.get(label) ?? 0) < 2) {
+        choices.push({ key: member.playerId, label, onPress: () => void handleApprove(row, member) });
+      } else if (!explained.has(label)) {
+        explained.add(label);
+        choices.push({
+          key: `ambiguous-${member.playerId}`,
+          note: t('joinLink.approveAmbiguous', { player: displayName(member.player) }),
+        });
+      }
+    }
+    return choices;
+  };
 
   const confirmDecline = (row: JoinRequestRow) => {
     Alert.alert(t('joinLink.declineTitle'), t('joinLink.declineBody', { name: requestSubject(row) }), [

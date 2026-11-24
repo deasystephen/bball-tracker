@@ -1161,6 +1161,7 @@
     "approveAsNewPlayer": "Agregar como jugador nuevo",
     "approveOntoPlayer": "Es {{player}}, que ya está en la plantilla",
     "approveOntoPlayerNumber": "Es {{player}} (#{{number}}), que ya está en la plantilla",
+    "approveAmbiguous": "Hay más de un jugador en la plantilla con el nombre {{player}}. Ponle a cada uno un número de camiseta para distinguirlos y vuelve a aprobar.",
     "linkedToPlayer": "{{parent}} ahora está vinculado con {{player}}",
     "decline": "Rechazar",
     "declineLabel": "Rechazar a {{name}}",
