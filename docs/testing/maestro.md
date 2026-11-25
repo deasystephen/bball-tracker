@@ -183,6 +183,16 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   `hideKeyboard` does and broke two flows. Nightly CI for the suite was
   attempted and closed as not planned (#441 records the CI learnings and a WIP branch, should it ever
   be revived); flows are deliberately manual-only.
+- **Expo SDK 58 run, 2026-11-24 (#922, PR #1115):** Debug build of the upgrade branch, Maestro 2.11.0,
+  33 flows, a seed before each. **iOS 26.4 simulator: 33 of 33** (30 on the first pass; `logout.yaml`
+  needed a second swipe, and the two roster flows failed on a development database where the invite
+  fixtures had been renamed, which the seed did not undo; the seed now restores the names).
+  **iOS 27.0 simulator: 31 of 33.** `create-team.yaml` and `admin-season-manage.yaml` fail there because
+  the tap on static text that dismisses the keyboard leaves it up; the released 1.7.0 (SDK 57) build
+  fails both the same way on iOS 27, so it is not the upgrade (#1118). When a flow fails on a new iOS
+  version, run the previous build on that simulator before blaming the change: copy the installed app
+  out of another simulator (`xcrun simctl get_app_container <udid> com.bballtracker.mobile`), install
+  it, and serve its JavaScript with Metro from a checkout of the commit it was built from.
 - **Run record, 2026-10-24.** 27 flows passed on the iPhone 17 / iOS 26.5 simulator against a fresh
   1.6.0 Debug build (ad-hoc signed `xcodebuild`, `main` at `a840311`) and the local stack, with a
   reseed before each: the 25 existing flows, all on the first attempt, plus `spanish-locale.yaml`
