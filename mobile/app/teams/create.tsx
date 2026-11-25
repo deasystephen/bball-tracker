@@ -13,12 +13,12 @@ import React, { useState, useMemo, useEffect } from 'react';
 import {
   View,
   StyleSheet,
-  ScrollView,
   KeyboardAvoidingView,
   Platform,
   Alert,
   TouchableOpacity,
 } from 'react-native';
+import { FormScrollView } from '../../components/FormScrollView';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemedView, ThemedText, Input, Button, LoadingSpinner, ListItem } from '../../components';
@@ -203,12 +203,11 @@ export default function CreateTeamScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.keyboardView}
       >
-        <ScrollView
+        <FormScrollView
           contentContainerStyle={[
             styles.scrollContent,
             { padding, paddingBottom: insets.bottom + spacing.xl },
           ]}
-          keyboardShouldPersistTaps="handled"
         >
 
           <Input
@@ -419,7 +418,7 @@ export default function CreateTeamScreen() {
               fullWidth
             />
           </View>
-        </ScrollView>
+        </FormScrollView>
       </KeyboardAvoidingView>
     </ThemedView>
   );

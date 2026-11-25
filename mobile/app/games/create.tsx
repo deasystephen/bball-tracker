@@ -6,13 +6,13 @@ import React, { useMemo, useState } from 'react';
 import {
   View,
   StyleSheet,
-  ScrollView,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
   Alert,
   TouchableOpacity,
 } from 'react-native';
+import { FormScrollView } from '../../components/FormScrollView';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -165,12 +165,11 @@ export default function CreateGameScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.keyboardView}
       >
-        <ScrollView
+        <FormScrollView
           contentContainerStyle={[
             styles.scrollContent,
             { padding, paddingBottom: insets.bottom + spacing.xl },
           ]}
-          keyboardShouldPersistTaps="handled"
         >
           {/* Opponent Section */}
           <Card variant="default" style={styles.sectionCard}>
@@ -321,7 +320,7 @@ export default function CreateGameScreen() {
               fullWidth
             />
           </View>
-        </ScrollView>
+        </FormScrollView>
       </KeyboardAvoidingView>
 
       <DateTimePickerSheet

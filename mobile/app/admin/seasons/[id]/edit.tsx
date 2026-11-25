@@ -11,11 +11,11 @@ import React, { useState } from 'react';
 import {
   View,
   StyleSheet,
-  ScrollView,
   KeyboardAvoidingView,
   Platform,
   Switch,
   } from 'react-native';
+import { FormScrollView } from '../../../../components/FormScrollView';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -172,12 +172,11 @@ function EditSeasonForm({ season }: { season: Season }) {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.keyboardView}
       >
-        <ScrollView
+        <FormScrollView
           contentContainerStyle={[
             styles.scrollContent,
             { padding, paddingBottom: insets.bottom + spacing.xl },
           ]}
-          keyboardShouldPersistTaps="handled"
         >
           <Input
             label={t('seasons.name')}
@@ -235,7 +234,7 @@ function EditSeasonForm({ season }: { season: Season }) {
               fullWidth
             />
           </View>
-        </ScrollView>
+        </FormScrollView>
       </KeyboardAvoidingView>
     </ThemedView>
   );

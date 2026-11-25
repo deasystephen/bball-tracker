@@ -13,7 +13,8 @@
  */
 
 import React, { useState } from 'react';
-import { View, StyleSheet, ScrollView, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
+import { FormScrollView } from '../../../../../components/FormScrollView';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -218,9 +219,8 @@ export default function PlayerGuardiansScreen() {
         </View>
       </View>
 
-      <ScrollView
+      <FormScrollView
         contentContainerStyle={[styles.scrollContent, { padding, paddingBottom: insets.bottom + spacing.xl }]}
-        keyboardShouldPersistTaps="handled"
       >
         {canManage && (
           <Card variant="elevated" style={styles.formCard}>
@@ -376,7 +376,7 @@ export default function PlayerGuardiansScreen() {
             })}
           </>
         )}
-      </ScrollView>
+      </FormScrollView>
     </ThemedView>
   );
 }

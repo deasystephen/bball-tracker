@@ -14,7 +14,8 @@
  */
 
 import React, { useMemo, useState } from 'react';
-import { View, StyleSheet, ScrollView, KeyboardAvoidingView, Platform, Alert } from 'react-native';
+import { View, StyleSheet, KeyboardAvoidingView, Platform, Alert } from 'react-native';
+import { FormScrollView } from '../../../components/FormScrollView';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -237,9 +238,8 @@ function NextSeasonForm({ team, seasons, hiddenSeasons, canCreateSeason, rollove
       </View>
 
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.keyboardView}>
-        <ScrollView
+        <FormScrollView
           contentContainerStyle={[styles.scrollContent, { padding, paddingBottom: insets.bottom + spacing.xl }]}
-          keyboardShouldPersistTaps="handled"
         >
           <ThemedText variant="body" color="textSecondary" style={styles.intro}>
             {currentSeason
@@ -331,7 +331,7 @@ function NextSeasonForm({ team, seasons, hiddenSeasons, canCreateSeason, rollove
             />
             <Button title={t('common.cancel')} variant="outline" onPress={goBack} fullWidth />
           </View>
-        </ScrollView>
+        </FormScrollView>
       </KeyboardAvoidingView>
     </ThemedView>
   );

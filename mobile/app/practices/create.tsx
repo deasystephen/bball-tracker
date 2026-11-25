@@ -11,13 +11,13 @@ import React, { useMemo, useState } from 'react';
 import {
   View,
   StyleSheet,
-  ScrollView,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
   Alert,
   TouchableOpacity,
 } from 'react-native';
+import { FormScrollView } from '../../components/FormScrollView';
 import { useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -285,9 +285,8 @@ export default function CreatePracticeScreen() {
       </View>
 
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.flex}>
-        <ScrollView
+        <FormScrollView
           contentContainerStyle={[styles.scrollContent, { padding, paddingBottom: insets.bottom + spacing.xl }]}
-          keyboardShouldPersistTaps="handled"
         >
           <Card variant="default" style={styles.section}>
             <PracticeDetailsFields value={details} onChange={(patch) => setDetails((d) => ({ ...d, ...patch }))} />
@@ -427,7 +426,7 @@ export default function CreatePracticeScreen() {
             />
             <Button title={t('common.cancel')} variant="outline" onPress={goBack} fullWidth />
           </View>
-        </ScrollView>
+        </FormScrollView>
       </KeyboardAvoidingView>
 
       <DateTimePickerSheet

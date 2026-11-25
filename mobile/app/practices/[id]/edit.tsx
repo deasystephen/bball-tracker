@@ -24,7 +24,8 @@
  */
 
 import React, { useState } from 'react';
-import { View, StyleSheet, ScrollView, Keyboard, KeyboardAvoidingView, Platform, Alert } from 'react-native';
+import { View, StyleSheet, Keyboard, KeyboardAvoidingView, Platform, Alert } from 'react-native';
+import { FormScrollView } from '../../../components/FormScrollView';
 import { useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemedView, ThemedText, Button, Card, LoadingSpinner, ErrorState } from '../../../components';
@@ -262,9 +263,8 @@ export default function EditPracticeScreen() {
       </View>
 
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.flex}>
-        <ScrollView
+        <FormScrollView
           contentContainerStyle={[styles.scroll, { padding, paddingBottom: insets.bottom + spacing.xl }]}
-          keyboardShouldPersistTaps="handled"
         >
           <ThemedText variant="caption" color="textSecondary" style={styles.explain} testID="practice-edit-scope">
             {seriesScope
@@ -329,7 +329,7 @@ export default function EditPracticeScreen() {
             />
             <Button title={t('common.cancel')} variant="outline" onPress={goBack} fullWidth />
           </View>
-        </ScrollView>
+        </FormScrollView>
       </KeyboardAvoidingView>
 
       <DateTimePickerSheet

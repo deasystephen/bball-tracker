@@ -355,8 +355,9 @@ Run-through guide for verifying v2.0 functionality end-to-end before declaring t
 - **Prereq:** Season from C.2
 - **Steps:**
   1. Teams tab → "Create new team"
-  2. Name `Test Team`, link to the Spring 2026 season
-- **Expected:** Team appears. Back from the new team's detail returns to the Teams list — never the spent create form (create is `replace`d, #421, matching games/create; the success toast passes taps through to the hero back arrow, #464 — pre-fix it swallowed them for its 3s lifetime, which looked like a dead back button). Creator is auto-assigned the `HEAD_COACH` staff row and the three default roles (Head Coach / Assistant Coach / Team Manager) exist. FREE tier: a 4th distinct team is created like any other — no tier is capped since #445 (Profile `UsageMeter` shows `4 · Unlimited`, no bar, no upgrade hint). Maestro: `.maestro/create-team.yaml`.
+  2. Name `Test Team`, type an age group, then tap the "Gender" label
+  3. Link to the Spring 2026 season
+- **Expected:** The tap on the label puts the keyboard away (#1118: on iOS 27 it stayed up before `FormScrollView`; the same holds on every form, check Edit Season too). Team appears. Back from the new team's detail returns to the Teams list — never the spent create form (create is `replace`d, #421, matching games/create; the success toast passes taps through to the hero back arrow, #464 — pre-fix it swallowed them for its 3s lifetime, which looked like a dead back button). Creator is auto-assigned the `HEAD_COACH` staff row and the three default roles (Head Coach / Assistant Coach / Team Manager) exist. FREE tier: a 4th distinct team is created like any other — no tier is capped since #445 (Profile `UsageMeter` shows `4 · Unlimited`, no bar, no upgrade hint). Maestro: `.maestro/create-team.yaml`.
 - **Notes:** ___________
 
 ### D.2 — View team detail
@@ -1535,3 +1536,4 @@ After B3-prod-access lands and production access is granted, this step is no lon
 - 2026-11-22: #1087 — one jersey number per team. New D.3c (refused on add, invite and edit with an inline error; accept never fails and joins with no number). `roster-management.yaml` asserts the edit refusal. Nothing marked passed.
 - 2026-11-23: #1109 — D.14 gained the approval onto an existing roster player (#1072) and `.maestro/join-link-existing-player.yaml`, listed in appendix B. Nothing ticked.
 - 2026-11-24: runtime 1.8.0 binary branch (#922, Expo SDK 58 / React Native 0.88). Target build moved to 1.8.0. No section changed: the upgrade adds no feature, so the whole plan is the regression pass for the new binary, with tab navigation, keyboard dismissal on forms, photo upload, date and time pickers, deep links, push registration and sign-in first.
+- 2026-11-24: #1118 — forms dismiss the keyboard on a tap outside an input on iOS 27 (`FormScrollView` on all 16 form screens). D.1 gained the step and the expectation. Nothing ticked.
