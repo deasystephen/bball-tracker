@@ -37,6 +37,7 @@ const EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'];
 const NO_IMPORT_ALLOW_LIST: Record<string, string> = {
   // Used by tooling or native code without an importable name.
   'react-test-renderer': 'peer of @testing-library/react-native, loaded by it',
+  '@react-native/jest-preset': 'peer dependency of jest-expo 58, which builds its preset on it',
   'react-native-screens': 'peer dependency of expo-router; native screens are used through the router',
   'react-native-worklets': 'peer dependency of react-native-reanimated 4 (Babel plugin and native runtime)',
   'expo-application': 'reached only through requireOptionalNativeModule("ExpoApplication") so an OTA never crashes an older binary',

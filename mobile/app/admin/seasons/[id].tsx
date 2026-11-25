@@ -151,7 +151,7 @@ export default function SeasonDetailScreen() {
           { paddingHorizontal: padding, paddingBottom: insets.bottom + spacing.xl },
         ]}
         refreshControl={
-          <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={colors.primary} />
+          <RefreshControl refreshing={isRefetching} onRefresh={() => void refetch()} tintColor={colors.primary} />
         }
       >
         <Card variant="elevated" style={styles.summaryCard}>

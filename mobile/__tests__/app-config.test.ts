@@ -5,6 +5,7 @@
  * the mapping so that footgun is a red test, and pins the Universal Links
  * entitlement so the next native build cannot silently carry the old domain.
  */
+import { execFileSync } from 'child_process';
 import { readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 
@@ -60,7 +61,7 @@ async function evaluateNativeConfig(config: ExpoConfig, names: string[]): Promis
 }
 
 /** The lowest OTA runtime `version` may ever be again; history at the test that uses it. */
-const RUNTIME_FLOOR = '1.7.0';
+const RUNTIME_FLOOR = '1.8.0';
 
 /** [major, minor, patch] compare; true when `version` >= `floor`. */
 function atLeast(version: string, floor: string): boolean {
@@ -192,6 +193,9 @@ describe('app.config.js', () => {
   //   8.32 native code (#644), no CFBundleLocalizations (#671), and predates
   //   the expo 57.0.31 / expo-notifications / expo-router patches and
   //   Amplitude 1.12.
+  // - 1.8.0: Expo SDK 58 (#922). Build #37 (runtime 1.7.0) is an SDK 57
+  //   binary (React Native 0.86, gesture-handler 2 and the SDK 57 native
+  //   modules).
   it(`keeps the OTA runtime at or past ${RUNTIME_FLOOR}`, async () => {
     expect(atLeast((await loadConfig({ APP_ENV: 'production' })).expo.version, RUNTIME_FLOOR)).toBe(true);
   });
@@ -253,28 +257,36 @@ describe('app.config.js', () => {
 
   // Xcode 27 / iOS 27 SDK (#576). Without the scene life cycle an app built
   // with the iOS 27 SDK does not launch correctly on iOS 27, and the failure
-  // only shows on a device. Baked into the binary at prebuild.
+  // only shows on a device. On SDK 57 `expo-build-properties` opted in; since
+  // SDK 58 (#922) the prebuild template carries it, and config-plugin
+  // introspection cannot see a template. So this reads the template prebuild
+  // unpacks (`expo/template.tgz`): a future SDK that moves the scene manifest
+  // somewhere else fails here, not on a device.
   describe('iOS scene life cycle', () => {
-    it('opts in through expo-build-properties', async () => {
-      const options = pluginOptions(await loadConfig({ APP_ENV: 'production' }), 'expo-build-properties');
-      expect(options).toEqual({ ios: { enableSceneSupport: true } });
+    const template = join(__dirname, '..', 'node_modules', 'expo', 'template.tgz');
+    const fromTemplate = (file: string): string =>
+      execFileSync('tar', ['-xzOf', template, `package/ios/HelloWorld/${file}`], { encoding: 'utf8' });
+
+    it('no longer opts in through expo-build-properties', async () => {
+      const config = await loadConfig({ APP_ENV: 'production' });
+      expect(pluginOptions(config, 'expo-build-properties')).toBeUndefined();
+      expect(config.expo.plugins).not.toContain('expo-build-properties');
     });
 
-    it('evaluates to an Info.plist that declares a scene manifest with Expo\'s scene delegate', async () => {
-      const config = await loadConfig({ APP_ENV: 'production' });
-      const { infoPlist } = (await evaluateNativeConfig(config, ['expo-build-properties'])).ios;
+    it('builds from a template whose Info.plist declares a single-scene manifest', () => {
+      const manifest = fromTemplate('Info.plist').match(
+        /<key>UIApplicationSceneManifest<\/key>\s*<dict>([\s\S]*?)<\/array>\s*<\/dict>\s*<\/dict>/
+      )?.[1];
 
-      expect(infoPlist.UIApplicationSceneManifest).toEqual({
-        UIApplicationSupportsMultipleScenes: false,
-        UISceneConfigurations: {
-          UIWindowSceneSessionRoleApplication: [
-            {
-              UISceneConfigurationName: 'Default Configuration',
-              UISceneDelegateClassName: 'EXExpoAppSceneDelegate',
-            },
-          ],
-        },
-      });
+      expect(manifest).toMatch(/<key>UIApplicationSupportsMultipleScenes<\/key>\s*<false\/>/);
+      expect(manifest).toMatch(/<key>UIWindowSceneSessionRoleApplication<\/key>/);
+      expect(manifest).toMatch(
+        /<key>UISceneDelegateClassName<\/key>\s*<string>\$\(PRODUCT_MODULE_NAME\)\.SceneDelegate<\/string>/
+      );
+    });
+
+    it("builds from a template whose SceneDelegate is Expo's scene delegate", () => {
+      expect(fromTemplate('SceneDelegate.swift')).toMatch(/class SceneDelegate:\s*ExpoAppSceneDelegate\b/);
     });
   });
 

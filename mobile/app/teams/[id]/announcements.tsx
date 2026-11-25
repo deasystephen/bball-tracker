@@ -207,7 +207,7 @@ export default function AnnouncementsScreen() {
             onEndReached={handleEndReached}
             onEndReachedThreshold={0.5}
             ListFooterComponent={
-              isFetchingNextPage ? <LoadingSpinner message={t('common.loadingMore')} /> : null
+              isFetchingNextPage ? <LoadingSpinner message={t('common.loadingMore')} /> : undefined
             }
             contentContainerStyle={{
               padding,

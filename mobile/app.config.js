@@ -73,16 +73,18 @@ export default {
   expo: {
     name: IS_PRODUCTION ? 'Hooplings' : `Hooplings (${process.env.APP_ENV || 'dev'})`,
     slug: 'bball-tracker',
-    // 1.7.0 = OTA runtime boundary for the "next native binary" bundle: the
-    // Sentry Expo config plugin (#644: the Xcode build phases that upload the
-    // embedded bundle's source maps and the dSYMs), Spanish declared to iOS
-    // through CFBundleLocalizations (#671), and the binary-coupled Expo SDK 57
-    // patch, Sentry and Amplitude bumps held on #275. An OTA ships JavaScript
-    // from the lockfile and runs it against the native code frozen in the
-    // binary. runtimeVersion policy is appVersion: every OTA from here on
-    // reaches 1.7.0 builds only, and build #34 stays on the last 1.6.0 OTA.
+    // 1.8.0 = OTA runtime boundary for the Expo SDK 58 upgrade (#922): React
+    // Native 0.86 -> 0.88, React 19.2.3 -> 19.3.0, every expo-* native module,
+    // react-native-gesture-handler 2 -> 3, Reanimated 4.7 / Worklets 0.13,
+    // Sentry 8.36 and Amplitude 1.14. An OTA ships JavaScript from the
+    // lockfile and runs it against the native code frozen in the binary.
+    // runtimeVersion policy is appVersion: every OTA from here on reaches
+    // 1.8.0 builds only, and build #37 stays on the last 1.7.0 OTA.
     //
-    // Earlier boundaries: 1.6.0 was the Android App Links intent filter
+    // Earlier boundaries: 1.7.0 was the Sentry Expo config plugin (#644),
+    // Spanish declared to iOS through CFBundleLocalizations (#671) and the
+    // binary-coupled SDK 57 patch, Sentry and Amplitude bumps held on #275
+    // (build #34 stays on the last 1.6.0 OTA); 1.6.0 was the Android App Links intent filter
     // (#716), dropping lottie-react-native and expo-status-bar (#780) and SDK
     // 57 patch bumps (build #33 stays on the last 1.5.0 OTA); 1.5.0 was the
     // Expo SDK 57 upgrade (#576: React
@@ -93,7 +95,7 @@ export default {
     // from the OTA MANIFEST while the schemes a binary answers are baked into
     // Info.plist, so builds #25-#30 stay on the last 1.2.0 OTA); 1.2.0 was
     // expo-secure-store (audit #52).
-    version: '1.7.0',
+    version: '1.8.0',
     orientation: 'portrait',
     icon: './assets/icon.png',
     userInterfaceStyle: 'light',
@@ -167,13 +169,10 @@ export default {
       favicon: './assets/favicon.png',
     },
     plugins: [
-      // UIKit scene-based life cycle (#576). An app built with the iOS 27 SDK
-      // (Xcode 27) on the old application life cycle does not launch correctly
-      // on iOS 27. SDK 57 keeps the old life cycle unless this is set; SDK 58
-      // makes it the default, where this entry becomes a no-op to remove.
-      // Native: it changes AppDelegate and Info.plist at prebuild, so it ships
-      // with an `eas build`, never an OTA.
-      ['expo-build-properties', { ios: { enableSceneSupport: true } }],
+      // No expo-build-properties entry: the UIKit scene life cycle an iOS 27
+      // SDK build needs (#576) comes from the SDK 58 prebuild template itself
+      // (SceneDelegate.swift and UIApplicationSceneManifest), which
+      // `__tests__/app-config.test.ts` reads out of `expo/template.tgz`.
       'expo-router',
       // Declares the app's languages to iOS (#671): CFBundleLocalizations
       // ['en', 'es'] in Info.plist, the languages i18n/locales/ ships. Without

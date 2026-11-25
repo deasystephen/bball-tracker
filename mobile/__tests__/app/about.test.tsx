@@ -148,7 +148,7 @@ describe('AboutScreen', () => {
   });
 
   it('shares the diagnostics text', async () => {
-    const shareSpy = jest.spyOn(Share, 'share').mockResolvedValue({ action: Share.dismissedAction });
+    const shareSpy = jest.spyOn(Share, 'share').mockResolvedValue({ action: Share.dismissedAction, activityType: undefined });
     const { getByText } = render(<AboutScreen />);
     fireEvent.press(getByText('Share diagnostics'));
 
@@ -176,7 +176,7 @@ describe('AboutScreen', () => {
     });
 
     it('opens a message to support that already carries the diagnostics', async () => {
-      const openSpy = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
+      const openSpy = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined);
       const { getByTestId } = render(<AboutScreen />);
       fireEvent.press(getByTestId('about-contact-support'));
 

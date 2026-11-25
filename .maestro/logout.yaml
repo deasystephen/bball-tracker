@@ -13,7 +13,14 @@ appId: com.bballtracker.mobile
 - tapOn: "Profile tab"
 - assertVisible: "Account"
 
-# Scroll down to find logout button
+# Scroll to the end of the screen. One swipe can stop with the Logout row under
+# the raised Track button of the tab bar: the row then counts as visible and
+# the tap lands on the tab (seen on the SDK 58 build, #922). Two swipes reach
+# the bottom, where the screen's tab bar padding keeps the row clear.
+- swipe:
+    start: 50%, 60%
+    end: 50%, 20%
+    duration: 500
 - swipe:
     start: 50%, 60%
     end: 50%, 20%

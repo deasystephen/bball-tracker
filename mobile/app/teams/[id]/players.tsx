@@ -219,7 +219,7 @@ export default function ManagePlayersScreen() {
   // Where the jersey field sits in the scroll content, so a refusal can bring
   // it into view: the submit button is below the fold (#1095). The card's
   // offset in the content plus the field's offset in the card.
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<React.ComponentRef<typeof ScrollView>>(null);
   const formCardY = useRef(0);
   const jerseyFieldY = useRef(0);
   const jerseyFieldHeight = useRef(0);

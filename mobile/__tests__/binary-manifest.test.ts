@@ -40,7 +40,7 @@
  * Nothing in it depends on the publishing environment, so the hash is the
  * same on every machine whatever `APP_ENV`, `API_URL`, `SENTRY_DSN` or
  * `AMPLITUDE_API_KEY` say. JavaScript-only config plugins
- * (`expo-build-properties`) are not pinned by version: a plugin's code runs
+ * (`expo-font`, for one) are not pinned by version: a plugin's code runs
  * only at prebuild and creates no JavaScript expectation, and what it
  * generates for our options is already in the introspected results.
  *

@@ -14,6 +14,7 @@ import { useTheme } from '../../hooks/useTheme';
 import { TAB_BAR_HEIGHT } from '../../hooks/useTabBarPadding';
 import { borderRadius, MAX_FONT_SCALE } from '../../theme';
 import { useTranslation } from '../../i18n';
+import { log } from '../../services/log';
 // expo-router carries its own fork of the tab navigator since SDK 56; the
 // `@react-navigation/bottom-tabs` package is no longer installed.
 import type { BottomTabBarProps } from 'expo-router/js-tabs';
@@ -28,7 +29,7 @@ const TAB_CONFIGS = [
 
 const TRACK_INDEX = 2;
 
-function CustomTabBar({ state, navigation }: BottomTabBarProps) {
+function CustomTabBar({ state, navigateToTab }: BottomTabBarProps) {
   const { colors, colorScheme } = useTheme();
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
@@ -46,7 +47,12 @@ function CustomTabBar({ state, navigation }: BottomTabBarProps) {
   );
 
   const handlePress = useCallback(
-    (index: number, routeName: string, isFocused: boolean) => {
+    (index: number, routeKey: string | undefined, isFocused: boolean) => {
+      if (!routeKey) {
+        // A TAB_CONFIGS name with no route file: the button would be dead.
+        log.warn('[TabBar] no route for tab', { index });
+        return;
+      }
       if (!isFocused) {
         pillPosition.set(
           withSpring(index, {
@@ -60,10 +66,12 @@ function CustomTabBar({ state, navigation }: BottomTabBarProps) {
             withSpring(1, { damping: 8, stiffness: 200 })
           )
         );
-        navigation.navigate(routeName);
+        // SDK 58's router fork hands the tab bar `navigateToTab(route.key)`;
+        // the `navigation` prop it replaced is gone (#922).
+        navigateToTab(routeKey);
       }
     },
-    [navigation, pillPosition, scales]
+    [navigateToTab, pillPosition, scales]
   );
 
   const pillStyle = useAnimatedStyle(() => {
@@ -133,16 +141,12 @@ function CustomTabBar({ state, navigation }: BottomTabBarProps) {
             const isTrackTab = index === TRACK_INDEX;
             const label = t(tab.labelKey);
 
-            const routeIndex = state.routes.findIndex(
-              (r) => r.name === tab.name
-            );
-            const routeName =
-              routeIndex >= 0 ? state.routes[routeIndex].name : tab.name;
+            const routeKey = state.routes.find((r) => r.name === tab.name)?.key;
 
             return (
               <TouchableOpacity
                 key={tab.name}
-                onPress={() => handlePress(index, routeName, isFocused)}
+                onPress={() => handlePress(index, routeKey, isFocused)}
                 style={styles.tabItem}
                 accessibilityRole="button"
                 accessibilityState={{ selected: isFocused }}
