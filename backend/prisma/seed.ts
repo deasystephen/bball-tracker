@@ -858,8 +858,10 @@ async function main() {
     const fixturePlayer = await prisma.user.upsert({
       where: { id: fixture.id },
       // Restored on every seed: roster-email-bounced.yaml corrects Xander's
-      // address, which changes the email and clears the delivery state.
-      update: { email: fixture.email, ...deliveryState },
+      // address, which changes the email and clears the delivery state. The
+      // name too: the flows find these rows by name, and a rename done by hand
+      // on a dev database otherwise survives every seed.
+      update: { name: fixture.name, email: fixture.email, ...deliveryState },
       create: {
         id: fixture.id,
         name: fixture.name,
