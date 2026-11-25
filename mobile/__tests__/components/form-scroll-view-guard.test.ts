@@ -11,7 +11,9 @@
 import { jsxAttributes, lineOf, parseTsx, tagNameOf, walkJsx } from '../helpers/source-files';
 import { scannedSources } from '../helpers/pressables';
 
-const TEXT_INPUTS = new Set(['Input', 'TextInput']);
+/** Text inputs, and the shared components that render one. */
+const TEXT_INPUTS = new Set(['Input', 'TextInput', 'PracticeDetailsFields']);
+const RAW_SCROLL_VIEWS = new Set(['ScrollView', 'Animated.ScrollView', 'KeyboardAwareScrollView']);
 const WRAPPER = 'components/FormScrollView.tsx';
 
 function findRawFormScrollViews(fileName: string, text: string): string[] {
@@ -21,10 +23,10 @@ function findRawFormScrollViews(fileName: string, text: string): string[] {
   walkJsx<number | null>(source, null, (node, rawScrollViewLine) => {
     const name = tagNameOf(node);
     if (name === 'FormScrollView') return null;
-    if (name === 'ScrollView') {
+    if (RAW_SCROLL_VIEWS.has(name)) {
       const line = lineOf(source, node);
       if (jsxAttributes(node).has('keyboardShouldPersistTaps')) {
-        findings.add(`${fileName}:${line} ScrollView sets keyboardShouldPersistTaps: use FormScrollView`);
+        findings.add(`${fileName}:${line} ${name} sets keyboardShouldPersistTaps: use FormScrollView`);
       }
       return line;
     }
@@ -73,6 +75,20 @@ describe('form scroll views', () => {
         );`
       );
       expect(findings).toEqual(['sample.tsx:3 TextInput is inside the ScrollView at line 2: use FormScrollView']);
+    });
+
+    it('reports a component that renders inputs, and an animated scroll view', () => {
+      const findings = findRawFormScrollViews(
+        'sample.tsx',
+        `const Form = () => (
+          <Animated.ScrollView>
+            <PracticeDetailsFields value={details} onChange={onChange} />
+          </Animated.ScrollView>
+        );`
+      );
+      expect(findings).toEqual([
+        'sample.tsx:3 PracticeDetailsFields is inside the ScrollView at line 2: use FormScrollView',
+      ]);
     });
 
     it('accepts FormScrollView, and a ScrollView with no input', () => {

@@ -6,7 +6,9 @@
 import React from 'react';
 import { Keyboard, ScrollView, Text, TouchableOpacity } from 'react-native';
 import { fireEvent, render } from '@testing-library/react-native';
-import { FormScrollView } from '../../components/FormScrollView';
+import { FormScrollView, TAP_SLOP } from '../../components/FormScrollView';
+
+const touch = (pageX: number, pageY: number) => ({ nativeEvent: { pageX, pageY } });
 
 describe('FormScrollView', () => {
   let dismiss: jest.SpyInstance;
@@ -19,28 +21,37 @@ describe('FormScrollView', () => {
     dismiss.mockRestore();
   });
 
-  it('claims a tap that no child handles and dismisses the keyboard on release', () => {
-    const { getByTestId } = render(
-      <FormScrollView>
+  const renderForm = () =>
+    render(
+      <FormScrollView contentContainerStyle={{ padding: 16 }}>
         <Text>Gender</Text>
       </FormScrollView>
     );
-    const content = getByTestId('form-scroll-content');
 
-    expect(content.props.onStartShouldSetResponder()).toBe(true);
-    fireEvent(content, 'responderRelease');
+  it('claims a tap that no child handles and dismisses the keyboard on release', () => {
+    const area = renderForm().getByTestId('form-scroll-tap-area');
+
+    expect(area.props.onStartShouldSetResponder()).toBe(true);
+    fireEvent(area, 'responderGrant', touch(100, 300));
+    fireEvent(area, 'responderRelease', touch(103, 296));
 
     expect(dismiss).toHaveBeenCalledTimes(1);
   });
 
   it('does not dismiss when the scroll view takes the gesture over (a drag)', () => {
-    const { getByTestId } = render(
-      <FormScrollView>
-        <Text>Gender</Text>
-      </FormScrollView>
-    );
+    const area = renderForm().getByTestId('form-scroll-tap-area');
 
-    fireEvent(getByTestId('form-scroll-content'), 'responderTerminate');
+    fireEvent(area, 'responderGrant', touch(100, 300));
+    fireEvent(area, 'responderTerminate', touch(100, 200));
+
+    expect(dismiss).not.toHaveBeenCalled();
+  });
+
+  it('does not dismiss on a swipe that ends as a release (a form too short to scroll)', () => {
+    const area = renderForm().getByTestId('form-scroll-tap-area');
+
+    fireEvent(area, 'responderGrant', touch(100, 300));
+    fireEvent(area, 'responderRelease', touch(100, 300 - TAP_SLOP - 1));
 
     expect(dismiss).not.toHaveBeenCalled();
   });
@@ -61,16 +72,17 @@ describe('FormScrollView', () => {
     expect(dismiss).not.toHaveBeenCalled();
   });
 
-  it('keeps taps on controls working while the keyboard is up, and pads the tappable wrapper', () => {
-    const { getByTestId, UNSAFE_getByType } = render(
-      <FormScrollView contentContainerStyle={{ padding: 16 }}>
-        <Text>Gender</Text>
-      </FormScrollView>
-    );
+  it('keeps controls tappable with the keyboard up', () => {
+    expect(renderForm().UNSAFE_getByType(ScrollView).props.keyboardShouldPersistTaps).toBe('handled');
+  });
 
-    expect(UNSAFE_getByType(ScrollView).props.keyboardShouldPersistTaps).toBe('handled');
-    expect(getByTestId('form-scroll-content').props.style).toEqual(
-      expect.arrayContaining([expect.objectContaining({ flexGrow: 1 }), { padding: 16 }])
-    );
+  it('fills the viewport with the tap area, and leaves the content as tall as its children', () => {
+    const { getByTestId, UNSAFE_getByType } = renderForm();
+
+    expect(UNSAFE_getByType(ScrollView).props.contentContainerStyle).toEqual({ flexGrow: 1 });
+    expect(getByTestId('form-scroll-tap-area').props.style).toEqual({ flexGrow: 1 });
+    // The caller's style and nothing else: a stretched wrapper would make
+    // every `flex: 1` Card share the leftover height.
+    expect(getByTestId('form-scroll-content').props.style).toEqual({ padding: 16 });
   });
 });

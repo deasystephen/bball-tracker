@@ -380,17 +380,25 @@ never inline a role check in a screen:
   simulator as `keyboardWillHide` with the frame going from 328pt to 270pt, right after typing),
   so the `ScrollView` stops dismissing and the submit button stays under the keyboard. The owner saw
   it on a device on Create Team (build #38); the 1.7.0 build does the same, so it came with iOS 27,
-  not with an SDK. `FormScrollView` never asks whether a keyboard is open: its content wrapper, a
+  not with an SDK. `FormScrollView` never asks whether a keyboard is open: its tap area, a
   plain `View`, becomes the touch responder for any tap no child claims and calls
   `Keyboard.dismiss()` on release. The native scroll view takes a drag over as a terminate, which
   dismisses nothing.
-- `contentContainerStyle` lands on that wrapper, so padding is tappable and children lay out as
-  they did directly inside a `ScrollView`. The wrapper is not a pressable (nothing for VoiceOver,
-  nothing for the nested-pressable guard).
+- Two views: the outer one fills the viewport and is the responder, so a tap below a short form
+  dismisses too; the inner one takes `contentContainerStyle` and is as tall as its content, like a
+  `ScrollView`'s own content container. Do not make the inner one grow: `Card` is `flex: 1`, and in a
+  stretched parent the cards share the leftover height instead of sizing to their content. A release
+  more than `TAP_SLOP` (10pt) from where the touch began is a swipe, not a tap, and dismisses
+  nothing (a form too short to scroll never hands the drag to the native scroll view). Neither view
+  is a pressable (nothing for VoiceOver, nothing for the nested-pressable guard). `horizontal` and
+  `stickyHeaderIndices` are not accepted, since both address the direct children.
 - Tests: `__tests__/components/FormScrollView.test.tsx`; the source guard
-  `__tests__/components/form-scroll-view-guard.test.ts` fails on a raw `ScrollView` that sets
-  `keyboardShouldPersistTaps` or contains an `Input` / `TextInput`. The one `FlatList` with a
-  composer (announcement detail) is outside it.
+  `__tests__/components/form-scroll-view-guard.test.ts` fails on a raw `ScrollView` (also
+  `Animated.ScrollView`, `KeyboardAwareScrollView`) that sets `keyboardShouldPersistTaps` or contains
+  an `Input`, a `TextInput` or a component listed there as rendering one (`PracticeDetailsFields`);
+  a new shared component with an input inside goes on that list. **Not covered:** the two
+  announcement screens (`app/teams/[id]/announcements.tsx` and `announcements/[announcementId].tsx`),
+  whose inputs sit beside a `FlatList` (#1122).
 
 ### Mobile date and time pickers (#576)
 - **Every date or time choice goes through `components/DateTimePickerSheet`**; never render
