@@ -9,7 +9,8 @@
  */
 
 import React, { useState } from 'react';
-import { View, StyleSheet, ScrollView } from 'react-native';
+import { View, StyleSheet } from 'react-native';
+import { FormScrollView } from '../../components/FormScrollView';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import {
@@ -170,9 +171,8 @@ export default function JoinDeepLinkScreen() {
 
   return (
     <ThemedView variant="background" style={styles.container}>
-      <ScrollView
+      <FormScrollView
         contentContainerStyle={[styles.scrollContent, { paddingTop: spacing.xl + insets.top, paddingBottom: spacing.xl + insets.bottom }]}
-        keyboardShouldPersistTaps="handled"
       >
         <Ionicons name="people-outline" size={64} color={colors.primary} />
         <ThemedText variant="h1" heading style={styles.title}>
@@ -243,7 +243,7 @@ export default function JoinDeepLinkScreen() {
             />
           </>
         )}
-      </ScrollView>
+      </FormScrollView>
     </ThemedView>
   );
 }

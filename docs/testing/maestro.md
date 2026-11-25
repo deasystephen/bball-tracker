@@ -117,9 +117,11 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   landed on a keyboard key instead (the profile.yaml rename kept typing a stray "v" from tapping
   Save). **Since Maestro 2.11 it fails the flow** ("Hide Keyboard... FAILED"): the upgrade broke
   the two flows that still used it (#584). No flow uses it any more. Deterministic dismissals:
-  `pressKey: Enter` for a single-line input (blurs on submit), or — inside a ScrollView with
-  `keyboardShouldPersistTaps="handled"` — tap any non-interactive text such as the field's own
-  label, which is the only way out of a number pad (it has no return key).
+  `pressKey: Enter` for a single-line input (blurs on submit), or, on any form (they all scroll in
+  `FormScrollView`), tap any non-interactive text such as the field's own label, which is the only
+  way out of a number pad (it has no return key). Up to #1118 that tap relied on React Native's
+  `keyboardShouldPersistTaps="handled"` and did nothing on iOS 27
+  (`docs/architecture/mobile-app.md`, Forms and the keyboard).
 - **A row under the on-screen keyboard counts as visible, and a tap on it lands on the keyboard.**
   `scrollUntilVisible` does not scroll for it, with or without `centerElement`, and the tap types
   into whatever field has focus (the flow then fails on its next assert, with a stray word in the
@@ -193,6 +195,10 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   version, run the previous build on that simulator before blaming the change: copy the installed app
   out of another simulator (`xcrun simctl get_app_container <udid> com.bballtracker.mobile`), install
   it, and serve its JavaScript with Metro from a checkout of the commit it was built from.
+- **Keyboard fix run, 2026-11-24 (#1118):** same Debug build with the `FormScrollView` JavaScript served by
+  Metro, 33 flows, a seed before each. **iOS 27.0 simulator: 33 of 33** and **iOS 26.4 simulator: 33 of
+  33**, every flow on the first attempt; `create-team.yaml` and `admin-season-manage.yaml` pass on
+  iOS 27 unchanged.
 - **Run record, 2026-10-24.** 27 flows passed on the iPhone 17 / iOS 26.5 simulator against a fresh
   1.6.0 Debug build (ad-hoc signed `xcodebuild`, `main` at `a840311`) and the local stack, with a
   reseed before each: the 25 existing flows, all on the first attempt, plus `spanish-locale.yaml`

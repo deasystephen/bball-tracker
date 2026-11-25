@@ -14,7 +14,8 @@
  *   ↳ anything else: error toast, screen stays, button re-enables
  */
 import React, { useState } from 'react';
-import { View, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import { View, StyleSheet, TouchableOpacity } from 'react-native';
+import { FormScrollView } from '../../components/FormScrollView';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -114,9 +115,8 @@ export default function DeleteAccountScreen() {
         </View>
       </View>
 
-      <ScrollView
+      <FormScrollView
         contentContainerStyle={[styles.scrollContent, { paddingHorizontal: padding, paddingBottom: insets.bottom + spacing.xl }]}
-        keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
         <Card variant="default" style={styles.card}>
@@ -186,7 +186,7 @@ export default function DeleteAccountScreen() {
           />
           <Button title={t('account.delete.cancel')} variant="outline" onPress={goBack} fullWidth style={styles.cancel} />
         </View>
-      </ScrollView>
+      </FormScrollView>
     </ThemedView>
   );
 }

@@ -369,6 +369,29 @@ never inline a role check in a screen:
   `__tests__/utils/role-onboarding.test.ts`, `__tests__/app/onboarding-name.test.tsx`; Maestro
   `.maestro/profile.yaml` renames Frank Vogel and **reverts** (team-staff.yaml asserts the seeded name).
 
+### Forms and the keyboard (#1118)
+- **A screen with a text input scrolls inside `components/FormScrollView`**, never a raw
+  `ScrollView`. A tap on anything that does not handle the touch itself (a label, a card, the
+  padding) dismisses the keyboard; buttons, pills and inputs keep working with the keyboard up
+  (`keyboardShouldPersistTaps="handled"` is set inside), and a drag scrolls without dismissing.
+- Why not React Native's own tap-to-dismiss: a `ScrollView` in `handled` mode dismisses only while
+  it believes a keyboard is open (`_keyboardMetrics`, set and cleared by the system's show and hide
+  notifications). **iOS 27 posts a hide while the keyboard is still on screen** (seen on the iOS 27.0
+  simulator as `keyboardWillHide` with the frame going from 328pt to 270pt, right after typing),
+  so the `ScrollView` stops dismissing and the submit button stays under the keyboard. The owner saw
+  it on a device on Create Team (build #38); the 1.7.0 build does the same, so it came with iOS 27,
+  not with an SDK. `FormScrollView` never asks whether a keyboard is open: its content wrapper, a
+  plain `View`, becomes the touch responder for any tap no child claims and calls
+  `Keyboard.dismiss()` on release. The native scroll view takes a drag over as a terminate, which
+  dismisses nothing.
+- `contentContainerStyle` lands on that wrapper, so padding is tappable and children lay out as
+  they did directly inside a `ScrollView`. The wrapper is not a pressable (nothing for VoiceOver,
+  nothing for the nested-pressable guard).
+- Tests: `__tests__/components/FormScrollView.test.tsx`; the source guard
+  `__tests__/components/form-scroll-view-guard.test.ts` fails on a raw `ScrollView` that sets
+  `keyboardShouldPersistTaps` or contains an `Input` / `TextInput`. The one `FlatList` with a
+  composer (announcement detail) is outside it.
+
 ### Mobile date and time pickers (#576)
 - **Every date or time choice goes through `components/DateTimePickerSheet`**; never render
   `@react-native-community/datetimepicker` in a screen. On iOS it is a bottom sheet with the

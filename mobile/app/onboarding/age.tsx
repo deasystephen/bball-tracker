@@ -18,7 +18,8 @@
  */
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, BackHandler, Keyboard, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, BackHandler, Keyboard, KeyboardAvoidingView, Platform, StyleSheet, View } from 'react-native';
+import { FormScrollView } from '../../components/FormScrollView';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button, Input, SortPills, ThemedText, ThemedView } from '../../components';
@@ -181,10 +182,9 @@ export default function AgeConfirmationScreen() {
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <ScrollView
+        <FormScrollView
           style={styles.flex}
           contentContainerStyle={[styles.content, { paddingTop: insets.top + spacing.xl }]}
-          keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
         >
           <View style={styles.header}>
@@ -224,7 +224,7 @@ export default function AgeConfirmationScreen() {
             autoCorrect={false}
             testID="age-year-input"
           />
-        </ScrollView>
+        </FormScrollView>
 
         <View style={[styles.footer, styles.content, { paddingBottom: insets.bottom + spacing.lg }]}>
           <Button

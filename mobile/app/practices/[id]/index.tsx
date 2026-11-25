@@ -20,7 +20,8 @@
  */
 
 import React, { useMemo, useState } from 'react';
-import { View, StyleSheet, ScrollView, TouchableOpacity, Alert } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, Alert } from 'react-native';
+import { FormScrollView } from '../../../components/FormScrollView';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -312,9 +313,8 @@ export default function PracticeDetailScreen() {
         ) : null}
       </View>
 
-      <ScrollView
+      <FormScrollView
         contentContainerStyle={[styles.scroll, { padding, paddingBottom: insets.bottom + spacing.xl }]}
-        keyboardShouldPersistTaps="handled"
       >
         {cancelled ? (
           <Card variant="default" style={[styles.card, { backgroundColor: colors.error + '15' }]}>
@@ -530,7 +530,7 @@ export default function PracticeDetailScreen() {
             })}
           </Card>
         ) : null}
-      </ScrollView>
+      </FormScrollView>
 
       <ActionMenu
         visible={menuOpen}

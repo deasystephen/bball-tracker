@@ -27,6 +27,7 @@ import {
   Pressable,
   type LayoutChangeEvent,
 } from 'react-native';
+import { FormScrollView } from '../../../components/FormScrollView';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -867,7 +868,7 @@ export default function ManagePlayersScreen() {
         </View>
       </View>
 
-      <ScrollView
+      <FormScrollView
         ref={scrollRef}
         onLayout={(e) => {
           viewportHeight.current = e.nativeEvent.layout.height;
@@ -880,7 +881,6 @@ export default function ManagePlayersScreen() {
           styles.scrollContent,
           { padding, paddingBottom: insets.bottom + spacing.xl },
         ]}
-        keyboardShouldPersistTaps="handled"
       >
 
         {/* Add Player card */}
@@ -1215,7 +1215,7 @@ export default function ManagePlayersScreen() {
             </Card>
           </View>
         )}
-      </ScrollView>
+      </FormScrollView>
 
       {(() => {
         const menuMember = members.find((m) => m.playerId === menuForPlayerId);
