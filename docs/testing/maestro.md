@@ -197,8 +197,8 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   it, and serve its JavaScript with Metro from a checkout of the commit it was built from.
 - **Keyboard fix run, 2026-11-24 (#1118):** same Debug build with the `FormScrollView` JavaScript served by
   Metro, 33 flows, a seed before each. **iOS 27.0 simulator: 33 of 33** and **iOS 26.4 simulator: 33 of
-  33**, every flow on the first attempt; `create-team.yaml` and `admin-season-manage.yaml` pass on
-  iOS 27 unchanged.
+  33**, every flow on the first attempt, run twice on each (before and after the review rework of
+  `FormScrollView`); `create-team.yaml` and `admin-season-manage.yaml` pass on iOS 27 unchanged.
 - **Run record, 2026-10-24.** 27 flows passed on the iPhone 17 / iOS 26.5 simulator against a fresh
   1.6.0 Debug build (ad-hoc signed `xcodebuild`, `main` at `a840311`) and the local stack, with a
   reseed before each: the 25 existing flows, all on the first attempt, plus `spanish-locale.yaml`
