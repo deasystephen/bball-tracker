@@ -9,12 +9,13 @@
 // Output: nothing (allow), or a PreToolUse decision of "deny" or "ask" with
 // the rule as the reason. Any error inside this script allows the call: a
 // broken guard must not stop every session, and CI backstops the rules that
-// matter most (migrations, lint suppressions, the binary manifest).
+// matter most (migrations, lint suppressions).
 //
 // Tested by mobile/__tests__/repo/claude-hooks.test.ts, which runs this file
 // as a process, the way the harness does.
 
 import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
 
 /** Files that may carry an `eslint-disable` (CLAUDE.md, Code Style). */
@@ -29,9 +30,9 @@ const RULES = {
   gitStash:
     'CLAUDE.md, Work Hygiene: never `git stash`. Several sessions share this checkout and a stash takes their changes too. Use a sibling `git worktree`.',
   gitCheckoutPaths:
-    'CLAUDE.md, Work Hygiene: never `git checkout -- <path>` (or `git checkout .`). It discards uncommitted work, which may belong to another session.',
+    'CLAUDE.md, Work Hygiene: never `git checkout -- <path>` (or `git checkout <path>`, `git checkout .`). It discards uncommitted work, which may belong to another session.',
   forcePush:
-    'CLAUDE.md, Work Hygiene: a force-push needs the owner\'s OK first (several sessions share these branches).',
+    "CLAUDE.md, Work Hygiene: a force-push needs the owner's OK first (several sessions share these branches).",
   pkill:
     'Stop only what you started: kill by PID, never `pkill` or `killall` by name. The owner runs other sessions on this machine.',
   expoStart:
@@ -55,39 +56,43 @@ const ask = (rule) => ({ decision: 'ask', reason: RULES[rule] });
 // arguments, `a && git stash` and `(git stash)` are commands.
 // ---------------------------------------------------------------------------
 
-/** Drop here-document bodies; they are data (an issue body, a commit message). */
-function stripHeredocs(command) {
-  const lines = command.split('\n');
-  const kept = [];
-  let terminator = null;
-  let stripTabs = false;
-  for (const line of lines) {
-    if (terminator !== null) {
-      const candidate = stripTabs ? line.replace(/^\t+/, '') : line;
-      if (candidate === terminator) terminator = null;
-      continue;
-    }
-    kept.push(line);
-    const match = /<<(-?)\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\2/.exec(line);
-    if (match) {
-      stripTabs = match[1] === '-';
-      terminator = match[3];
+/** Index of the `)` that closes the `(` at `open`, or the end of the text. */
+function matchingParen(text, open) {
+  let depth = 0;
+  for (let i = open; i < text.length; i += 1) {
+    if (text[i] === '\\') i += 1;
+    else if (text[i] === '(') depth += 1;
+    else if (text[i] === ')') {
+      depth -= 1;
+      if (depth === 0) return i;
     }
   }
-  return kept.join('\n');
+  return text.length;
+}
+
+/** Index of the next unescaped backtick after `from`, or the end of the text. */
+function closingBacktick(text, from) {
+  for (let i = from; i < text.length; i += 1) {
+    if (text[i] === '\\') i += 1;
+    else if (text[i] === '`') return i;
+  }
+  return text.length;
 }
 
 /**
- * Split a command line into segments (one simple command each), each a list
- * of words with quotes resolved. `nested` collects command substitutions
- * found inside double quotes or backticks, to be checked on their own.
+ * Split a command line into items, in order:
+ *   { type: 'cmd', words }   one simple command, quotes resolved
+ *   { type: 'open' | 'close' }  a subshell or command-substitution boundary
+ *   { type: 'nested', text }  a substitution found inside quotes or backticks
+ * Here-document bodies are skipped: they are data (an issue body, a script).
  */
-function parse(command) {
-  const segments = [];
-  const nested = [];
+function parse(text) {
+  const items = [];
   let words = [];
   let word = '';
   let inWord = false;
+  let arithmetic = 0;
+  let heredocs = [];
   const endWord = () => {
     if (inWord) words.push(word);
     word = '';
@@ -95,20 +100,18 @@ function parse(command) {
   };
   const endSegment = () => {
     endWord();
-    if (words.length > 0) segments.push(words);
+    if (words.length > 0) items.push({ type: 'cmd', words });
     words = [];
   };
 
-  const text = stripHeredocs(command);
   for (let i = 0; i < text.length; i += 1) {
     const ch = text[i];
+    const next = text[i + 1];
     if (ch === '\\') {
-      if (text[i + 1] === '\n') {
-        i += 1;
-        continue;
+      if (next !== '\n') {
+        word += next ?? '';
+        inWord = true;
       }
-      word += text[i + 1] ?? '';
-      inWord = true;
       i += 1;
     } else if (ch === "'") {
       const end = text.indexOf("'", i + 1);
@@ -117,34 +120,91 @@ function parse(command) {
       inWord = true;
       i = stop;
     } else if (ch === '"') {
-      let quoted = '';
       let j = i + 1;
       for (; j < text.length && text[j] !== '"'; j += 1) {
         if (text[j] === '\\' && j + 1 < text.length) {
-          quoted += text[j + 1];
+          // An escaped character is literal: \` and \$( run nothing.
+          word += text[j + 1];
           j += 1;
+        } else if (text[j] === '`') {
+          const stop = closingBacktick(text, j + 1);
+          items.push({ type: 'nested', text: text.slice(j + 1, stop) });
+          j = stop;
+        } else if (text[j] === '$' && text[j + 1] === '(' && text[j + 2] !== '(') {
+          const stop = matchingParen(text, j + 1);
+          items.push({ type: 'nested', text: text.slice(j + 2, stop) });
+          j = stop;
         } else {
-          quoted += text[j];
+          word += text[j];
         }
       }
-      for (const sub of quoted.matchAll(/\$\(([^()]*)\)|`([^`]*)`/g)) nested.push(sub[1] ?? sub[2]);
-      word += quoted;
       inWord = true;
       i = j;
     } else if (ch === '`') {
-      const end = text.indexOf('`', i + 1);
-      const stop = end === -1 ? text.length : end;
-      nested.push(text.slice(i + 1, stop));
+      const stop = closingBacktick(text, i + 1);
+      items.push({ type: 'nested', text: text.slice(i + 1, stop) });
       inWord = true;
       i = stop;
     } else if (ch === '#' && !inWord) {
       const end = text.indexOf('\n', i);
       i = end === -1 ? text.length : end - 1;
-    } else if (ch === '>' || ch === '<') {
+    } else if (ch === '<' && next === '<' && arithmetic > 0) {
+      word += '<<';
+      inWord = true;
+      i += 1;
+    } else if (ch === '<' && next === '<' && text[i + 2] === '<') {
+      // A here-string: `<<< word`. The word is data, the next line is not.
       endWord();
-      words.push(ch);
-      if (text[i + 1] === ch) i += 1;
-    } else if (';&|\n()'.includes(ch)) {
+      words.push('<');
+      i += 2;
+    } else if (ch === '<' && next === '<') {
+      const match = /^<<(-?)[ \t]*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\2/.exec(text.slice(i));
+      endWord();
+      if (match) {
+        heredocs.push({ terminator: match[3], stripTabs: match[1] === '-' });
+        i += match[0].length - 1;
+      } else {
+        words.push('<');
+        i += 1;
+      }
+    } else if (ch === '<') {
+      endWord();
+      words.push('<');
+    } else if (ch === '>') {
+      endWord();
+      words.push('>');
+      if (next === '>') i += 1;
+      if (text[i + 1] === '|' || text[i + 1] === '&') i += 1;
+    } else if (ch === '\n') {
+      endSegment();
+      for (const { terminator, stripTabs } of heredocs) {
+        let lineStart = i + 1;
+        for (;;) {
+          const lineEnd = text.indexOf('\n', lineStart);
+          const stop = lineEnd === -1 ? text.length : lineEnd;
+          const line = text.slice(lineStart, stop);
+          i = stop;
+          if ((stripTabs ? line.replace(/^\t+/, '') : line) === terminator || lineEnd === -1) break;
+          lineStart = stop + 1;
+        }
+      }
+      heredocs = [];
+    } else if (ch === '(' && next === '(') {
+      arithmetic += 1;
+      word += '((';
+      inWord = true;
+      i += 1;
+    } else if (ch === ')' && next === ')' && arithmetic > 0) {
+      arithmetic -= 1;
+      word += '))';
+      i += 1;
+    } else if (ch === '(') {
+      endSegment();
+      items.push({ type: 'open' });
+    } else if (ch === ')') {
+      endSegment();
+      items.push({ type: 'close' });
+    } else if (ch === ';' || ch === '&' || ch === '|') {
       endSegment();
     } else if (ch === ' ' || ch === '\t') {
       endWord();
@@ -154,43 +214,97 @@ function parse(command) {
     }
   }
   endSegment();
-  return { segments, nested };
+  return items;
 }
 
-const WRAPPERS = new Set(['sudo', 'command', 'exec', 'time', 'nohup', 'env', 'caffeinate']);
+/** Shell keywords that precede a command. */
+const KEYWORDS = new Set(['{', '!', 'if', 'then', 'elif', 'else', 'while', 'until', 'do']);
+/** Commands that run another command, with the flags of theirs that take a value. */
+const WRAPPERS = {
+  sudo: ['-u', '-g', '-h', '-p', '-C'],
+  command: [],
+  exec: ['-a'],
+  time: ['-o', '-f'],
+  nohup: [],
+  nice: ['-n'],
+  env: ['-u', '-C', '-S'],
+  caffeinate: ['-t', '-w'],
+  timeout: ['-s', '-k', '--signal', '--kill-after'],
+  xargs: ['-n', '-I', '-P', '-L', '-d', '-s', '-E', '-J', '-R'],
+};
 const SHELLS = new Set(['bash', 'sh', 'zsh']);
 const READ_ONLY = new Set(['grep', 'rg', 'echo', 'printf', 'cat', 'git', 'gh', 'ls', 'find']);
+/** git options that take their value as the next word. */
+const GIT_VALUE_OPTIONS = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--super-prefix', '--config-env']);
+
+const isAssignment = (w) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(w);
+const isManifest = (w) => /(^|\/)binary-manifest\.json$/.test(w);
 
 function isInMobile(dir) {
   return path.resolve(dir).split(path.sep).includes('mobile');
 }
 
-/** Words after `xargs` and its flags: the command it will run. */
-function afterXargs(words) {
-  let i = 1;
-  while (i < words.length && words[i].startsWith('-')) i += 1;
-  return words.slice(i);
-}
-
-function checkSegment(allWords, state) {
+/** Strip assignments, keywords and wrapper commands from the front of a segment. */
+function unwrap(allWords) {
   let words = allWords;
   const assigns = [];
   for (;;) {
     if (words.length === 0) break;
-    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0])) {
+    const name = path.basename(words[0]);
+    if (isAssignment(words[0])) {
       assigns.push(words[0]);
       words = words.slice(1);
-    } else if (WRAPPERS.has(path.basename(words[0]))) {
+    } else if (KEYWORDS.has(words[0])) {
       words = words.slice(1);
-      while (words.length > 0 && words[0].startsWith('-')) words = words.slice(1);
-    } else if (words[0] === '{' || words[0] === '!' || words[0] === 'then' || words[0] === 'do' || words[0] === 'else') {
-      words = words.slice(1);
-    } else if (path.basename(words[0]) === 'xargs') {
-      words = afterXargs(words);
+    } else if (Object.hasOwn(WRAPPERS, name)) {
+      const valueFlags = WRAPPERS[name];
+      let i = 1;
+      while (i < words.length && words[i].startsWith('-')) i += valueFlags.includes(words[i]) ? 2 : 1;
+      if (name === 'timeout') i += 1; // the duration
+      words = words.slice(i);
     } else {
       break;
     }
   }
+  return { words, assigns };
+}
+
+function checkGit(args, dir) {
+  let gitDir = dir;
+  let i = 0;
+  while (i < args.length && args[i].startsWith('-')) {
+    if (args[i] === '-C' && args[i + 1]) gitDir = path.resolve(gitDir, args[i + 1]);
+    i += GIT_VALUE_OPTIONS.has(args[i]) ? 2 : 1;
+  }
+  const sub = args[i];
+  const rest = args.slice(i + 1);
+
+  if (sub === 'reset') return deny('gitReset');
+  if (sub === 'stash' && rest[0] !== 'list' && rest[0] !== 'show') return deny('gitStash');
+
+  if (sub === 'checkout') {
+    const dashes = rest.indexOf('--');
+    if (dashes !== -1) return dashes < rest.length - 1 ? deny('gitCheckoutPaths') : null;
+    const createsBranch = rest.some((a) => a === '-b' || a === '-B' || a === '--orphan');
+    const namesPath = rest.some((a) => !a.startsWith('-') && fs.existsSync(path.resolve(gitDir, a)));
+    if (!createsBranch && namesPath) return deny('gitCheckoutPaths');
+  }
+
+  if (
+    sub === 'push' &&
+    rest.some(
+      (a) => a === '--force' || a.startsWith('--force-') || /^-[a-eg-z]*f[a-z]*$/.test(a) || a.startsWith('+'),
+    )
+  ) {
+    return ask('forcePush');
+  }
+
+  if ((sub === 'rm' || sub === 'mv') && rest.some(isManifest)) return deny('binaryManifest');
+  return null;
+}
+
+function checkSegment(allWords, state) {
+  const { words, assigns } = unwrap(allWords);
   if (words.length === 0) return null;
   const cmd = path.basename(words[0]);
   const args = words.slice(1);
@@ -200,31 +314,15 @@ function checkSegment(allWords, state) {
     return null;
   }
 
-  if (SHELLS.has(cmd) || cmd === 'eval') {
-    const script = cmd === 'eval' ? args.join(' ') : args[args.findIndex((a) => /^-[a-z]*c$/.test(a)) + 1];
-    const hasScript = cmd === 'eval' || args.some((a) => /^-[a-z]*c$/.test(a));
-    return hasScript && script ? checkCommand(script, state) : null;
+  if (SHELLS.has(cmd)) {
+    const flag = args.findIndex((a) => /^-[a-z]*c$/.test(a));
+    return flag !== -1 && args[flag + 1] ? checkCommand(args[flag + 1], state.dir) : null;
   }
+  if (cmd === 'eval') return checkCommand(args.join(' '), state.dir);
 
   if (cmd === 'git') {
-    let i = 0;
-    while (i < args.length && args[i].startsWith('-')) {
-      if (args[i] === '-C' && args[i + 1]) state.dir = path.resolve(state.dir, args[i + 1]);
-      i += args[i] === '-C' || args[i] === '-c' ? 2 : 1;
-    }
-    const sub = args[i];
-    const rest = args.slice(i + 1);
-    if (sub === 'reset') return deny('gitReset');
-    if (sub === 'stash' && rest[0] !== 'list' && rest[0] !== 'show') return deny('gitStash');
-    if (sub === 'checkout' && (rest.includes('--') || rest.includes('.'))) return deny('gitCheckoutPaths');
-    if (
-      sub === 'push' &&
-      rest.some(
-        (a) => a === '-f' || a === '--force' || a.startsWith('--force-') || /^-[a-eg-z]*f[a-z]*$/.test(a) || a.startsWith('+'),
-      )
-    ) {
-      return ask('forcePush');
-    }
+    const verdict = checkGit(args, state.dir);
+    if (verdict) return verdict;
   }
 
   if (cmd === 'pkill' || cmd === 'killall') return deny('pkill');
@@ -256,26 +354,32 @@ function checkSegment(allWords, state) {
     return deny('unsigned');
   }
 
-  const manifestAt = allWords.findIndex((w) => /(^|\/)binary-manifest\.json$/.test(w));
-  if (manifestAt !== -1) {
-    const redirected = allWords[manifestAt - 1] === '>';
+  // Writes to the binary manifest: a redirect onto it from any command, or a
+  // command that changes the file it is given.
+  if (allWords.some((w, i) => isManifest(w) && allWords[i - 1] === '>')) return deny('binaryManifest');
+  if (args.some(isManifest)) {
     const inPlace =
       (cmd === 'sed' && args.some((a) => /^-[a-zA-Z]*i/.test(a) || a === '--in-place')) ||
       (cmd === 'perl' && args.some((a) => /^-[a-zA-Z]*i/.test(a)));
-    if (redirected || inPlace || ['tee', 'rm', 'mv', 'cp', 'truncate'].includes(cmd)) return deny('binaryManifest');
+    const isDestination = (cmd === 'cp' || cmd === 'mv') && isManifest(args[args.length - 1]);
+    const isSource = cmd === 'mv' && args.slice(0, -1).some(isManifest);
+    if (inPlace || isDestination || isSource || ['tee', 'rm', 'truncate'].includes(cmd)) {
+      return deny('binaryManifest');
+    }
   }
 
   return null;
 }
 
-function checkCommand(command, state) {
-  const { segments, nested } = parse(command);
-  for (const words of segments) {
-    const verdict = checkSegment(words, state);
-    if (verdict) return verdict;
-  }
-  for (const inner of nested) {
-    const verdict = checkCommand(inner, { ...state });
+function checkCommand(command, startDir) {
+  const state = { dir: startDir };
+  const saved = [];
+  for (const item of parse(command)) {
+    let verdict = null;
+    if (item.type === 'open') saved.push(state.dir);
+    else if (item.type === 'close') state.dir = saved.pop() ?? state.dir;
+    else if (item.type === 'nested') verdict = checkCommand(item.text, state.dir);
+    else verdict = checkSegment(item.words, state);
     if (verdict) return verdict;
   }
   return null;
@@ -285,12 +389,28 @@ function checkCommand(command, state) {
 // File edits.
 // ---------------------------------------------------------------------------
 
+/** `target` with symlinks resolved, even when the file does not exist yet. */
+function realPath(target) {
+  let existing = target;
+  const missing = [];
+  while (!fs.existsSync(existing)) {
+    const parent = path.dirname(existing);
+    if (parent === existing) return target;
+    missing.unshift(path.basename(existing));
+    existing = parent;
+  }
+  return path.join(fs.realpathSync(existing), ...missing);
+}
+
 function repoRoot(dir) {
+  let existing = dir;
+  while (!fs.existsSync(existing) && path.dirname(existing) !== existing) existing = path.dirname(existing);
   try {
-    return execFileSync('git', ['-C', dir, 'rev-parse', '--show-toplevel'], {
+    const root = execFileSync('git', ['-C', existing, 'rev-parse', '--show-toplevel'], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
+    return fs.realpathSync(root);
   } catch {
     return null;
   }
@@ -314,11 +434,15 @@ function isOnMain(root, relPath) {
   return false;
 }
 
+const DIRECTIVE = /(\/\/|\/\*)\s*eslint-disable/g;
+const countDirectives = (texts) =>
+  texts.filter((t) => typeof t === 'string').reduce((n, t) => n + (t.match(DIRECTIVE)?.length ?? 0), 0);
+
 function checkEdit(toolInput, cwd) {
   const filePath = toolInput.file_path ?? toolInput.notebook_path;
   if (typeof filePath !== 'string') return null;
-  const absolute = path.resolve(cwd, filePath);
-  const root = repoRoot(path.dirname(absolute)) ?? repoRoot(cwd);
+  const absolute = realPath(path.resolve(cwd, filePath));
+  const root = repoRoot(path.dirname(absolute));
   const rel = root ? path.relative(root, absolute).split(path.sep).join('/') : absolute;
 
   if (rel === 'mobile/binary-manifest.json') return deny('binaryManifest');
@@ -328,12 +452,15 @@ function checkEdit(toolInput, cwd) {
   }
 
   if (/\.(ts|tsx|js|jsx|mjs|cjs)$/.test(rel) && !ESLINT_DISABLE_ALLOWED.includes(rel)) {
-    const added = [toolInput.new_string, toolInput.content, toolInput.new_source]
-      .filter((v) => typeof v === 'string')
-      .join('\n');
-    const removed = typeof toolInput.old_string === 'string' ? toolInput.old_string : '';
-    const directive = /(\/\/|\/\*)\s*eslint-disable/;
-    if (directive.test(added) && !directive.test(removed)) return deny('eslintDisable');
+    const edits = Array.isArray(toolInput.edits) ? toolInput.edits : [];
+    const added = countDirectives([
+      toolInput.new_string,
+      toolInput.content,
+      toolInput.new_source,
+      ...edits.map((e) => e?.new_string),
+    ]);
+    const removed = countDirectives([toolInput.old_string, ...edits.map((e) => e?.old_string)]);
+    if (added > removed) return deny('eslintDisable');
   }
 
   return null;
@@ -345,7 +472,7 @@ function decide(input) {
   const cwd = typeof input.cwd === 'string' ? input.cwd : process.cwd();
   const toolInput = input.tool_input ?? {};
   if (input.tool_name === 'Bash') {
-    return typeof toolInput.command === 'string' ? checkCommand(toolInput.command, { dir: cwd }) : null;
+    return typeof toolInput.command === 'string' ? checkCommand(toolInput.command, cwd) : null;
   }
   if (['Edit', 'Write', 'MultiEdit', 'NotebookEdit'].includes(input.tool_name)) {
     return checkEdit(toolInput, cwd);

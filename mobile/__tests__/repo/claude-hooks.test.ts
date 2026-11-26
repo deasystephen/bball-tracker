@@ -11,6 +11,7 @@
 
 import { spawnSync } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
@@ -62,6 +63,23 @@ describe('guard-hard-rules hook: Bash', () => {
     ['git checkout -- mobile/app.config.js', 'git checkout --'],
     ['git checkout main -- backend/src/index.ts', 'git checkout --'],
     ['git checkout .', 'git checkout --'],
+    ['git checkout mobile/app.config.js', 'git checkout --'],
+    ['git checkout HEAD mobile/app.config.js', 'git checkout --'],
+    ['git -C mobile checkout app.config.js', 'git checkout --'],
+    ['if ! git stash; then echo x; fi', 'git stash'],
+    ['while git stash; do sleep 1; done', 'git stash'],
+    ['git ls-files | xargs -n 1 git stash', 'git stash'],
+    ['sudo -u me git reset --hard', 'git reset'],
+    ['git --git-dir .git --work-tree . reset --hard', 'git reset'],
+    ['grep -c foo <<< input\ngit stash', 'git stash'],
+    ['echo $((1<<3))\ngit stash', 'git stash'],
+    ['timeout 30 pkill -f metro', 'pkill'],
+    ['cd mobile && (cd ../backend && npm test) && npm start', 'expo start'],
+    ['cd mobile && echo "$(npm start)"', 'expo start'],
+    ["echo '{}' >| mobile/binary-manifest.json", 'binary-manifest.json'],
+    ['git rm mobile/binary-manifest.json', 'binary-manifest.json'],
+    ['cp /tmp/edited.json mobile/binary-manifest.json', 'binary-manifest.json'],
+    ['cat mobile/app.config.js > /dev/null; echo x >> mobile/binary-manifest.json', 'binary-manifest.json'],
     ['pkill -f metro', 'pkill'],
     ['killall node', 'pkill'],
     ['npm start', 'expo start', MOBILE],
@@ -100,6 +118,16 @@ describe('guard-hard-rules hook: Bash', () => {
   it.each<[string, string?]>([
     ['git checkout main'],
     ['git checkout -b fix/1127-hooks origin/main'],
+    ['git checkout -b docs origin/main'],
+    ['git checkout main --'],
+    // An escaped backtick is a literal one: the shell runs nothing.
+    ['git commit -m "docs: the hook refuses \\`git stash\\` and \\`git reset\\`"'],
+    ['gh pr create --body "costs \\$(5) and mentions \\`pkill\\`"'],
+    ['git -C mobile status && cd backend && npm start'],
+    ['(cd mobile && npm test) && npm start', BACKEND],
+    ['cp mobile/binary-manifest.json /tmp/manifest-before.json'],
+    ['echo $((1<<3))\necho ok'],
+    ['npm test 2>&1 | tail -5', MOBILE],
     ['git restore --staged mobile/app.config.js'],
     ['git stash list'],
     ['git stash show -p'],
@@ -128,10 +156,35 @@ describe('guard-hard-rules hook: Bash', () => {
 });
 
 describe('guard-hard-rules hook: file edits', () => {
-  const mergedMigration = fs
-    .readdirSync(path.join(BACKEND, 'prisma', 'migrations'))
-    .filter((name) => /^\d{14}_/.test(name))
-    .sort()[0];
+  // A throwaway repository with one migration on `main` and a symlink to it.
+  // The real checkout cannot stand in: a pull-request run in CI is a shallow
+  // checkout of the merge commit, with no `main` ref to compare against.
+  let fixture: string;
+  let linked: string;
+  const MIGRATION = 'backend/prisma/migrations/20250101000000_initial/migration.sql';
+
+  beforeAll(() => {
+    fixture = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'hook-fixture-')));
+    const git = (...args: string[]) => {
+      const result = spawnSync('git', ['-C', fixture, '-c', 'user.name=t', '-c', 'user.email=t@example.test', ...args]);
+      expect(result.status).toBe(0);
+    };
+    for (const file of [MIGRATION, 'mobile/binary-manifest.json']) {
+      fs.mkdirSync(path.dirname(path.join(fixture, file)), { recursive: true });
+      fs.writeFileSync(path.join(fixture, file), 'x\n');
+    }
+    git('init', '--quiet', '--initial-branch=main');
+    git('add', '.');
+    git('commit', '--quiet', '-m', 'initial');
+    git('checkout', '--quiet', '-b', 'feature');
+    linked = `${fixture}-link`;
+    fs.symlinkSync(fixture, linked);
+  });
+
+  afterAll(() => {
+    fs.rmSync(linked, { force: true });
+    fs.rmSync(fixture, { recursive: true, force: true });
+  });
 
   it('denies an edit to mobile/binary-manifest.json', () => {
     const verdict = edit('Edit', {
@@ -145,7 +198,7 @@ describe('guard-hard-rules hook: file edits', () => {
 
   it('denies an edit to a migration that is on main', () => {
     const verdict = edit('Edit', {
-      file_path: path.join(BACKEND, 'prisma', 'migrations', mergedMigration, 'migration.sql'),
+      file_path: path.join(fixture, MIGRATION),
       old_string: 'a',
       new_string: 'b',
     });
@@ -153,9 +206,18 @@ describe('guard-hard-rules hook: file edits', () => {
     expect(verdict.reason).toContain('Add a new migration');
   });
 
+  it('applies the path rules to a file reached through a symlink', () => {
+    expect(edit('Edit', { file_path: path.join(linked, MIGRATION), old_string: 'a', new_string: 'b' }).decision).toBe(
+      'deny',
+    );
+    expect(
+      edit('Write', { file_path: path.join(linked, 'mobile', 'binary-manifest.json'), content: '{}' }).decision,
+    ).toBe('deny');
+  });
+
   it('allows writing a new migration', () => {
     const verdict = edit('Write', {
-      file_path: path.join(BACKEND, 'prisma', 'migrations', '29990101000000_not_on_main', 'migration.sql'),
+      file_path: path.join(fixture, 'backend/prisma/migrations/29990101000000_not_on_main/migration.sql'),
       content: 'ALTER TABLE "Team" ADD COLUMN "x" TEXT;',
     });
     expect(verdict.decision).toBe('allow');
@@ -170,6 +232,25 @@ describe('guard-hard-rules hook: file edits', () => {
       expect(verdict.decision).toBe('deny');
       expect(verdict.reason).toContain('Fix the code');
     }
+  });
+
+  it('denies a second suppression next to one that was already there, and one inside a MultiEdit', () => {
+    const file_path = path.join(MOBILE, 'services', 'log.ts');
+    expect(
+      edit('Edit', {
+        file_path,
+        old_string: `${DISABLE_DIRECTIVE}\nconsole.log(x);`,
+        new_string: `${DISABLE_DIRECTIVE}\n${DISABLE_DIRECTIVE}\nconsole.log(x);`,
+      }).decision,
+    ).toBe('deny');
+    const multi = runHook(
+      JSON.stringify({
+        tool_name: 'MultiEdit',
+        tool_input: { file_path, edits: [{ old_string: 'a', new_string: `${DISABLE_DIRECTIVE}\na` }] },
+        cwd: REPO_ROOT,
+      }),
+    );
+    expect(multi.decision).toBe('deny');
   });
 
   it('allows an edit that keeps a suppression that was already there, and the two named exceptions', () => {
