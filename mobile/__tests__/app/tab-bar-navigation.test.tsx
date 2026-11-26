@@ -42,6 +42,30 @@ jest.mock('expo-router', () => {
   };
   return { Tabs };
 });
+// The shared reanimated mock makes a new shared value on every render, so a
+// pill that only starts in the right place would pass for one that follows the
+// navigator. Here a shared value lives as long as its component, as the real
+// one does. An animated style is still computed while rendering, so a value
+// set in an effect shows on the next render.
+jest.mock('react-native-reanimated', () => {
+  const { useRef } = jest.requireActual<typeof import('react')>('react');
+  const { View, Text } = jest.requireActual<typeof import('react-native')>('react-native');
+  return {
+    __esModule: true,
+    default: { View, Text },
+    useSharedValue: <T,>(initial: T) => {
+      const ref = useRef<{ value: T; get: () => T; set: (next: T) => void } | null>(null);
+      if (!ref.current) {
+        const shared = { value: initial, get: (): T => shared.value, set: (next: T): void => void (shared.value = next) };
+        ref.current = shared;
+      }
+      return ref.current;
+    },
+    useAnimatedStyle: <T,>(style: () => T): T => style(),
+    withSpring: <T,>(value: T): T => value,
+    withSequence: <T,>(...values: T[]): T => values[values.length - 1],
+  };
+});
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 34, left: 0, right: 0 }),
 }));
@@ -80,6 +104,62 @@ describe('custom tab bar', () => {
 
     fireEvent.press(tab('Home tab'));
     expect(mockNavigateToTab).toHaveBeenCalledWith('home-key');
+  });
+
+  // The pill and the selected state follow the navigator, not the tap (#1117).
+  describe('a tab change that does not come from a tap on the bar', () => {
+    const focus = (name: string): void => {
+      mockFocusedIndex = mockRoutes.findIndex((r) => r.name === name);
+    };
+    const pill = (): ReturnType<typeof screen.getByTestId> => screen.getByTestId('tab-bar-pill');
+    // The Jest window is 750pt wide (react-native's preset): five tabs of 150pt.
+    const TAB_WIDTH = 150;
+    /** The navigator re-renders the bar with a new focused route; the second render shows the effect's value. */
+    const navigatorMovesTo = (name: string, rerender: (ui: React.ReactElement) => void): void => {
+      focus(name);
+      rerender(<TabsLayout />);
+      rerender(<TabsLayout />);
+    };
+
+    it('starts the pill under the focused tab', () => {
+      focus('stats');
+      render(<TabsLayout />);
+      expect(pill()).toHaveStyle({ transform: [{ translateX: 3 * TAB_WIDTH }] });
+    });
+
+    it('moves the pill when the navigator changes tab on its own (router.replace, a deep link)', () => {
+      const { rerender } = render(<TabsLayout />);
+      expect(pill()).toHaveStyle({ transform: [{ translateX: 0 }] });
+
+      navigatorMovesTo('teams', rerender);
+
+      expect(pill()).toHaveStyle({ transform: [{ translateX: TAB_WIDTH }] });
+      expect(tab('Teams tab').props.accessibilityState).toEqual({ selected: true });
+      expect(tab('Home tab').props.accessibilityState).toEqual({ selected: false });
+      expect(mockNavigateToTab).not.toHaveBeenCalled();
+    });
+
+    it('on the hidden Invitations tab selects nothing, hides the pill, and Home navigates', () => {
+      focus('invitations');
+      render(<TabsLayout />);
+
+      for (const label of ['Home tab', 'Teams tab', 'Track game tab', 'Stats tab', 'Profile tab']) {
+        expect(tab(label).props.accessibilityState).toEqual({ selected: false });
+      }
+      expect(pill()).toHaveStyle({ opacity: 0 });
+
+      fireEvent.press(tab('Home tab'));
+      expect(mockNavigateToTab).toHaveBeenCalledWith('home-key');
+    });
+
+    it('shows the pill again, under the right tab, after leaving Invitations', () => {
+      focus('invitations');
+      const { rerender } = render(<TabsLayout />);
+
+      navigatorMovesTo('profile', rerender);
+
+      expect(pill()).toHaveStyle({ opacity: 1, transform: [{ translateX: 4 * TAB_WIDTH }] });
+    });
   });
 });
 

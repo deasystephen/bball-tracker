@@ -135,6 +135,15 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   `paddingBottom` from `hooks/useTabBarPadding.ts#useTabBarPadding()` (= `TAB_BAR_HEIGHT` 60 + bottom
   safe-area inset + `spacing.lg`); never hand-roll that padding — a too-small value leaves the last rows
   permanently trapped under the bar (the pre-fix Profile bug).
+- **The bar's selected tab and highlight pill follow the navigator's state, never the tap (#1117).**
+  `CustomTabBar` maps the focused route to one of its five tabs and moves the pill in an effect on
+  that index, so a `router.replace('/(tabs)/teams')` or a deep link moves it like a tap does. When
+  the focused route is not one of the five (`invitations`, `href: null`, reached after a guardian
+  invitation is accepted), no tab is selected and the pill is hidden, so every button navigates,
+  Home included. Never fall back to index 0 for an unknown route: a tab that looks selected ignores
+  its own tap. Tests: `__tests__/app/tab-bar-navigation.test.tsx` (it mocks reanimated with a
+  shared value that persists across renders; the shared mock in `jest.setup.js` re-creates it on
+  every render and would pass a pill that only starts in the right place).
 
 ### Mobile routing & guards
 - **The age screen comes first (#981).** `postLoginRoute` sends a user whose session payload says

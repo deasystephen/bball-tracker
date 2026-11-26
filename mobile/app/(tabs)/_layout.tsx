@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo } from 'react';
 import { View, TouchableOpacity, StyleSheet, Platform, useWindowDimensions } from 'react-native';
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -35,7 +35,22 @@ function CustomTabBar({ state, navigateToTab }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
   const { width: screenWidth } = useWindowDimensions();
   const tabWidth = screenWidth / TAB_CONFIGS.length;
-  const pillPosition = useSharedValue(0);
+
+  // Map the navigator's focused route to one of the five tabs the bar shows.
+  // -1 when the focused route is not one of them (`invitations`, `href: null`):
+  // then no tab is selected and the pill is hidden, so every button, Home
+  // included, still navigates (#1117).
+  const activeRouteName = state.routes[state.index]?.name;
+  const activeVisualIndex = TAB_CONFIGS.findIndex((tab) => tab.name === activeRouteName);
+  const hasActiveTab = activeVisualIndex >= 0;
+
+  const pillPosition = useSharedValue(Math.max(activeVisualIndex, 0));
+  // The pill follows the navigator's state, not the tap: a tab change that
+  // comes from `router.replace` or a deep link moves it too (#1117).
+  useEffect(() => {
+    if (activeVisualIndex < 0) return;
+    pillPosition.set(withSpring(activeVisualIndex, { damping: 18, stiffness: 200 }));
+  }, [activeVisualIndex, pillPosition]);
   const scale0 = useSharedValue(1);
   const scale1 = useSharedValue(1);
   const scale2 = useSharedValue(1);
@@ -54,12 +69,6 @@ function CustomTabBar({ state, navigateToTab }: BottomTabBarProps) {
         return;
       }
       if (!isFocused) {
-        pillPosition.set(
-          withSpring(index, {
-            damping: 18,
-            stiffness: 200,
-          })
-        );
         scales[index].set(
           withSequence(
             withSpring(1.15, { damping: 6, stiffness: 300 }),
@@ -71,7 +80,7 @@ function CustomTabBar({ state, navigateToTab }: BottomTabBarProps) {
         navigateToTab(routeKey);
       }
     },
-    [navigateToTab, pillPosition, scales]
+    [navigateToTab, scales]
   );
 
   const pillStyle = useAnimatedStyle(() => {
@@ -97,11 +106,6 @@ function CustomTabBar({ state, navigateToTab }: BottomTabBarProps) {
     transform: [{ scale: scale4.value }],
   }));
   const iconStyles = [iconStyle0, iconStyle1, iconStyle2, iconStyle3, iconStyle4];
-
-  // Map Expo Router state indices to our 5-tab config
-  const activeRouteName = state.routes[state.index]?.name;
-  const visualIndex = TAB_CONFIGS.findIndex((t) => t.name === activeRouteName);
-  const activeVisualIndex = visualIndex >= 0 ? visualIndex : 0;
 
   return (
     <View style={styles.tabBarOuter}>
@@ -131,9 +135,10 @@ function CustomTabBar({ state, navigateToTab }: BottomTabBarProps) {
           <Animated.View
             style={[
               styles.pill,
-              { backgroundColor: colors.primary + '18' },
+              { backgroundColor: colors.primary + '18', opacity: hasActiveTab ? 1 : 0 },
               pillStyle,
             ]}
+            testID="tab-bar-pill"
           />
 
           {TAB_CONFIGS.map((tab, index) => {
