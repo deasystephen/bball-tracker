@@ -58,9 +58,9 @@ export const Input: React.FC<InputProps> = ({
         </ThemedText>
       )}
       <View
-        // A touch on the field moves focus or the cursor; FormScrollView must
-        // not read it as a tap that dismisses the keyboard (#1118).
-        onTouchStart={markTextInputTouch}
+        // A touch on an editable field moves focus or the cursor; FormScrollView
+        // must not read it as a tap that dismisses the keyboard (#1118).
+        onTouchStart={props.editable === false ? undefined : markTextInputTouch}
         style={[
           styles.inputContainer,
           {

@@ -1,22 +1,27 @@
 /**
  * Tells `FormScrollView` that the touch now starting began on a text input
  * (#1118). Touch events bubble from the touched view upwards, so `Input`
- * marks the touch before the scroll view's wrapper sees it. React Native has
- * no public way to ask whether a touch target is a text input.
+ * marks the touch before the scroll view's wrapper sees the same event.
+ * React Native has no public way to ask whether a touch target is a text
+ * input.
+ *
+ * The mark is the native event's own timestamp, so it can only match the one
+ * event it was taken from: an `Input` outside any `FormScrollView` leaves a
+ * mark that no later touch can pick up.
  */
 
-const FRESH_MS = 250;
+import type { GestureResponderEvent } from 'react-native';
 
-let markedAt = 0;
+let markedTimestamp: number | null = null;
 
 /** Called by `Input` from `onTouchStart`. */
-export function markTextInputTouch(): void {
-  markedAt = Date.now();
+export function markTextInputTouch(event: GestureResponderEvent): void {
+  markedTimestamp = event.nativeEvent.timestamp;
 }
 
-/** True once per marked touch, and only while the mark is fresh. */
-export function takeTextInputTouch(): boolean {
-  const fresh = markedAt !== 0 && Date.now() - markedAt <= FRESH_MS;
-  markedAt = 0;
-  return fresh;
+/** True when this is the event an `Input` just marked. */
+export function isTextInputTouch(event: GestureResponderEvent): boolean {
+  const marked = markedTimestamp !== null && markedTimestamp === event.nativeEvent.timestamp;
+  markedTimestamp = null;
+  return marked;
 }

@@ -12,10 +12,12 @@
  * first version of this component claimed the responder for unhandled taps;
  * it passed on the simulator and did nothing on the device.
  *
- * A tap is a touch that ends, or is cancelled, within TAP_SLOP of where it
- * began. A drag travels further, so scrolling dismisses nothing. A tap on a
- * button or a pill dismisses the keyboard and still presses the control
- * (`handled` mode stays on, so the press is never swallowed). A tap on a text
+ * A tap is a touch that ends within TAP_SLOP of where it began. A drag
+ * travels further or is cancelled when the scroll view takes it over, so
+ * scrolling dismisses nothing. A tap on a button or a pill dismisses the
+ * keyboard (the focused field loses the focus, also with a hardware keyboard)
+ * and still presses the control: `handled` mode stays on, so the press is
+ * never swallowed. A tap on a text
  * input is left alone: it moves the focus or the cursor (`Input` marks such
  * a touch through `utils/text-input-touch.ts`).
  *
@@ -29,17 +31,17 @@
  * wrapper. `__tests__/components/form-scroll-view-guard.test.ts` fails on a
  * raw `<ScrollView>` with a text input under `app/`.
  *
- * TEMPORARY (#1118): if the keyboard is still up after a tap that should have
- * dismissed it, one Sentry event per app session reports what the touch did
- * (phases, distance, focus before and after; no text, no ids). Remove
- * `reportIfKeyboardStuck` once the device check passes.
+ * TEMPORARY (#1118): if the field that had the focus still has it 700ms after
+ * a tap, one Sentry event per app session reports what the touch did (phase,
+ * distance; no text, no ids). Remove
+ * `reportIfStillFocused` once the device check passes.
  */
 
 import React, { useEffect, useRef } from 'react';
 import { Keyboard, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import type { GestureResponderEvent, ScrollViewProps } from 'react-native';
 import { captureException } from '../services/sentry';
-import { takeTextInputTouch } from '../utils/text-input-touch';
+import { isTextInputTouch } from '../utils/text-input-touch';
 
 export type FormScrollViewProps = Omit<
   ScrollViewProps,
@@ -59,11 +61,12 @@ interface Touch {
   travel: number;
 }
 
-let stuckKeyboardReported = false;
+const stuckKeyboardReported = { end: false, cancel: false };
 
-/** Test hook: the report is sent once per app session. */
+/** Test hook: each kind of report is sent once per app session. */
 export function resetStuckKeyboardReport(): void {
-  stuckKeyboardReported = false;
+  stuckKeyboardReported.end = false;
+  stuckKeyboardReported.cancel = false;
 }
 
 export function FormScrollView({ children, contentContainerStyle, ref, ...rest }: FormScrollViewProps) {
@@ -78,8 +81,15 @@ export function FormScrollView({ children, contentContainerStyle, ref, ...rest }
   );
 
   const begin = (event: GestureResponderEvent) => {
-    const onTextInput = takeTextInputTouch();
-    if (onTextInput || event.nativeEvent.touches.length > 1) {
+    if (isTextInputTouch(event)) {
+      // The field is about to take or keep the focus: a pending check would
+      // find the keyboard up for a good reason.
+      if (stuckCheck.current) clearTimeout(stuckCheck.current);
+      stuckCheck.current = null;
+      touch.current = null;
+      return;
+    }
+    if (event.nativeEvent.touches.length > 1) {
       touch.current = null;
       return;
     }
@@ -104,14 +114,16 @@ export function FormScrollView({ children, contentContainerStyle, ref, ...rest }
     const focused = TextInput.State.currentlyFocusedInput();
     if (!focused) return;
 
-    Keyboard.dismiss();
+    // A cancelled touch is the system or the scroll view taking the gesture
+    // over (a scroll or a swipe back can begin inside TAP_SLOP): it dismisses
+    // nothing, but it is checked below, in case taps arrive cancelled.
+    if (phase === 'end') Keyboard.dismiss();
 
-    // TEMPORARY (#1118), see reportIfKeyboardStuck.
-    const focusedRightAfter = TextInput.State.currentlyFocusedInput() != null;
+    // TEMPORARY (#1118), see reportIfStillFocused.
     if (stuckCheck.current) clearTimeout(stuckCheck.current);
     stuckCheck.current = setTimeout(() => {
       stuckCheck.current = null;
-      reportIfKeyboardStuck({ phase, travel: Math.round(travel), focused, focusedRightAfter });
+      reportIfStillFocused({ phase, travel: Math.round(travel), focused });
     }, STUCK_CHECK_MS);
   };
   const end = (event: GestureResponderEvent) => finish('end', event);
@@ -141,28 +153,29 @@ export function FormScrollView({ children, contentContainerStyle, ref, ...rest }
 }
 
 /**
- * TEMPORARY (#1118): tell Sentry, once per session, when a tap that called
- * `Keyboard.dismiss()` left the keyboard on screen, and whether an input was
- * focused again afterwards.
+ * TEMPORARY (#1118): tell Sentry, once per session and kind, when the input that had
+ * the focus at a tap still has it afterwards. Focus, not `Keyboard.isVisible()`,
+ * decides: that flag follows the system's show and hide notifications, which
+ * are not trustworthy on iOS 27. It is sent along for comparison.
  */
-function reportIfKeyboardStuck(tap: {
-  phase: string;
-  travel: number;
-  focused: unknown;
-  focusedRightAfter: boolean;
-}): void {
-  if (stuckKeyboardReported || !Keyboard.isVisible()) return;
-  stuckKeyboardReported = true;
-  const focusedLater = TextInput.State.currentlyFocusedInput();
+function reportIfStillFocused(tap: { phase: 'end' | 'cancel'; travel: number; focused: unknown }): void {
+  if (stuckKeyboardReported[tap.phase]) return;
+  if (TextInput.State.currentlyFocusedInput() !== tap.focused) return;
+  stuckKeyboardReported[tap.phase] = true;
   captureException(
-    new Error('Keyboard still visible after a dismissing tap'),
+    // 'end': the tap dismissed and the field kept the focus. 'cancel': a
+    // touch that did not move was cancelled, which dismisses nothing; a slow
+    // scroll start looks the same, so read that one with care.
+    new Error(
+      tap.phase === 'end'
+        ? 'Input still focused after a dismissing tap'
+        : 'Input still focused after a cancelled touch that did not move'
+    ),
     {
       flow: 'form-keyboard-dismiss',
       phase: tap.phase,
       travel: tap.travel,
-      focusedRightAfterDismiss: tap.focusedRightAfter,
-      focusedLater: focusedLater != null,
-      sameInputFocusedLater: focusedLater != null && focusedLater === tap.focused,
+      keyboardReportedVisible: Keyboard.isVisible(),
     },
     { flow: 'form-keyboard-dismiss' }
   );

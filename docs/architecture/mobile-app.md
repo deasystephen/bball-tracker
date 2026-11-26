@@ -378,10 +378,13 @@ never inline a role check in a screen:
   nothing.
 - **How:** the tap area listens to the raw touch events (`onTouchStart`, `onTouchMove`,
   `onTouchEnd`, `onTouchCancel`), which reach it whoever becomes the JS touch responder. A tap is a
-  touch that ends, or is cancelled, within `TAP_SLOP` (10pt) of where it began. `Input` marks a
-  touch that starts on a field (`utils/text-input-touch.ts`; touch events bubble from the touched
-  view up, so the mark is set before the tap area sees the touch), because React Native has no
-  public way to ask whether a touch target is a text input.
+  touch that ends within `TAP_SLOP` (10pt) of where it began; a cancelled touch dismisses nothing,
+  because the scroll view or a swipe back can take a gesture over inside that distance. `Input`
+  marks a touch that starts on an editable field (`utils/text-input-touch.ts` keeps the native
+  event's timestamp; touch events bubble from the touched view up, so the tap area sees the same
+  event next and no later touch can match a stale mark), because React Native has no public way to
+  ask whether a touch target is a text input. A tap on a control also takes the focus away for
+  someone typing on a hardware keyboard; that is accepted.
 - **Why not the responder system, and what is and is not known.** On the owner's iPhone (iOS
   27.2.1, build #38) a finger tap on the "Gender" label of Create Team left the keyboard up with
   React Native's own `handled`-mode dismissal, and still did with the first `FormScrollView`, which
@@ -398,10 +401,12 @@ never inline a role check in a screen:
   open (`_keyboardMetrics` null) and ignores the dismissing tap, which is why `create-team.yaml` and
   `admin-season-manage.yaml` failed on iOS 27 before `FormScrollView`. That was first recorded as
   the cause of the device bug; it is not.
-- **Temporary diagnostic:** if the keyboard is still visible 700ms after a tap that called
-  `Keyboard.dismiss()`, `FormScrollView` sends one Sentry event per app session (`flow:
-  form-keyboard-dismiss`: touch phase, distance, focus before and after; no text, no ids). Remove
-  `reportIfKeyboardStuck` when #1118 closes.
+- **Temporary diagnostic:** if the field that had the focus at a tap still has it 700ms later,
+  `FormScrollView` sends a Sentry event (`flow: form-keyboard-dismiss`: touch phase, distance, and
+  what `Keyboard.isVisible()` claimed; no text, no ids), once per app session for a tap that
+  dismissed and once for a cancelled touch that did not move. Focus decides, not
+  `Keyboard.isVisible()`, which follows the same notifications that proved unreliable. No event is
+  not proof by itself: the device check is. Remove `reportIfStillFocused` when #1118 closes.
 - Two views: the outer one fills the viewport and takes the touches, so a tap below a short form
   dismisses too; the inner one takes `contentContainerStyle` and is as tall as its content, like a
   `ScrollView`'s own content container. Do not make the inner one grow: `Card` is `flex: 1`, and in a

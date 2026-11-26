@@ -18,14 +18,17 @@ import { captureException } from '../../services/sentry';
 
 jest.mock('../../services/sentry', () => ({ captureException: jest.fn() }));
 
+let clock = 1000;
+/** Every native touch event has its own timestamp; a bubbling one keeps it. */
 const touch = (pageX: number, pageY: number, touches = 1) => ({
-  nativeEvent: { pageX, pageY, touches: Array.from({ length: touches }, () => ({})) },
+  nativeEvent: { pageX, pageY, timestamp: (clock += 16), touches: Array.from({ length: touches }, () => ({})) },
 });
 
 describe('FormScrollView', () => {
   let dismiss: jest.SpyInstance;
   let focusedInput: jest.SpyInstance;
   let keyboardVisible: jest.SpyInstance;
+  const FOCUSED = { field: 'age group' } as unknown as ReturnType<typeof TextInput.State.currentlyFocusedInput>;
 
   beforeEach(() => {
     jest.useFakeTimers();
@@ -34,9 +37,7 @@ describe('FormScrollView', () => {
     dismiss = jest.spyOn(Keyboard, 'dismiss').mockImplementation(() => undefined);
     keyboardVisible = jest.spyOn(Keyboard, 'isVisible').mockReturnValue(false);
     // An input has the focus unless a test says otherwise.
-    focusedInput = jest
-      .spyOn(TextInput.State, 'currentlyFocusedInput')
-      .mockReturnValue({} as ReturnType<typeof TextInput.State.currentlyFocusedInput>);
+    focusedInput = jest.spyOn(TextInput.State, 'currentlyFocusedInput').mockReturnValue(FOCUSED);
   });
 
   afterEach(() => {
@@ -76,13 +77,13 @@ describe('FormScrollView', () => {
     expect(area.props.onResponderRelease).toBeUndefined();
   });
 
-  it('dismisses when the system cancels a touch that did not move', () => {
+  it('does not dismiss on a cancelled touch: the scroll view or a swipe back took it over', () => {
     const { getByText } = renderForm();
 
     fireEvent(getByText('Gender'), 'touchStart', touch(100, 300));
-    fireEvent(getByText('Gender'), 'touchCancel', touch(100, 301));
+    fireEvent(getByText('Gender'), 'touchCancel', touch(100, 306));
 
-    expect(dismiss).toHaveBeenCalledTimes(1);
+    expect(dismiss).not.toHaveBeenCalled();
   });
 
   it('does not dismiss on a drag, whether it ends or is cancelled by the scroll view', () => {
@@ -108,17 +109,40 @@ describe('FormScrollView', () => {
     const { getByTestId } = renderForm();
     const area = getByTestId('form-scroll-tap-area');
 
-    // fireEvent calls one handler; on a device the touch bubbles from the
-    // field (which marks it) to the tap area.
-    fireEvent(getByTestId('age-group'), 'touchStart', touch(100, 200));
-    fireEvent(area, 'touchStart', touch(100, 200));
+    // fireEvent calls one handler; on a device the same event bubbles from
+    // the field (which marks it) to the tap area. Device-only: the order.
+    const start = touch(100, 200);
+    fireEvent(getByTestId('age-group'), 'touchStart', start);
+    fireEvent(area, 'touchStart', start);
     fireEvent(area, 'touchEnd', touch(100, 200));
 
     expect(dismiss).not.toHaveBeenCalled();
+  });
 
-    // The mark is spent: the next tap elsewhere dismisses.
+  it('does not carry the mark of a field touch over to the next touch', () => {
+    const { getByTestId } = renderForm();
+    const area = getByTestId('form-scroll-tap-area');
+
+    // A field outside any FormScrollView was touched: nobody took the mark.
+    fireEvent(getByTestId('age-group'), 'touchStart', touch(100, 200));
     fireEvent(area, 'touchStart', touch(100, 300));
     fireEvent(area, 'touchEnd', touch(100, 300));
+
+    expect(dismiss).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats a read-only field as plain content', () => {
+    const { getByTestId } = render(
+      <FormScrollView>
+        <Input label="Note" testID="note" editable={false} />
+      </FormScrollView>
+    );
+    const area = getByTestId('form-scroll-tap-area');
+
+    const start = touch(100, 200);
+    fireEvent(getByTestId('note'), 'touchStart', start);
+    fireEvent(area, 'touchStart', start);
+    fireEvent(area, 'touchEnd', touch(100, 200));
 
     expect(dismiss).toHaveBeenCalledTimes(1);
   });
@@ -150,7 +174,7 @@ describe('FormScrollView', () => {
     fireEvent(label, 'touchStart', touch(100, 300));
     fireEvent(label, 'touchEnd', touch(100, 300));
 
-    focusedInput.mockReturnValue({} as ReturnType<typeof TextInput.State.currentlyFocusedInput>);
+    focusedInput.mockReturnValue(FOCUSED);
     fireEvent(label, 'touchStart', touch(100, 300, 2));
     fireEvent(label, 'touchEnd', touch(100, 300));
 
@@ -172,39 +196,64 @@ describe('FormScrollView', () => {
   });
 
   describe('the temporary stuck-keyboard report', () => {
-    const tapLabel = () => {
+    const tapLabel = (last: 'touchEnd' | 'touchCancel' = 'touchEnd') => {
       const { getByText } = renderForm();
       fireEvent(getByText('Gender'), 'touchStart', touch(100, 300));
-      fireEvent(getByText('Gender'), 'touchEnd', touch(102, 300));
+      fireEvent(getByText('Gender'), last, touch(102, 300));
       act(() => {
         jest.advanceTimersByTime(STUCK_CHECK_MS);
       });
     };
 
-    it('says nothing when the keyboard went away', () => {
+    it('says nothing when the field lost the focus', () => {
+      dismiss.mockImplementation(() => focusedInput.mockReturnValue(undefined));
+
       tapLabel();
 
       expect(captureException).not.toHaveBeenCalled();
     });
 
-    it('reports once per session when the keyboard is still up, with no text and no ids', () => {
-      keyboardVisible.mockReturnValue(true);
-
+    it('reports once per session when the field kept the focus, whatever the keyboard flag says', () => {
       tapLabel();
       tapLabel();
 
       expect(captureException).toHaveBeenCalledTimes(1);
       const [error, context, tags] = (captureException as jest.Mock).mock.calls[0];
-      expect((error as Error).message).toBe('Keyboard still visible after a dismissing tap');
+      expect((error as Error).message).toBe('Input still focused after a dismissing tap');
+      // No text and no ids.
       expect(context).toEqual({
         flow: 'form-keyboard-dismiss',
         phase: 'end',
         travel: 2,
-        focusedRightAfterDismiss: true,
-        focusedLater: true,
-        sameInputFocusedLater: true,
+        keyboardReportedVisible: false,
       });
       expect(tags).toEqual({ flow: 'form-keyboard-dismiss' });
+    });
+
+    it('reports a cancelled touch that did not move as its own kind', () => {
+      tapLabel('touchCancel');
+      tapLabel('touchCancel');
+      tapLabel();
+
+      expect((captureException as jest.Mock).mock.calls.map(([error]) => (error as Error).message)).toEqual([
+        'Input still focused after a cancelled touch that did not move',
+        'Input still focused after a dismissing tap',
+      ]);
+    });
+
+    it('drops the pending check when the next touch is on a field', () => {
+      const { getByText, getByTestId } = renderForm();
+      fireEvent(getByText('Gender'), 'touchStart', touch(100, 300));
+      fireEvent(getByText('Gender'), 'touchEnd', touch(100, 300));
+
+      const start = touch(100, 200);
+      fireEvent(getByTestId('age-group'), 'touchStart', start);
+      fireEvent(getByTestId('form-scroll-tap-area'), 'touchStart', start);
+      act(() => {
+        jest.advanceTimersByTime(STUCK_CHECK_MS);
+      });
+
+      expect(captureException).not.toHaveBeenCalled();
     });
   });
 });
