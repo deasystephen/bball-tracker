@@ -50,7 +50,7 @@ run in this repo), or fail a required CI check.
 | Never `pkill` / `killall` by name | denied | |
 | Never `npm start` or `expo start` in `mobile/` | denied | |
 | Never build with `CODE_SIGNING_ALLOWED=NO` | denied | |
-| Never edit `mobile/binary-manifest.json` by hand | denied (Edit, Write, and a shell redirect, `sed -i`, `tee`, `cp`, `mv`, `rm`) | `mobile/__tests__/binary-manifest.test.ts` |
+| Never edit `mobile/binary-manifest.json` by hand | denied (Edit, Write, and a shell redirect, `sed -i`, `tee`, `cp`, `mv`, `rm`) | none: the drift guard compares the manifest with `package.json`, which a hand edit can satisfy |
 | Never edit or remove a migration already on `main` | denied (Edit, Write) | `.github/scripts/migration-backfill-guard.sh` (required check) |
 | Never add an `eslint-disable` (two named exceptions) | denied (Edit, Write) | `mobile/__tests__/repo/no-lint-suppressions.test.ts`, which scans all three packages |
 
