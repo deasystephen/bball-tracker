@@ -413,9 +413,15 @@ never inline a role check in a screen:
   `__tests__/components/form-scroll-view-guard.test.ts` fails on a raw `ScrollView` (also
   `Animated.ScrollView`, `KeyboardAwareScrollView`) that sets `keyboardShouldPersistTaps` or contains
   an `Input`, a `TextInput` or a component listed there as rendering one (`PracticeDetailsFields`);
-  a new shared component with an input inside goes on that list. **Not covered:** the two
-  announcement screens (`app/teams/[id]/announcements.tsx` and `announcements/[announcementId].tsx`),
-  whose inputs sit beside a `FlatList` (#1122).
+  a new shared component with an input inside goes on that list.
+- **Lists with a composer are outside the guard, and the two that exist are not affected (#1122).**
+  The announcement screens (`app/teams/[id]/announcements.tsx` and
+  `announcements/[announcementId].tsx`) keep their inputs beside a `FlatList`, so they do not use
+  `FormScrollView`. The owner checked both on an iPhone on iOS 27 (build #38) on 2026-11-26: with
+  the keyboard up, a tap on a card or a reply puts it away. Why these dismiss while a `ScrollView`
+  form in `handled` mode did not is not known. A fix was written and not merged (closed PR #1141:
+  the tap handling extracted into a shared `KeyboardDismissView`, with a guard for a list beside an
+  input); start from that branch if a list screen ever shows the bug on a device.
 
 ### Mobile date and time pickers (#576)
 - **Every date or time choice goes through `components/DateTimePickerSheet`**; never render

@@ -1539,3 +1539,4 @@ After B3-prod-access lands and production access is granted, this step is no lon
 - 2026-11-24: #1118 — forms dismiss the keyboard on a tap outside an input on iOS 27 (`FormScrollView` on all 16 form screens). D.1 gained the step and the expectation. Nothing ticked.
 - 2026-11-26: #1118 again — the first fix did nothing on the device. `FormScrollView` now reads raw touches; D.1's expectation says it is a device-only check. Nothing ticked.
 - 2026-11-26: #1118 closed — the owner confirmed on an iPhone on iOS 27.2.1 that a tap on the Create Team "Gender" label puts the keyboard away. The temporary Sentry report is removed.
+- 2026-11-26: #1122 — the two announcement screens were checked on an iPhone on iOS 27 (build #38): a tap outside the field puts the keyboard away on both, so no fix shipped and no step changed.
