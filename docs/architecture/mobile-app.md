@@ -138,8 +138,8 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
 - **The bar's selected tab and highlight pill follow the navigator's state, never the tap (#1117).**
   `CustomTabBar` maps the focused route to one of its five tabs and moves the pill in an effect on
   that index, so a `router.replace('/(tabs)/teams')` or a deep link moves it like a tap does. When
-  the focused route is not one of the five (`invitations`, `href: null`, reached after a guardian
-  invitation is accepted), no tab is selected and the pill is hidden, so every button navigates,
+  the focused route is not one of the five (`invitations`, `href: null`, where a player
+  invitation accepted from a link lands), no tab is selected and the pill is hidden, so every button navigates,
   Home included. Never fall back to index 0 for an unknown route: a tab that looks selected ignores
   its own tap. Tests: `__tests__/app/tab-bar-navigation.test.tsx` (it mocks reanimated with a
   shared value that persists across renders; the shared mock in `jest.setup.js` re-creates it on

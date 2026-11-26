@@ -640,7 +640,7 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 - **Role:** invited user (signed in)
 - **Prereq:** E.4 successful OR navigate to `hooplings://invite/<token>` directly
 - **Steps:** On the invite screen, tap "Accept Invitation" → confirm alert.
-- **Expected:** Toast confirmation. Navigates to the Invitations tab. The invitation moves from PENDING to ACCEPTED through the authenticated `POST /invitations/:id/accept` (the app never calls the public by-token accept; that route serves the web invite page). Amplitude records `invitation_accepted` with `source: link`. User now appears on the team roster. If the link was opened while signed out, the app routes through `/login` and returns to `/invite/<token>` afterwards (`setPendingReturnPath`).
+- **Expected:** Toast confirmation. Navigates to the Invitations tab. The tab bar highlights no tab there (Invitations is not one of the five) and a tap on Home goes Home (#1117); after a staff invitation, which lands on Teams, the highlight pill sits under Teams, and after a guardian invitation under Profile. The invitation moves from PENDING to ACCEPTED through the authenticated `POST /invitations/:id/accept` (the app never calls the public by-token accept; that route serves the web invite page). Amplitude records `invitation_accepted` with `source: link`. User now appears on the team roster. If the link was opened while signed out, the app routes through `/login` and returns to `/invite/<token>` afterwards (`setPendingReturnPath`).
 - **Notes:** ___________
 
 ### E.6 — Reject invitation
@@ -1540,3 +1540,4 @@ After B3-prod-access lands and production access is granted, this step is no lon
 - 2026-11-26: #1118 again — the first fix did nothing on the device. `FormScrollView` now reads raw touches; D.1's expectation says it is a device-only check. Nothing ticked.
 - 2026-11-26: #1118 closed — the owner confirmed on an iPhone on iOS 27.2.1 that a tap on the Create Team "Gender" label puts the keyboard away. The temporary Sentry report is removed.
 - 2026-11-26: #1122 — the two announcement screens were checked on an iPhone on iOS 27 (build #38): a tap outside the field puts the keyboard away on both, so no fix shipped and no step changed.
+- 2026-11-26: #1117 — the tab bar's pill and selected state follow the navigator. The invitation-accept expectation gained the tab bar checks. Nothing ticked.
