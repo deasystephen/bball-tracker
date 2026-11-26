@@ -36,6 +36,36 @@ destructive commands stay on in interactive sessions; the per-project allow list
 `.claude/settings.local.json` (gitignored) must not pre-approve `pkill`, `gh pr merge`,
 `eas-cli build/submit/update`, `git push`, `git branch -D` or production AWS writes.
 
+## Rules the harness enforces
+
+A rule that only prose carries holds while somebody is watching. The ones below are refused
+before the tool runs, by the PreToolUse hook `.claude/hooks/guard-hard-rules.mjs` (registered
+in the committed `.claude/settings.json`, so it applies to every session and every unattended
+run in this repo), or fail a required CI check.
+
+| Rule | Hook | CI |
+| --- | --- | --- |
+| Never `git reset`, `git stash` (other than `list` / `show`), `git checkout -- <path>` or `git checkout .` | denied | |
+| Force-push | asks first; an unattended run has nobody to ask, so it is refused | |
+| Never `pkill` / `killall` by name | denied | |
+| Never `npm start` or `expo start` in `mobile/` | denied | |
+| Never build with `CODE_SIGNING_ALLOWED=NO` | denied | |
+| Never edit `mobile/binary-manifest.json` by hand | denied (Edit, Write, and a shell redirect, `sed -i`, `tee`, `cp`, `mv`, `rm`) | `mobile/__tests__/binary-manifest.test.ts` |
+| Never edit or remove a migration already on `main` | denied (Edit, Write) | `.github/scripts/migration-backfill-guard.sh` (required check) |
+| Never add an `eslint-disable` (two named exceptions) | denied (Edit, Write) | `mobile/__tests__/repo/no-lint-suppressions.test.ts`, which scans all three packages |
+
+The hook reads the command the way a shell would: a commit message or a `grep` pattern that
+mentions `git stash` passes, while `a && git stash`, `(git stash)`, `bash -c "git stash"` and a
+backtick substitution inside a double-quoted string are caught. Its denial names the rule and
+what to do instead. It is a guard against a slip, not a sandbox: a script file that runs the
+command, or a shell fed through a here-document, is not inspected. If the hook itself fails
+(bad input, no `git`), the call is allowed, so a broken guard cannot stop every session.
+
+`mobile/__tests__/repo/claude-hooks.test.ts` runs the hook as a process against a table of
+commands that must be denied, asked about and allowed; add a row there with any new rule. Both
+tests live in the mobile suite because that job runs on every PR and a change to it does not
+start an API deploy.
+
 ## Within-run checklist
 
 A long run fills the context window and older turns get summarised. A checklist in a file
