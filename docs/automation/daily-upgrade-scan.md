@@ -45,6 +45,18 @@ The two automations merge the same way and deploy differently.
 | **Dependabot** | `GITHUB_TOKEN` (`dependabot-auto-merge.yml`) | No `CI` run starts on `main`, so nothing is deployed. A backend bump waits on `main` and ships with the next deploy |
 | **Claude scan** | the Claude GitHub App's token | `CI` runs on `main`. A pull request that touches `backend/` **deploys to production unattended**, usually between 15:00 and 19:00 UTC. It also carries any Dependabot bump that was waiting |
 
+**Since 2026-11-26 a pull request to `main` needs one approving review (#1124).** The ruleset
+"main: owner approval on pull requests" requires it, dismisses an approval when new commits are
+pushed, and lets two actors bypass it: the repository admin and the Dependabot app. The Claude
+GitHub App is not a bypass actor, so a Claude-scan pull request no longer merges on its own:
+the scan still enables auto-merge, and the merge (and the deploy in the table above) happens
+when the owner approves. Dependabot's patch and minor bumps are meant to keep merging on green
+checks; whether an auto-merge that `GITHUB_TOKEN` enabled honours the Dependabot bypass was not
+yet observed when this was written, and #1124 stays open until one such merge is seen. The
+owner cannot approve their own pull request, so they merge it with the bypass (the checkbox on
+the merge button, or `gh pr merge --admin`). Rule and reasoning:
+`docs/automation/claude-code-sessions.md`.
+
 The web site is live since 2026-11-22 (#30), so the same split applies to it: a Claude-scan pull
 request that touches `web/` rolls the web service unattended (`build-and-deploy-web`,
 `docs/deployment/web-app.md`), and a Dependabot web bump waits on `main` for the next web deploy.

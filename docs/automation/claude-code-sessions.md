@@ -22,7 +22,7 @@ user, or before a mutating step that is hard to undo:
 
 | Stop before | Why |
 | --- | --- |
-| Merging to `main` | A merge that touches `backend/`, `infra/`, `docker/` or `ci.yml` deploys to ECS and briefly splits live games; the user also reviews every PR before it lands |
+| Merging to `main` | A merge that touches `backend/`, `infra/`, `docker/` or `ci.yml` deploys to ECS and briefly splits live games; the user also reviews every PR before it lands. GitHub enforces this for every identity but the owner and Dependabot: a ruleset on `main` requires one approving review (#1124). A session on the owner's machine uses the owner's `gh` login, which can bypass the rule, so for interactive sessions this stop is still the control |
 | `terraform apply` | Changes production infrastructure; CI never applies it |
 | `eas build`, `eas submit` | Burns a build number and ships a binary to TestFlight |
 | Force-pushing | Several sessions share this checkout and its branches |
