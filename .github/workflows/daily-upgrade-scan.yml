@@ -106,9 +106,38 @@ jobs:
             - DRY_RUN=${{ github.event.inputs.dry_run || 'false' }}
             - RUN_URL=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
             - SCAN_REPORT=${{ runner.temp }}/scan-report.md (write your final report here)
+          # --model: without it the run takes the account default, which on a
+          # Max subscription is the Opus tier and draws on the allowance the
+          # owner's own sessions use (#1134).
           claude_args: |
+            --model sonnet
             --allowedTools "Bash,Read,Glob,Grep,Edit,Write"
             --max-turns 150
+
+      # The execution file is the run's message log. Its `result` entry carries
+      # the turn count and a client-side cost estimate (not a bill: the run
+      # uses the subscription). Reported so a change of model shows up here.
+      - name: Report model, turns and cost estimate
+        if: always()
+        env:
+          EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+        run: |
+          if [ -z "${EXECUTION_FILE:-}" ] || [ ! -s "$EXECUTION_FILE" ]; then
+            echo '::warning::No execution file from the Claude step; model and cost not reported'
+            exit 0
+          fi
+          jq -r -s '
+            flatten as $m
+            | ($m | map(select(.type == "result")) | last) as $r
+            | ($m | map(select(.type == "system" and .subtype == "init")) | first) as $i
+            | "### Claude run",
+              "",
+              "| Model | Turns | Duration | Cost estimate |",
+              "| --- | --- | --- | --- |",
+              "| \($i.model // "unknown") | \($r.num_turns // "n/a") | \((($r.duration_ms // 0) / 60000 | floor)) min | $\($r.total_cost_usd // "n/a") |",
+              "",
+              "_The cost is the client\u0027s estimate at API prices; the run is billed to the subscription._"
+          ' "$EXECUTION_FILE" >> "$GITHUB_STEP_SUMMARY" || echo '::warning::Could not read the execution file'
 
       - name: Publish scan report
         if: always()

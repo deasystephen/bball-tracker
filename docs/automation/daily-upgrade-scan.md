@@ -23,6 +23,19 @@ the deferral list current, and post a daily summary comment on the rolling
 - **Manual**: Actions → *Daily Upgrade Scan* → *Run workflow*. Tick **dry_run**
   to inventory + categorize without opening PRs or posting comments.
 
+## Model and cost (#1134)
+
+The Claude step runs with `--model sonnet`. Without a `--model` the run takes the account
+default, which on a Max subscription is the Opus tier, so a daily run would draw on the same
+Opus allowance as the owner's interactive sessions. The scan is triage against a written
+prompt and does not need it. If a Sonnet run triages worse than the Opus runs before it (a
+skipped step, a wrong bucket), note it on #1134 before changing the model back.
+
+The run summary ends with a "Claude run" table: the model, the turn count, the duration and a
+cost estimate, read from the action's execution file. The estimate is what the tokens would
+cost at API prices; the run is billed to the subscription, so it is a measure of size, not a
+charge. `--max-turns 150` and the job's 45-minute timeout are the caps.
+
 ## Division of labour
 
 | Who | Owns | Mechanism |
