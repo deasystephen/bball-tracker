@@ -230,71 +230,71 @@ export default function AnnouncementThreadScreen() {
       >
         {/* A tap outside the reply field dismisses the keyboard (#1122). */}
         <KeyboardDismissView style={styles.flex} testID="announcement-thread-tap-area">
-        <FlatList
-          data={thread.replies}
-          keyExtractor={(item) => item.id}
-          renderItem={renderReply}
-          ListHeaderComponent={listHeader}
-          ListEmptyComponent={
-            <EmptyState
-              icon="chatbubble-ellipses-outline"
-              title={t('announcements.noReplies')}
-              message={t('announcements.noRepliesMessage')}
-            />
-          }
-          ListFooterComponent={isFetchingNextPage ? <LoadingSpinner message={t('announcements.loadingMore')} /> : undefined}
-          onEndReached={handleEndReached}
-          onEndReachedThreshold={0.5}
-          refreshControl={
-            <RefreshControl
-              refreshing={isRefetching && !isFetchingNextPage}
-              onRefresh={() => {
-                refetchAnnouncement();
-                refetchReplies();
-              }}
-            />
-          }
-          keyboardShouldPersistTaps="handled"
-          contentContainerStyle={{ paddingHorizontal: padding, paddingTop: spacing.md, paddingBottom: spacing.xl }}
-        />
+          <FlatList
+            data={thread.replies}
+            keyExtractor={(item) => item.id}
+            renderItem={renderReply}
+            ListHeaderComponent={listHeader}
+            ListEmptyComponent={
+              <EmptyState
+                icon="chatbubble-ellipses-outline"
+                title={t('announcements.noReplies')}
+                message={t('announcements.noRepliesMessage')}
+              />
+            }
+            ListFooterComponent={isFetchingNextPage ? <LoadingSpinner message={t('announcements.loadingMore')} /> : undefined}
+            onEndReached={handleEndReached}
+            onEndReachedThreshold={0.5}
+            refreshControl={
+              <RefreshControl
+                refreshing={isRefetching && !isFetchingNextPage}
+                onRefresh={() => {
+                  refetchAnnouncement();
+                  refetchReplies();
+                }}
+              />
+            }
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={{ paddingHorizontal: padding, paddingTop: spacing.md, paddingBottom: spacing.xl }}
+          />
 
-        <View
-          style={[
-            styles.composer,
-            {
-              paddingHorizontal: padding,
-              paddingBottom: insets.bottom + spacing.sm,
-              borderTopColor: colors.border,
-              backgroundColor: colors.background,
-            },
-          ]}
-        >
-          <View style={styles.composerInput}>
-            <Input
-              placeholder={t('announcements.replyPlaceholder')}
-              value={body}
-              onChangeText={setBody}
-              multiline
-              maxLength={2000}
-              testID="reply-input"
-              accessibilityLabel={t('announcements.replyPlaceholder')}
-            />
-          </View>
-          <TouchableOpacity
-            onPress={handleSend}
-            disabled={!body.trim() || createReply.isPending}
+          <View
             style={[
-              styles.sendButton,
-              { backgroundColor: body.trim() && !createReply.isPending ? colors.primary : colors.border },
+              styles.composer,
+              {
+                paddingHorizontal: padding,
+                paddingBottom: insets.bottom + spacing.sm,
+                borderTopColor: colors.border,
+                backgroundColor: colors.background,
+              },
             ]}
-            accessibilityRole="button"
-            accessibilityLabel={t('announcements.send')}
-            accessibilityState={{ disabled: !body.trim() || createReply.isPending }}
-            testID="reply-send"
           >
-            <Ionicons name="send" size={20} color="#fff" />
-          </TouchableOpacity>
-        </View>
+            <View style={styles.composerInput}>
+              <Input
+                placeholder={t('announcements.replyPlaceholder')}
+                value={body}
+                onChangeText={setBody}
+                multiline
+                maxLength={2000}
+                testID="reply-input"
+                accessibilityLabel={t('announcements.replyPlaceholder')}
+              />
+            </View>
+            <TouchableOpacity
+              onPress={handleSend}
+              disabled={!body.trim() || createReply.isPending}
+              style={[
+                styles.sendButton,
+                { backgroundColor: body.trim() && !createReply.isPending ? colors.primary : colors.border },
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel={t('announcements.send')}
+              accessibilityState={{ disabled: !body.trim() || createReply.isPending }}
+              testID="reply-send"
+            >
+              <Ionicons name="send" size={20} color="#fff" />
+            </TouchableOpacity>
+          </View>
         </KeyboardDismissView>
       </KeyboardAvoidingView>
 

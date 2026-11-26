@@ -159,66 +159,66 @@ export default function AnnouncementsScreen() {
       >
         {/* A tap outside a field dismisses the keyboard (#1122). */}
         <KeyboardDismissView style={styles.flex} testID="announcements-tap-area">
-        {/* Compose Form */}
-        {showCompose && (
-          <View style={[styles.composeForm, { paddingHorizontal: padding }]}>
-            <Input
-              label={t('announcements.titleLabel')}
-              placeholder={t('announcements.titlePlaceholder')}
-              value={title}
-              onChangeText={setTitle}
-              testID="announcement-title-input"
-            />
-            {/* testID: an empty multiline input is absent from the iOS
-                accessibility tree, so Maestro cannot find it by placeholder. */}
-            <Input
-              label={t('announcements.messageLabel')}
-              placeholder={t('announcements.messagePlaceholder')}
-              value={body}
-              onChangeText={setBody}
-              multiline
-              numberOfLines={3}
-              testID="announcement-body-input"
-            />
-            <Button
-              title={t('announcements.post')}
-              onPress={handleSubmit}
-              loading={createAnnouncement.isPending}
-              disabled={!title.trim() || !body.trim()}
-            />
-          </View>
-        )}
+          {/* Compose Form */}
+          {showCompose && (
+            <View style={[styles.composeForm, { paddingHorizontal: padding }]}>
+              <Input
+                label={t('announcements.titleLabel')}
+                placeholder={t('announcements.titlePlaceholder')}
+                value={title}
+                onChangeText={setTitle}
+                testID="announcement-title-input"
+              />
+              {/* testID: an empty multiline input is absent from the iOS
+                  accessibility tree, so Maestro cannot find it by placeholder. */}
+              <Input
+                label={t('announcements.messageLabel')}
+                placeholder={t('announcements.messagePlaceholder')}
+                value={body}
+                onChangeText={setBody}
+                multiline
+                numberOfLines={3}
+                testID="announcement-body-input"
+              />
+              <Button
+                title={t('announcements.post')}
+                onPress={handleSubmit}
+                loading={createAnnouncement.isPending}
+                disabled={!title.trim() || !body.trim()}
+              />
+            </View>
+          )}
 
-        {/* Announcements List */}
-        {isLoading ? (
-          <LoadingSpinner message={t('announcements.loading')} fullScreen />
-        ) : error ? (
-          <ErrorState
-            message={error instanceof Error ? error.message : t('announcements.loadFailed')}
-            onRetry={refetch}
-          />
-        ) : !data?.announcements?.length ? (
-          <EmptyState
-            title={t('announcements.emptyTitle')}
-            message={t('announcements.emptyMessage')}
-          />
-        ) : (
-          <FlatList
-            data={data.announcements}
-            keyExtractor={(item) => item.id}
-            renderItem={renderItem}
-            onEndReached={handleEndReached}
-            onEndReachedThreshold={0.5}
-            keyboardShouldPersistTaps="handled"
-            ListFooterComponent={
-              isFetchingNextPage ? <LoadingSpinner message={t('common.loadingMore')} /> : undefined
-            }
-            contentContainerStyle={{
-              padding,
-              paddingBottom: insets.bottom + spacing.xl,
-            }}
-          />
-        )}
+          {/* Announcements List */}
+          {isLoading ? (
+            <LoadingSpinner message={t('announcements.loading')} fullScreen />
+          ) : error ? (
+            <ErrorState
+              message={error instanceof Error ? error.message : t('announcements.loadFailed')}
+              onRetry={refetch}
+            />
+          ) : !data?.announcements?.length ? (
+            <EmptyState
+              title={t('announcements.emptyTitle')}
+              message={t('announcements.emptyMessage')}
+            />
+          ) : (
+            <FlatList
+              data={data.announcements}
+              keyExtractor={(item) => item.id}
+              renderItem={renderItem}
+              onEndReached={handleEndReached}
+              onEndReachedThreshold={0.5}
+              keyboardShouldPersistTaps="handled"
+              ListFooterComponent={
+                isFetchingNextPage ? <LoadingSpinner message={t('common.loadingMore')} /> : undefined
+              }
+              contentContainerStyle={{
+                padding,
+                paddingBottom: insets.bottom + spacing.xl,
+              }}
+            />
+          )}
         </KeyboardDismissView>
       </KeyboardAvoidingView>
     </ThemedView>
