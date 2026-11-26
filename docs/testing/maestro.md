@@ -120,8 +120,10 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   `pressKey: Enter` for a single-line input (blurs on submit), or, on any form (they all scroll in
   `FormScrollView`), tap any non-interactive text such as the field's own label, which is the only
   way out of a number pad (it has no return key). Up to #1118 that tap relied on React Native's
-  `keyboardShouldPersistTaps="handled"` and did nothing on iOS 27
-  (`docs/architecture/mobile-app.md`, Forms and the keyboard).
+  `keyboardShouldPersistTaps="handled"`, which `inputText` breaks on the iOS 27 simulator: it makes
+  iOS post a keyboard hide while the keyboard stays up. That is a harness artifact, not what a
+  phone does (`docs/architecture/mobile-app.md`, Forms and the keyboard). To type like a finger,
+  tap the on-screen keys one by one (`tapOn: "U"`).
 - **A row under the on-screen keyboard counts as visible, and a tap on it lands on the keyboard.**
   `scrollUntilVisible` does not scroll for it, with or without `centerElement`, and the tap types
   into whatever field has focus (the flow then fails on its next assert, with a stray word in the

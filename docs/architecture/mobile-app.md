@@ -371,27 +371,43 @@ never inline a role check in a screen:
 
 ### Forms and the keyboard (#1118)
 - **A screen with a text input scrolls inside `components/FormScrollView`**, never a raw
-  `ScrollView`. A tap on anything that does not handle the touch itself (a label, a card, the
-  padding) dismisses the keyboard; buttons, pills and inputs keep working with the keyboard up
-  (`keyboardShouldPersistTaps="handled"` is set inside), and a drag scrolls without dismissing.
-- Why not React Native's own tap-to-dismiss: a `ScrollView` in `handled` mode dismisses only while
-  it believes a keyboard is open (`_keyboardMetrics`, set and cleared by the system's show and hide
-  notifications). **iOS 27 posts a hide while the keyboard is still on screen** (seen on the iOS 27.0
-  simulator as `keyboardWillHide` with the frame going from 328pt to 270pt, right after typing),
-  so the `ScrollView` stops dismissing and the submit button stays under the keyboard. The owner saw
-  it on a device on Create Team (build #38); the 1.7.0 build does the same, so it came with iOS 27,
-  not with an SDK. `FormScrollView` never asks whether a keyboard is open: its tap area, a
-  plain `View`, becomes the touch responder for any tap no child claims and calls
-  `Keyboard.dismiss()` on release. The native scroll view takes a drag over as a terminate, which
-  dismisses nothing.
-- Two views: the outer one fills the viewport and is the responder, so a tap below a short form
+  `ScrollView`. A tap that is not on a text input dismisses the keyboard: on a label, a card, the
+  padding, and also on a button or a pill, which is still pressed
+  (`keyboardShouldPersistTaps="handled"` is set inside, so the press is never swallowed). A tap on a
+  text input moves the focus or the cursor and dismisses nothing; a drag scrolls and dismisses
+  nothing.
+- **How:** the tap area listens to the raw touch events (`onTouchStart`, `onTouchMove`,
+  `onTouchEnd`, `onTouchCancel`), which reach it whoever becomes the JS touch responder. A tap is a
+  touch that ends, or is cancelled, within `TAP_SLOP` (10pt) of where it began. `Input` marks a
+  touch that starts on a field (`utils/text-input-touch.ts`; touch events bubble from the touched
+  view up, so the mark is set before the tap area sees the touch), because React Native has no
+  public way to ask whether a touch target is a text input.
+- **Why not the responder system, and what is and is not known.** On the owner's iPhone (iOS
+  27.2.1, build #38) a finger tap on the "Gender" label of Create Team left the keyboard up with
+  React Native's own `handled`-mode dismissal, and still did with the first `FormScrollView`, which
+  claimed the JS responder for unhandled taps and dismissed on release. On that device, with the
+  keyboard up, pills took their taps, the form scrolled, and `Keyboard.dismiss()` from the date row
+  of New Game worked. So touches arrive and the dismissal works; what does not happen is a
+  responder *release* for a tap on plain content. **The cause is not known and is not reproduced**:
+  on the iOS 27.0 simulator both versions dismiss, with on-screen typing and with a tap that moves a
+  few points. The raw events sidestep the responder negotiation; whether that cures the device is
+  recorded on #1118.
+- **A simulator trap, not the device bug:** Maestro's `inputText` on the iOS 27 simulator makes iOS
+  post `keyboardWillHide` / `keyboardDidHide` while the keyboard stays on screen (typing by tapping
+  the on-screen keys does not). A raw `ScrollView` in `handled` mode then believes no keyboard is
+  open (`_keyboardMetrics` null) and ignores the dismissing tap, which is why `create-team.yaml` and
+  `admin-season-manage.yaml` failed on iOS 27 before `FormScrollView`. That was first recorded as
+  the cause of the device bug; it is not.
+- **Temporary diagnostic:** if the keyboard is still visible 700ms after a tap that called
+  `Keyboard.dismiss()`, `FormScrollView` sends one Sentry event per app session (`flow:
+  form-keyboard-dismiss`: touch phase, distance, focus before and after; no text, no ids). Remove
+  `reportIfKeyboardStuck` when #1118 closes.
+- Two views: the outer one fills the viewport and takes the touches, so a tap below a short form
   dismisses too; the inner one takes `contentContainerStyle` and is as tall as its content, like a
   `ScrollView`'s own content container. Do not make the inner one grow: `Card` is `flex: 1`, and in a
-  stretched parent the cards share the leftover height instead of sizing to their content. A release
-  more than `TAP_SLOP` (10pt) from where the touch began is a swipe, not a tap, and dismisses
-  nothing (a form too short to scroll never hands the drag to the native scroll view). Neither view
-  is a pressable (nothing for VoiceOver, nothing for the nested-pressable guard). `horizontal` and
-  `stickyHeaderIndices` are not accepted, since both address the direct children.
+  stretched parent the cards share the leftover height instead of sizing to their content. Neither
+  view is a pressable (nothing for VoiceOver, nothing for the nested-pressable guard). `horizontal`
+  and `stickyHeaderIndices` are not accepted, since both address the direct children.
 - Tests: `__tests__/components/FormScrollView.test.tsx`; the source guard
   `__tests__/components/form-scroll-view-guard.test.ts` fails on a raw `ScrollView` (also
   `Animated.ScrollView`, `KeyboardAwareScrollView`) that sets `keyboardShouldPersistTaps` or contains
