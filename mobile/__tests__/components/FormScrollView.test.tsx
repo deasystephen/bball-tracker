@@ -6,17 +6,9 @@
 
 import React from 'react';
 import { Keyboard, ScrollView, Text, TextInput, TouchableOpacity } from 'react-native';
-import { act, fireEvent, render } from '@testing-library/react-native';
-import {
-  FormScrollView,
-  STUCK_CHECK_MS,
-  TAP_SLOP,
-  resetStuckKeyboardReport,
-} from '../../components/FormScrollView';
+import { fireEvent, render } from '@testing-library/react-native';
+import { FormScrollView, TAP_SLOP } from '../../components/FormScrollView';
 import { Input } from '../../components/Input';
-import { captureException } from '../../services/sentry';
-
-jest.mock('../../services/sentry', () => ({ captureException: jest.fn() }));
 
 let clock = 1000;
 /** Every native touch event has its own timestamp; a bubbling one keeps it. */
@@ -27,27 +19,17 @@ const touch = (pageX: number, pageY: number, touches = 1) => ({
 describe('FormScrollView', () => {
   let dismiss: jest.SpyInstance;
   let focusedInput: jest.SpyInstance;
-  let keyboardVisible: jest.SpyInstance;
   const FOCUSED = { field: 'age group' } as unknown as ReturnType<typeof TextInput.State.currentlyFocusedInput>;
 
   beforeEach(() => {
-    jest.useFakeTimers();
-    resetStuckKeyboardReport();
-    (captureException as jest.Mock).mockClear();
     dismiss = jest.spyOn(Keyboard, 'dismiss').mockImplementation(() => undefined);
-    keyboardVisible = jest.spyOn(Keyboard, 'isVisible').mockReturnValue(false);
     // An input has the focus unless a test says otherwise.
     focusedInput = jest.spyOn(TextInput.State, 'currentlyFocusedInput').mockReturnValue(FOCUSED);
   });
 
   afterEach(() => {
-    act(() => {
-      jest.runOnlyPendingTimers();
-    });
-    jest.useRealTimers();
     dismiss.mockRestore();
     focusedInput.mockRestore();
-    keyboardVisible.mockRestore();
   });
 
   const renderForm = () =>
@@ -193,67 +175,5 @@ describe('FormScrollView', () => {
     // The caller's style and nothing else: a stretched wrapper would make
     // every `flex: 1` Card share the leftover height.
     expect(getByTestId('form-scroll-content').props.style).toEqual({ padding: 16 });
-  });
-
-  describe('the temporary stuck-keyboard report', () => {
-    const tapLabel = (last: 'touchEnd' | 'touchCancel' = 'touchEnd') => {
-      const { getByText } = renderForm();
-      fireEvent(getByText('Gender'), 'touchStart', touch(100, 300));
-      fireEvent(getByText('Gender'), last, touch(102, 300));
-      act(() => {
-        jest.advanceTimersByTime(STUCK_CHECK_MS);
-      });
-    };
-
-    it('says nothing when the field lost the focus', () => {
-      dismiss.mockImplementation(() => focusedInput.mockReturnValue(undefined));
-
-      tapLabel();
-
-      expect(captureException).not.toHaveBeenCalled();
-    });
-
-    it('reports once per session when the field kept the focus, whatever the keyboard flag says', () => {
-      tapLabel();
-      tapLabel();
-
-      expect(captureException).toHaveBeenCalledTimes(1);
-      const [error, context, tags] = (captureException as jest.Mock).mock.calls[0];
-      expect((error as Error).message).toBe('Input still focused after a dismissing tap');
-      // No text and no ids.
-      expect(context).toEqual({
-        flow: 'form-keyboard-dismiss',
-        phase: 'end',
-        travel: 2,
-        keyboardReportedVisible: false,
-      });
-      expect(tags).toEqual({ flow: 'form-keyboard-dismiss' });
-    });
-
-    it('reports a cancelled touch that did not move as its own kind', () => {
-      tapLabel('touchCancel');
-      tapLabel('touchCancel');
-      tapLabel();
-
-      expect((captureException as jest.Mock).mock.calls.map(([error]) => (error as Error).message)).toEqual([
-        'Input still focused after a cancelled touch that did not move',
-        'Input still focused after a dismissing tap',
-      ]);
-    });
-
-    it('drops the pending check when the next touch is on a field', () => {
-      const { getByText, getByTestId } = renderForm();
-      fireEvent(getByText('Gender'), 'touchStart', touch(100, 300));
-      fireEvent(getByText('Gender'), 'touchEnd', touch(100, 300));
-
-      const start = touch(100, 200);
-      fireEvent(getByTestId('age-group'), 'touchStart', start);
-      fireEvent(getByTestId('form-scroll-tap-area'), 'touchStart', start);
-      act(() => {
-        jest.advanceTimersByTime(STUCK_CHECK_MS);
-      });
-
-      expect(captureException).not.toHaveBeenCalled();
-    });
   });
 });

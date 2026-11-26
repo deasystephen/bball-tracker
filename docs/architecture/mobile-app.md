@@ -393,20 +393,16 @@ never inline a role check in a screen:
   of New Game worked. So touches arrive and the dismissal works; what does not happen is a
   responder *release* for a tap on plain content. **The cause is not known and is not reproduced**:
   on the iOS 27.0 simulator both versions dismiss, with on-screen typing and with a tap that moves a
-  few points. The raw events sidestep the responder negotiation; whether that cures the device is
-  recorded on #1118.
+  few points. The raw events sidestep the responder negotiation, and that cured the device: the
+  owner confirmed it on the same phone on 2026-11-26 (PR #1137 by OTA). While it was unconfirmed the
+  component also reported to Sentry when a field kept the focus after a tap; no such event arrived
+  and the report was removed.
 - **A simulator trap, not the device bug:** Maestro's `inputText` on the iOS 27 simulator makes iOS
   post `keyboardWillHide` / `keyboardDidHide` while the keyboard stays on screen (typing by tapping
   the on-screen keys does not). A raw `ScrollView` in `handled` mode then believes no keyboard is
   open (`_keyboardMetrics` null) and ignores the dismissing tap, which is why `create-team.yaml` and
   `admin-season-manage.yaml` failed on iOS 27 before `FormScrollView`. That was first recorded as
   the cause of the device bug; it is not.
-- **Temporary diagnostic:** if the field that had the focus at a tap still has it 700ms later,
-  `FormScrollView` sends a Sentry event (`flow: form-keyboard-dismiss`: touch phase, distance, and
-  what `Keyboard.isVisible()` claimed; no text, no ids), once per app session for a tap that
-  dismissed and once for a cancelled touch that did not move. Focus decides, not
-  `Keyboard.isVisible()`, which follows the same notifications that proved unreliable. No event is
-  not proof by itself: the device check is. Remove `reportIfStillFocused` when #1118 closes.
 - Two views: the outer one fills the viewport and takes the touches, so a tap below a short form
   dismisses too; the inner one takes `contentContainerStyle` and is as tall as its content, like a
   `ScrollView`'s own content container. Do not make the inner one grow: `Card` is `flex: 1`, and in a
