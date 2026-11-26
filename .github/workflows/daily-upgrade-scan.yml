@@ -130,11 +130,18 @@ jobs:
             flatten as $m
             | ($m | map(select(.type == "result")) | last) as $r
             | ($m | map(select(.type == "system" and .subtype == "init")) | first) as $i
+            | (($r.modelUsage // {}) | keys | join(", ")) as $used
             | "### Claude run",
               "",
-              "| Model | Turns | Duration | Cost estimate |",
-              "| --- | --- | --- | --- |",
-              "| \($i.model // "unknown") | \($r.num_turns // "n/a") | \((($r.duration_ms // 0) / 60000 | floor)) min | $\($r.total_cost_usd // "n/a") |",
+              "| Outcome | Model | Turns | Duration | Cost estimate |",
+              "| --- | --- | --- | --- | --- |",
+              ([
+                ($r.subtype // "no result (stopped before the end)"),
+                (if $used != "" then $used else ($i.model // "unknown") end),
+                ($r.num_turns // "n/a"),
+                (if $r.duration_ms then "\($r.duration_ms / 60000 | floor) min" else "n/a" end),
+                (if $r.total_cost_usd then "$\($r.total_cost_usd * 100 | round / 100)" else "n/a" end)
+              ] | map(tostring) | "| " + join(" | ") + " |"),
               "",
               "_The cost is the client\u0027s estimate at API prices; the run is billed to the subscription._"
           ' "$EXECUTION_FILE" >> "$GITHUB_STEP_SUMMARY" || echo '::warning::Could not read the execution file'

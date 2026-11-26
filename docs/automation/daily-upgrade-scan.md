@@ -31,8 +31,9 @@ Opus allowance as the owner's interactive sessions. The scan is triage against a
 prompt and does not need it. If a Sonnet run triages worse than the Opus runs before it (a
 skipped step, a wrong bucket), note it on #1134 before changing the model back.
 
-The run summary ends with a "Claude run" table: the model, the turn count, the duration and a
-cost estimate, read from the action's execution file. The estimate is what the tokens would
+The run summary carries a "Claude run" table above the scan report: how the run ended (for
+example `success`, or `error_max_turns` when it hit the cap), the models that did the work,
+the turn count, the duration and a cost estimate, read from the action's execution file. The estimate is what the tokens would
 cost at API prices; the run is billed to the subscription, so it is a measure of size, not a
 charge. `--max-turns 150` and the job's 45-minute timeout are the caps.
 
