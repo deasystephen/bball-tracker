@@ -310,16 +310,19 @@ describe('AnnouncementThreadScreen', () => {
       expect(dismiss).toHaveBeenCalledTimes(2);
     });
 
-    it('a tap on the reply field keeps it', () => {
+    it('a tap on the reply field or on Send keeps it: the composer is outside the tap area', () => {
       signIn('lebron');
       const { getByTestId } = render(<AnnouncementThreadScreen />);
+      fireEvent.changeText(getByTestId('reply-input'), 'On my way');
 
-      const onField = touch(100, 700);
-      fireEvent(getByTestId('reply-input'), 'touchStart', onField);
-      fireEvent(getByTestId('announcement-thread-tap-area'), 'touchStart', onField);
-      fireEvent(getByTestId('announcement-thread-tap-area'), 'touchEnd', touch(100, 700));
+      for (const id of ['reply-input', 'reply-send']) {
+        fireEvent(getByTestId(id), 'touchStart', touch(100, 700));
+        fireEvent(getByTestId(id), 'touchEnd', touch(100, 700));
+      }
+      fireEvent.press(getByTestId('reply-send'));
 
       expect(dismiss).not.toHaveBeenCalled();
+      expect(mockCreate.mutateAsync).toHaveBeenCalledTimes(1);
     });
   });
 });

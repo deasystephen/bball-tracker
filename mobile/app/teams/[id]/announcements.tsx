@@ -11,6 +11,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
+  TextInput,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -91,13 +92,22 @@ export default function AnnouncementsScreen() {
     }
   };
 
+  // While a compose field has the focus, a tap on the list only puts the
+  // keyboard away (KeyboardDismissView, #1122): it must not also leave a
+  // half-written announcement for a thread. The field still counts as focused
+  // here, because its blur event arrives after this press.
+  const openThread = (announcementId: string) => {
+    if (TextInput.State.currentlyFocusedInput()) return;
+    router.push(`/teams/${id}/announcements/${announcementId}`);
+  };
+
   // Each card opens its thread (#34); the reply count is the list's only
   // hint of activity, the thread itself loads on the next screen.
   const renderItem = ({ item }: { item: Announcement }) => (
     <Card
       variant="default"
       style={styles.announcementCard}
-      onPress={() => router.push(`/teams/${id}/announcements/${item.id}`)}
+      onPress={() => openThread(item.id)}
       accessibilityRole="button"
       testID={`announcement-${item.id}`}
     >

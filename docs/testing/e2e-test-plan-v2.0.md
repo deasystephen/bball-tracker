@@ -1031,7 +1031,7 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
   1. Team detail → "Announcements" → "+" (accessibilityLabel "New announcement")
   2. Type the title `Practice tomorrow`, then, with the keyboard up, tap an announcement in the list or the empty space under the form
   3. Body `6pm sharp` → "Post Announcement"
-- **Expected:** The tap in step 2 puts the keyboard away (#1122; device only on iOS 27, like D.1. In a thread, the same holds for a tap on a reply while the reply field has the focus; a tap on a card also opens it). Posts. 📧 Email + push sent to all team members and the guardians of members (deduped; sandbox-limited). Dates in emails render in `DEFAULT_TIMEZONE` (`America/Los_Angeles`), not UTC (audit #57).
+- **Expected:** The tap in step 2 puts the keyboard away (#1122; device only on iOS 27, like D.1. The tap on a card does not open its thread while a field has the focus; the next tap does. In a thread, a tap on a reply puts the keyboard away while the reply field has the focus, and "Send reply" leaves it up). Posts. 📧 Email + push sent to all team members and the guardians of members (deduped; sandbox-limited). Dates in emails render in `DEFAULT_TIMEZONE` (`America/Los_Angeles`), not UTC (audit #57).
 - **Notes:** ___________
 
 ### J.2 — Members see the announcement in app

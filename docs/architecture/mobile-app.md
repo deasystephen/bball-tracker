@@ -415,18 +415,27 @@ never inline a role check in a screen:
   an `Input`, a `TextInput` or a component listed there as rendering one (`PracticeDetailsFields`);
   a new shared component with an input inside goes on that list.
 - **A list with a composer (#1122).** A screen whose inputs sit beside a `FlatList` or `SectionList`
-  has no `ScrollView` to swap, so it wraps the list and the inputs in one
-  `components/KeyboardDismissView`, the view that holds the tap handling above (`FormScrollView` is
-  built on it; never copy the handlers). The list sets `keyboardShouldPersistTaps="handled"`, so a
-  tap on a row dismisses the keyboard and still presses the row. Today: the two announcement screens
-  (`app/teams/[id]/announcements.tsx`, compose form above the list, and
-  `announcements/[announcementId].tsx`, reply composer under it). The same guard file fails on a
-  source that renders a list and a text input unless both are inside `KeyboardDismissView` and the
-  list is in `handled` mode; it reads one file at a time, so a list and an input split across two
-  components are not seen. Tests: `__tests__/components/KeyboardDismissView.test.tsx`,
-  `__tests__/app/announcements-list.test.tsx`, `__tests__/app/announcement-thread.test.tsx`.
-  **Not yet known:** whether these two screens showed the device bug before the change; they were
-  wrapped on the strength of the same mechanism, and the device check is recorded on #1122.
+  has no `ScrollView` to swap, so it wraps the list in `components/KeyboardDismissView`, the view
+  that holds the tap handling above (`FormScrollView` is built on it; never copy the handlers). The
+  list sets `keyboardShouldPersistTaps="handled"`, so a row's press is never swallowed. Today: the
+  two announcement screens.
+  - `app/teams/[id]/announcements.tsx` (compose form above the list): the view wraps the form and
+    the list, so a tap on a card, the empty state or the space under the form dismisses. A card
+    pressed while a field has the focus does not open its thread (`openThread` checks
+    `TextInput.State.currentlyFocusedInput()`, still set during the press because the blur event
+    arrives later): the tap only puts the keyboard away, so a half-written announcement is not left
+    behind. The next tap opens the thread.
+  - `announcements/[announcementId].tsx` (reply composer under the list): the view wraps the list
+    only. The composer stays outside, so a tap on Send leaves the keyboard up for the next reply.
+  - An input inside the view marks its own touches; `isTextInputTouch` does not clear the mark, so
+    a dismiss view nested in another still sees it.
+  - The same guard file fails on a source that renders a list and a text input unless the list is
+    inside `KeyboardDismissView` and in `handled` mode. It reads one file at a time and by tag name:
+    a shared component that renders a list goes into its `LISTS` set.
+  - Tests: `__tests__/components/KeyboardDismissView.test.tsx`,
+    `__tests__/app/announcements-list.test.tsx`, `__tests__/app/announcement-thread.test.tsx`.
+  - **Not yet known:** whether these two screens showed the device bug before the change; they were
+    wrapped on the strength of the same mechanism, and the device check is recorded on #1122.
 
 ### Mobile date and time pickers (#576)
 - **Every date or time choice goes through `components/DateTimePickerSheet`**; never render

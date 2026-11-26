@@ -16,7 +16,7 @@ Loads when a file under `mobile/` is read. Detail: `docs/architecture/mobile-app
   `hasTeamPermission` / `team-permissions` / `game-permissions`. Jersey `0` is valid (`!= null`).
 - Shared components are mandatory: `DateTimePickerSheet` for dates and times, `ActionMenu` for
   per-row menus (never an `Alert` menu), `SortPills` for pill rows, `useTabBarPadding()` for tab
-  scroll padding, `FormScrollView` (never a raw `ScrollView`) around any text input (`KeyboardDismissView` around a list with a composer), `ErrorState` with `onBack={useGoBack(parent)}` on pushed screens.
+  scroll padding, `FormScrollView` (never a raw `ScrollView`) around any text input (`KeyboardDismissView` around a list that shares a screen with one), `ErrorState` with `onBack={useGoBack(parent)}` on pushed screens.
 - Never nest a pressable inside a pressable (source-scanning test). Toasts get no touch handlers.
 - Every pressable has `accessibilityRole` (icon-only: also a label; single-choice: `accessibilityState.selected`)
   and a 44pt target from `utils/touch-target.ts`; `__tests__/a11y/pressable-roles` and `touch-targets` enforce it.

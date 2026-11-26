@@ -74,6 +74,24 @@ describe('KeyboardDismissView', () => {
     expect(dismiss).not.toHaveBeenCalled();
   });
 
+  it('nested in another dismiss view, a tap on the field still keeps the keyboard', () => {
+    const { getByTestId } = render(
+      <KeyboardDismissView testID="outer">
+        <KeyboardDismissView testID="inner">
+          <Input placeholder="Reply" testID="reply" />
+        </KeyboardDismissView>
+      </KeyboardDismissView>
+    );
+
+    // One native event bubbles through the field and both views.
+    const onField = touch(100, 600);
+    for (const id of ['reply', 'inner', 'outer']) fireEvent(getByTestId(id), 'touchStart', onField);
+    const release = touch(100, 600);
+    for (const id of ['inner', 'outer']) fireEvent(getByTestId(id), 'touchEnd', release);
+
+    expect(dismiss).not.toHaveBeenCalled();
+  });
+
   it('does nothing when no field has the focus', () => {
     focusedInput.mockReturnValue(null);
     const { getByText } = renderThread();

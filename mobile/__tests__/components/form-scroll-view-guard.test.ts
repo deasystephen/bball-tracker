@@ -51,43 +51,42 @@ const DISMISS_VIEW = 'components/KeyboardDismissView.tsx';
 /**
  * A screen that renders a list and a text input (a composer above or below
  * the list) has no ScrollView to swap for `FormScrollView` (#1122): the list
- * and every input sit inside one `KeyboardDismissView`, and the list is in
- * `handled` mode so a tap on a row is pressed, not swallowed, while the
- * keyboard is up. Read per file: a list and an input in the same source.
+ * sits inside a `KeyboardDismissView`, in `handled` mode so a tap on a row is
+ * pressed, not swallowed, while the keyboard is up. The input may sit inside
+ * the view (it marks its own touches) or outside it (the reply composer, so
+ * that Send leaves the keyboard up). Read per file and by tag name: a list and
+ * an input in the same source. A shared component that renders a list goes
+ * into LISTS, as one that renders an input goes into TEXT_INPUTS.
  */
 function findUncoveredListComposers(fileName: string, text: string): string[] {
   const source = parseTsx(fileName, text);
   const lists: { line: number; name: string; covered: boolean; handled: boolean }[] = [];
-  const inputs: { line: number; name: string; covered: boolean }[] = [];
+  let inputs = 0;
 
   walkJsx<boolean>(source, false, (node, covered) => {
     const name = tagNameOf(node);
-    if (name === 'KeyboardDismissView' || name === 'FormScrollView') return true;
-    const line = lineOf(source, node);
+    if (name === 'KeyboardDismissView') return true;
     if (LISTS.has(name)) {
       const handled = literalAttribute(jsxAttributes(node), 'keyboardShouldPersistTaps') === 'handled';
-      lists.push({ line, name, covered, handled });
+      lists.push({ line: lineOf(source, node), name, covered, handled });
     }
-    if (TEXT_INPUTS.has(name)) inputs.push({ line, name, covered });
+    if (TEXT_INPUTS.has(name)) inputs += 1;
     return covered;
   });
 
-  if (lists.length === 0 || inputs.length === 0) return [];
+  if (inputs === 0) return [];
   return [
     ...lists
       .filter((list) => !list.covered)
-      .map((list) => `${fileName}:${list.line} ${list.name} shares a screen with a text input: wrap both in KeyboardDismissView`),
+      .map((list) => `${fileName}:${list.line} ${list.name} shares a screen with a text input: wrap it in KeyboardDismissView`),
     ...lists
       .filter((list) => !list.handled)
       .map((list) => `${fileName}:${list.line} ${list.name} shares a screen with a text input: set keyboardShouldPersistTaps="handled"`),
-    ...inputs
-      .filter((input) => !input.covered)
-      .map((input) => `${fileName}:${input.line} ${input.name} shares a screen with a list: wrap both in KeyboardDismissView`),
   ];
 }
 
 describe('lists with a composer', () => {
-  it('every screen with a list and a text input wraps both in KeyboardDismissView', () => {
+  it('every screen with a list and a text input wraps the list in KeyboardDismissView', () => {
     const findings = scannedSources()
       .filter(({ file }) => !file.endsWith(WRAPPER) && !file.endsWith(DISMISS_VIEW))
       .flatMap(({ file, text }) => findUncoveredListComposers(file, text));
@@ -118,13 +117,12 @@ describe('lists with a composer', () => {
         );`
       );
       expect(findings).toEqual([
-        'sample.tsx:4 FlatList shares a screen with a text input: wrap both in KeyboardDismissView',
+        'sample.tsx:4 FlatList shares a screen with a text input: wrap it in KeyboardDismissView',
         'sample.tsx:4 FlatList shares a screen with a text input: set keyboardShouldPersistTaps="handled"',
-        'sample.tsx:3 Input shares a screen with a list: wrap both in KeyboardDismissView',
       ]);
     });
 
-    it('reports an input left outside the wrapper, and a list not in handled mode', () => {
+    it('reports a wrapped list that is not in handled mode, and accepts the input outside the wrapper', () => {
       const findings = findUncoveredListComposers(
         'sample.tsx',
         `const Screen = () => (
@@ -138,7 +136,6 @@ describe('lists with a composer', () => {
       );
       expect(findings).toEqual([
         'sample.tsx:4 SectionList shares a screen with a text input: set keyboardShouldPersistTaps="handled"',
-        'sample.tsx:6 TextInput shares a screen with a list: wrap both in KeyboardDismissView',
       ]);
     });
 

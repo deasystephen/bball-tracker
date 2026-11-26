@@ -144,16 +144,33 @@ describe('AnnouncementsScreen keyboard (#1122)', () => {
     expect(dismiss).toHaveBeenCalledTimes(1);
   });
 
-  it('a tap on a compose field keeps the keyboard, and a card still opens its thread', () => {
+  it('a tap on a compose field keeps the keyboard', () => {
     const { getByTestId } = openCompose();
 
     const onField = touch(100, 150);
     fireEvent(getByTestId('announcement-title-input'), 'touchStart', onField);
     fireEvent(getByTestId('announcements-tap-area'), 'touchStart', onField);
     fireEvent(getByTestId('announcements-tap-area'), 'touchEnd', touch(100, 150));
-    expect(dismiss).not.toHaveBeenCalled();
 
-    fireEvent.press(getByTestId('announcement-a1'));
+    expect(dismiss).not.toHaveBeenCalled();
+  });
+
+  it('a tap on a card while a field has the focus only dismisses; the next tap opens the thread', () => {
+    const { getByTestId } = openCompose();
+    const card = getByTestId('announcement-a1');
+
+    fireEvent(card, 'touchStart', touch(100, 500));
+    fireEvent(card, 'touchEnd', touch(100, 500));
+    fireEvent.press(card);
+    expect(dismiss).toHaveBeenCalledTimes(1);
+    expect(mockRouter.push).not.toHaveBeenCalled();
+
+    // The field has lost the focus.
+    focusedInput.mockReturnValue(null);
+    fireEvent(card, 'touchStart', touch(100, 500));
+    fireEvent(card, 'touchEnd', touch(100, 500));
+    fireEvent.press(card);
+    expect(dismiss).toHaveBeenCalledTimes(1);
     expect(mockRouter.push).toHaveBeenCalledWith('/teams/t1/announcements/a1');
   });
 });
