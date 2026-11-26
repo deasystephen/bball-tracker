@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { View, TouchableOpacity, StyleSheet, Platform, useWindowDimensions } from 'react-native';
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -28,6 +28,7 @@ const TAB_CONFIGS = [
 ] as const;
 
 const TRACK_INDEX = 2;
+const PILL_SPRING = { damping: 18, stiffness: 200 };
 
 function CustomTabBar({ state, navigateToTab }: BottomTabBarProps) {
   const { colors, colorScheme } = useTheme();
@@ -46,10 +47,15 @@ function CustomTabBar({ state, navigateToTab }: BottomTabBarProps) {
 
   const pillPosition = useSharedValue(Math.max(activeVisualIndex, 0));
   // The pill follows the navigator's state, not the tap: a tab change that
-  // comes from `router.replace` or a deep link moves it too (#1117).
+  // comes from `router.replace` or a deep link moves it too (#1117). Coming
+  // back from a route with no tab, the pill was hidden wherever it last stood:
+  // it appears under the new tab, it does not slide there across the bar.
+  const previousVisualIndex = useRef(activeVisualIndex);
   useEffect(() => {
+    const previous = previousVisualIndex.current;
+    previousVisualIndex.current = activeVisualIndex;
     if (activeVisualIndex < 0) return;
-    pillPosition.set(withSpring(activeVisualIndex, { damping: 18, stiffness: 200 }));
+    pillPosition.set(previous < 0 ? activeVisualIndex : withSpring(activeVisualIndex, PILL_SPRING));
   }, [activeVisualIndex, pillPosition]);
   const scale0 = useSharedValue(1);
   const scale1 = useSharedValue(1);
@@ -69,6 +75,10 @@ function CustomTabBar({ state, navigateToTab }: BottomTabBarProps) {
         return;
       }
       if (!isFocused) {
+        // Start the pill with the tap; the effect above then sets the same
+        // target once the navigator's state follows. From a route with no tab
+        // the pill is hidden, and the effect places it.
+        if (hasActiveTab) pillPosition.set(withSpring(index, PILL_SPRING));
         scales[index].set(
           withSequence(
             withSpring(1.15, { damping: 6, stiffness: 300 }),
@@ -80,7 +90,7 @@ function CustomTabBar({ state, navigateToTab }: BottomTabBarProps) {
         navigateToTab(routeKey);
       }
     },
-    [navigateToTab, scales]
+    [hasActiveTab, navigateToTab, pillPosition, scales]
   );
 
   const pillStyle = useAnimatedStyle(() => {

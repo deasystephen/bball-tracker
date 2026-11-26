@@ -45,8 +45,10 @@ jest.mock('expo-router', () => {
 // The shared reanimated mock makes a new shared value on every render, so a
 // pill that only starts in the right place would pass for one that follows the
 // navigator. Here a shared value lives as long as its component, as the real
-// one does. An animated style is still computed while rendering, so a value
-// set in an effect shows on the next render.
+// one does. Otherwise it behaves like the shared mock: a spring resolves to
+// its target at once, and an animated style is computed while rendering, so a
+// value set in an effect shows on the next render.
+const mockWithSpring = jest.fn(<T,>(value: T): T => value);
 jest.mock('react-native-reanimated', () => {
   const { useRef } = jest.requireActual<typeof import('react')>('react');
   const { View, Text } = jest.requireActual<typeof import('react-native')>('react-native');
@@ -62,8 +64,8 @@ jest.mock('react-native-reanimated', () => {
       return ref.current;
     },
     useAnimatedStyle: <T,>(style: () => T): T => style(),
-    withSpring: <T,>(value: T): T => value,
-    withSequence: <T,>(...values: T[]): T => values[values.length - 1],
+    withSpring: <T,>(value: T): T => mockWithSpring(value) as T,
+    withSequence: <T,>(...values: T[]): T => values[0],
   };
 });
 jest.mock('react-native-safe-area-context', () => ({
@@ -159,6 +161,27 @@ describe('custom tab bar', () => {
       navigatorMovesTo('profile', rerender);
 
       expect(pill()).toHaveStyle({ opacity: 1, transform: [{ translateX: 4 * TAB_WIDTH }] });
+    });
+
+    it('springs between two tabs, and places the pill without a slide when it was hidden', () => {
+      const { rerender } = render(<TabsLayout />);
+      mockWithSpring.mockClear();
+      navigatorMovesTo('teams', rerender);
+      expect(mockWithSpring).toHaveBeenCalledWith(1);
+
+      navigatorMovesTo('invitations', rerender);
+      mockWithSpring.mockClear();
+      navigatorMovesTo('profile', rerender);
+      expect(mockWithSpring).not.toHaveBeenCalled();
+      expect(pill()).toHaveStyle({ transform: [{ translateX: 4 * TAB_WIDTH }] });
+    });
+
+    it('a tap starts the pill at once, before the navigator answers', () => {
+      const { rerender } = render(<TabsLayout />);
+      fireEvent.press(tab('Stats tab'));
+      // Same focused route: only the tap has happened.
+      rerender(<TabsLayout />);
+      expect(pill()).toHaveStyle({ transform: [{ translateX: 3 * TAB_WIDTH }] });
     });
   });
 });
