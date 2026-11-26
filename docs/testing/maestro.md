@@ -120,8 +120,10 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   `pressKey: Enter` for a single-line input (blurs on submit), or, on any form (they all scroll in
   `FormScrollView`), tap any non-interactive text such as the field's own label, which is the only
   way out of a number pad (it has no return key). Up to #1118 that tap relied on React Native's
-  `keyboardShouldPersistTaps="handled"` and did nothing on iOS 27
-  (`docs/architecture/mobile-app.md`, Forms and the keyboard).
+  `keyboardShouldPersistTaps="handled"`, which `inputText` breaks on the iOS 27 simulator: it makes
+  iOS post a keyboard hide while the keyboard stays up. That is a harness artifact, not what a
+  phone does (`docs/architecture/mobile-app.md`, Forms and the keyboard). To type like a finger,
+  tap the on-screen keys one by one (`tapOn: "U"`).
 - **A row under the on-screen keyboard counts as visible, and a tap on it lands on the keyboard.**
   `scrollUntilVisible` does not scroll for it, with or without `centerElement`, and the tap types
   into whatever field has focus (the flow then fails on its next assert, with a stray word in the
@@ -199,6 +201,10 @@ As-built reference. Moved out of `CLAUDE.md` on 2026-09-30, when that file had g
   Metro, 33 flows, a seed before each. **iOS 27.0 simulator: 33 of 33** and **iOS 26.4 simulator: 33 of
   33**, every flow on the first attempt, run twice on each (before and after the review rework of
   `FormScrollView`); `create-team.yaml` and `admin-season-manage.yaml` pass on iOS 27 unchanged.
+- **Keyboard fix, second version, 2026-11-26 (#1118, PR #1137):** `FormScrollView` on raw touch events.
+  iOS 27.0 simulator 33 of 33; after the review changes iOS 26.4 33 of 33 and the 13 form flows on
+  iOS 27.0, every flow on the first attempt. None of this shows the device bug: the first version
+  was 33 of 33 too and did nothing on the phone.
 - **Run record, 2026-10-24.** 27 flows passed on the iPhone 17 / iOS 26.5 simulator against a fresh
   1.6.0 Debug build (ad-hoc signed `xcodebuild`, `main` at `a840311`) and the local stack, with a
   reseed before each: the 25 existing flows, all on the first attempt, plus `spanish-locale.yaml`
