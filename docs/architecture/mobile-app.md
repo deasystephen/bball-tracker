@@ -413,9 +413,20 @@ never inline a role check in a screen:
   `__tests__/components/form-scroll-view-guard.test.ts` fails on a raw `ScrollView` (also
   `Animated.ScrollView`, `KeyboardAwareScrollView`) that sets `keyboardShouldPersistTaps` or contains
   an `Input`, a `TextInput` or a component listed there as rendering one (`PracticeDetailsFields`);
-  a new shared component with an input inside goes on that list. **Not covered:** the two
-  announcement screens (`app/teams/[id]/announcements.tsx` and `announcements/[announcementId].tsx`),
-  whose inputs sit beside a `FlatList` (#1122).
+  a new shared component with an input inside goes on that list.
+- **A list with a composer (#1122).** A screen whose inputs sit beside a `FlatList` or `SectionList`
+  has no `ScrollView` to swap, so it wraps the list and the inputs in one
+  `components/KeyboardDismissView`, the view that holds the tap handling above (`FormScrollView` is
+  built on it; never copy the handlers). The list sets `keyboardShouldPersistTaps="handled"`, so a
+  tap on a row dismisses the keyboard and still presses the row. Today: the two announcement screens
+  (`app/teams/[id]/announcements.tsx`, compose form above the list, and
+  `announcements/[announcementId].tsx`, reply composer under it). The same guard file fails on a
+  source that renders a list and a text input unless both are inside `KeyboardDismissView` and the
+  list is in `handled` mode; it reads one file at a time, so a list and an input split across two
+  components are not seen. Tests: `__tests__/components/KeyboardDismissView.test.tsx`,
+  `__tests__/app/announcements-list.test.tsx`, `__tests__/app/announcement-thread.test.tsx`.
+  **Not yet known:** whether these two screens showed the device bug before the change; they were
+  wrapped on the strength of the same mechanism, and the device check is recorded on #1122.
 
 ### Mobile date and time pickers (#576)
 - **Every date or time choice goes through `components/DateTimePickerSheet`**; never render

@@ -1029,8 +1029,9 @@ The marquee feature shipped this month. Includes the email path (#131) + web/mob
 - **Role:** COACH
 - **Steps:**
   1. Team detail → "Announcements" → "+" (accessibilityLabel "New announcement")
-  2. Title `Practice tomorrow`, body `6pm sharp` → "Post Announcement"
-- **Expected:** Posts. 📧 Email + push sent to all team members and the guardians of members (deduped; sandbox-limited). Dates in emails render in `DEFAULT_TIMEZONE` (`America/Los_Angeles`), not UTC (audit #57).
+  2. Type the title `Practice tomorrow`, then, with the keyboard up, tap an announcement in the list or the empty space under the form
+  3. Body `6pm sharp` → "Post Announcement"
+- **Expected:** The tap in step 2 puts the keyboard away (#1122; device only on iOS 27, like D.1. In a thread, the same holds for a tap on a reply while the reply field has the focus; a tap on a card also opens it). Posts. 📧 Email + push sent to all team members and the guardians of members (deduped; sandbox-limited). Dates in emails render in `DEFAULT_TIMEZONE` (`America/Los_Angeles`), not UTC (audit #57).
 - **Notes:** ___________
 
 ### J.2 — Members see the announcement in app
@@ -1539,3 +1540,4 @@ After B3-prod-access lands and production access is granted, this step is no lon
 - 2026-11-24: #1118 — forms dismiss the keyboard on a tap outside an input on iOS 27 (`FormScrollView` on all 16 form screens). D.1 gained the step and the expectation. Nothing ticked.
 - 2026-11-26: #1118 again — the first fix did nothing on the device. `FormScrollView` now reads raw touches; D.1's expectation says it is a device-only check. Nothing ticked.
 - 2026-11-26: #1118 closed — the owner confirmed on an iPhone on iOS 27.2.1 that a tap on the Create Team "Gender" label puts the keyboard away. The temporary Sentry report is removed.
+- 2026-11-26: #1122 — the two announcement screens (inputs beside a `FlatList`) dismiss the keyboard through `KeyboardDismissView`. J.1 gained the step and the expectation. Nothing ticked.

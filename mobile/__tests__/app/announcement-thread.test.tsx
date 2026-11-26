@@ -4,6 +4,7 @@
  * or to a coach (`canManageTeam`). The API stays the authority.
  */
 
+import { Keyboard, TextInput } from 'react-native';
 import { render, fireEvent, waitFor } from '@testing-library/react-native';
 
 import AnnouncementThreadScreen from '../../app/teams/[id]/announcements/[announcementId]';
@@ -275,5 +276,50 @@ describe('AnnouncementThreadScreen', () => {
     const { getByLabelText } = render(<AnnouncementThreadScreen />);
     fireEvent.press(getByLabelText('Go back'));
     expect(mockRouter.back).toHaveBeenCalledTimes(1);
+  });
+
+  describe('the keyboard (#1122)', () => {
+    let clock = 1000;
+    const touch = (pageX: number, pageY: number) => ({
+      nativeEvent: { pageX, pageY, timestamp: (clock += 16), touches: [{}] },
+    });
+    let dismiss: jest.SpyInstance;
+    let focusedInput: jest.SpyInstance;
+
+    beforeEach(() => {
+      dismiss = jest.spyOn(Keyboard, 'dismiss').mockImplementation(() => undefined);
+      focusedInput = jest
+        .spyOn(TextInput.State, 'currentlyFocusedInput')
+        .mockReturnValue({} as unknown as ReturnType<typeof TextInput.State.currentlyFocusedInput>);
+    });
+
+    afterEach(() => {
+      dismiss.mockRestore();
+      focusedInput.mockRestore();
+    });
+
+    it('a tap on a reply or on the announcement dismisses it', () => {
+      signIn('lebron');
+      const { getByText } = render(<AnnouncementThreadScreen />);
+
+      fireEvent(getByText('Running late'), 'touchStart', touch(100, 300));
+      fireEvent(getByText('Running late'), 'touchEnd', touch(101, 302));
+      fireEvent(getByText('Practice moved'), 'touchStart', touch(100, 120));
+      fireEvent(getByText('Practice moved'), 'touchEnd', touch(100, 120));
+
+      expect(dismiss).toHaveBeenCalledTimes(2);
+    });
+
+    it('a tap on the reply field keeps it', () => {
+      signIn('lebron');
+      const { getByTestId } = render(<AnnouncementThreadScreen />);
+
+      const onField = touch(100, 700);
+      fireEvent(getByTestId('reply-input'), 'touchStart', onField);
+      fireEvent(getByTestId('announcement-thread-tap-area'), 'touchStart', onField);
+      fireEvent(getByTestId('announcement-thread-tap-area'), 'touchEnd', touch(100, 700));
+
+      expect(dismiss).not.toHaveBeenCalled();
+    });
   });
 });

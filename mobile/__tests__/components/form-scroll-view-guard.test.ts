@@ -6,9 +6,12 @@
  * a label no longer dismisses the keyboard, and the submit button stays under
  * it. `FormScrollView` dismisses on its own. Jest renders no keyboard, so this
  * reads the source instead.
+ *
+ * A screen whose inputs sit beside a `FlatList` has no ScrollView to swap: it
+ * wraps the list and the inputs in `KeyboardDismissView` (#1122).
  */
 
-import { jsxAttributes, lineOf, parseTsx, tagNameOf, walkJsx } from '../helpers/source-files';
+import { jsxAttributes, lineOf, literalAttribute, parseTsx, tagNameOf, walkJsx } from '../helpers/source-files';
 import { scannedSources } from '../helpers/pressables';
 
 /** Text inputs, and the shared components that render one. */
@@ -40,6 +43,122 @@ function findRawFormScrollViews(fileName: string, text: string): string[] {
 
   return [...findings];
 }
+
+/** Virtualized lists: their rows are not JSX children, so an input can only sit beside one. */
+const LISTS = new Set(['FlatList', 'SectionList', 'Animated.FlatList', 'Animated.SectionList', 'FlashList']);
+const DISMISS_VIEW = 'components/KeyboardDismissView.tsx';
+
+/**
+ * A screen that renders a list and a text input (a composer above or below
+ * the list) has no ScrollView to swap for `FormScrollView` (#1122): the list
+ * and every input sit inside one `KeyboardDismissView`, and the list is in
+ * `handled` mode so a tap on a row is pressed, not swallowed, while the
+ * keyboard is up. Read per file: a list and an input in the same source.
+ */
+function findUncoveredListComposers(fileName: string, text: string): string[] {
+  const source = parseTsx(fileName, text);
+  const lists: { line: number; name: string; covered: boolean; handled: boolean }[] = [];
+  const inputs: { line: number; name: string; covered: boolean }[] = [];
+
+  walkJsx<boolean>(source, false, (node, covered) => {
+    const name = tagNameOf(node);
+    if (name === 'KeyboardDismissView' || name === 'FormScrollView') return true;
+    const line = lineOf(source, node);
+    if (LISTS.has(name)) {
+      const handled = literalAttribute(jsxAttributes(node), 'keyboardShouldPersistTaps') === 'handled';
+      lists.push({ line, name, covered, handled });
+    }
+    if (TEXT_INPUTS.has(name)) inputs.push({ line, name, covered });
+    return covered;
+  });
+
+  if (lists.length === 0 || inputs.length === 0) return [];
+  return [
+    ...lists
+      .filter((list) => !list.covered)
+      .map((list) => `${fileName}:${list.line} ${list.name} shares a screen with a text input: wrap both in KeyboardDismissView`),
+    ...lists
+      .filter((list) => !list.handled)
+      .map((list) => `${fileName}:${list.line} ${list.name} shares a screen with a text input: set keyboardShouldPersistTaps="handled"`),
+    ...inputs
+      .filter((input) => !input.covered)
+      .map((input) => `${fileName}:${input.line} ${input.name} shares a screen with a list: wrap both in KeyboardDismissView`),
+  ];
+}
+
+describe('lists with a composer', () => {
+  it('every screen with a list and a text input wraps both in KeyboardDismissView', () => {
+    const findings = scannedSources()
+      .filter(({ file }) => !file.endsWith(WRAPPER) && !file.endsWith(DISMISS_VIEW))
+      .flatMap(({ file, text }) => findUncoveredListComposers(file, text));
+
+    expect(findings).toEqual([]);
+  });
+
+  it('the two announcement screens are scanned and are the composer kind', () => {
+    const composers = scannedSources().filter(({ text }) => /<(FlatList|SectionList)\b/.test(text) && /<Input\b/.test(text));
+
+    expect(composers.map(({ file }) => file).sort()).toEqual(
+      expect.arrayContaining([
+        'app/teams/[id]/announcements.tsx',
+        'app/teams/[id]/announcements/[announcementId].tsx',
+      ])
+    );
+  });
+
+  describe('the scanner', () => {
+    it('reports the announcement defect: a composer beside a bare FlatList', () => {
+      const findings = findUncoveredListComposers(
+        'sample.tsx',
+        `const Screen = () => (
+          <KeyboardAvoidingView>
+            <Input label="Title" />
+            <FlatList data={rows} renderItem={renderItem} />
+          </KeyboardAvoidingView>
+        );`
+      );
+      expect(findings).toEqual([
+        'sample.tsx:4 FlatList shares a screen with a text input: wrap both in KeyboardDismissView',
+        'sample.tsx:4 FlatList shares a screen with a text input: set keyboardShouldPersistTaps="handled"',
+        'sample.tsx:3 Input shares a screen with a list: wrap both in KeyboardDismissView',
+      ]);
+    });
+
+    it('reports an input left outside the wrapper, and a list not in handled mode', () => {
+      const findings = findUncoveredListComposers(
+        'sample.tsx',
+        `const Screen = () => (
+          <>
+            <KeyboardDismissView>
+              <SectionList sections={sections} keyboardShouldPersistTaps="always" />
+            </KeyboardDismissView>
+            <TextInput />
+          </>
+        );`
+      );
+      expect(findings).toEqual([
+        'sample.tsx:4 SectionList shares a screen with a text input: set keyboardShouldPersistTaps="handled"',
+        'sample.tsx:6 TextInput shares a screen with a list: wrap both in KeyboardDismissView',
+      ]);
+    });
+
+    it('accepts a wrapped composer, a list with no input and an input with no list', () => {
+      const wrapped = findUncoveredListComposers(
+        'sample.tsx',
+        `const Screen = () => (
+          <KeyboardDismissView>
+            <FlatList data={rows} renderItem={renderItem} keyboardShouldPersistTaps="handled" />
+            <View><Input placeholder="Reply" /></View>
+          </KeyboardDismissView>
+        );`
+      );
+      const listOnly = findUncoveredListComposers('sample.tsx', `const Screen = () => <FlatList data={rows} />;`);
+      const inputOnly = findUncoveredListComposers('sample.tsx', `const Screen = () => <View><Input /></View>;`);
+
+      expect([wrapped, listOnly, inputOnly]).toEqual([[], [], []]);
+    });
+  });
+});
 
 describe('form scroll views', () => {
   it('no screen puts a text input in a raw ScrollView', () => {

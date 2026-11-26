@@ -24,6 +24,7 @@ import {
   LoadingSpinner,
   ErrorState,
   EmptyState,
+  KeyboardDismissView,
 } from '../../../components';
 import { useInfiniteAnnouncements, useCreateAnnouncement } from '../../../hooks/useAnnouncements';
 import { useTeam, hasTeamPermission } from '../../../hooks/useTeams';
@@ -156,6 +157,8 @@ export default function AnnouncementsScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.flex}
       >
+        {/* A tap outside a field dismisses the keyboard (#1122). */}
+        <KeyboardDismissView style={styles.flex} testID="announcements-tap-area">
         {/* Compose Form */}
         {showCompose && (
           <View style={[styles.composeForm, { paddingHorizontal: padding }]}>
@@ -206,6 +209,7 @@ export default function AnnouncementsScreen() {
             renderItem={renderItem}
             onEndReached={handleEndReached}
             onEndReachedThreshold={0.5}
+            keyboardShouldPersistTaps="handled"
             ListFooterComponent={
               isFetchingNextPage ? <LoadingSpinner message={t('common.loadingMore')} /> : undefined
             }
@@ -215,6 +219,7 @@ export default function AnnouncementsScreen() {
             }}
           />
         )}
+        </KeyboardDismissView>
       </KeyboardAvoidingView>
     </ThemedView>
   );

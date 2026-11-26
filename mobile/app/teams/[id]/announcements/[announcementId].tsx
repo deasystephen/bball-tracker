@@ -24,6 +24,7 @@ import {
   ErrorState,
   EmptyState,
   ActionMenu,
+  KeyboardDismissView,
   type ActionMenuItem,
 } from '../../../../components';
 import { useToast } from '../../../../components/Toast';
@@ -227,6 +228,8 @@ export default function AnnouncementThreadScreen() {
         style={styles.flex}
         keyboardVerticalOffset={insets.top}
       >
+        {/* A tap outside the reply field dismisses the keyboard (#1122). */}
+        <KeyboardDismissView style={styles.flex} testID="announcement-thread-tap-area">
         <FlatList
           data={thread.replies}
           keyExtractor={(item) => item.id}
@@ -292,6 +295,7 @@ export default function AnnouncementThreadScreen() {
             <Ionicons name="send" size={20} color="#fff" />
           </TouchableOpacity>
         </View>
+        </KeyboardDismissView>
       </KeyboardAvoidingView>
 
       <ActionMenu
