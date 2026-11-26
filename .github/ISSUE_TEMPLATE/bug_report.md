@@ -1,54 +1,45 @@
 ---
-name: Bug report
-about: Something behaves wrongly, written so an agent with no other context can fix it
-title: ''
+name: Bug Report
+about: Create a report to help us improve
+title: '[BUG] '
 labels: bug
 assignees: ''
 ---
 
-<!-- Format and labelling rules: docs/automation/issue-specs.md. Delete these comments before saving. -->
+## Bug Description
 
-**Kind:** bug · **Area:** backend | mobile | web | infra (`path/to/the/suspect/file`) · **Needs:** nothing external | credentials | a device | a design decision | production access
+<!-- A clear and concise description of what the bug is -->
 
-## What happens
+## Steps to Reproduce
 
-<!-- Observed behaviour and expected behaviour, one or two sentences each. -->
+1. 
+2. 
+3. 
 
-## Repro
+## Expected Behavior
 
-<!-- Numbered steps from a known state (a seeded database, a named seed user).
-     Include the exact error text, and the Sentry or Datadog link if there is one. -->
+<!-- What you expected to happen -->
 
-1.
+## Actual Behavior
 
-**Seen on:** <!-- commit or `/health` commit, TestFlight build and OTA group, iOS or Android version -->
+<!-- What actually happened -->
 
-## Cause or fix direction
+## Environment
 
-<!-- What is known, with file paths and line numbers. Write "unknown" if it is;
-     a guess presented as a finding sends the fix the wrong way. -->
+- **OS**: [e.g., iOS 17.0, macOS 14.0]
+- **Device**: [e.g., iPhone 14, iPad Pro]
+- **App Version**: [e.g., 1.0.0]
+- **Node Version**: [e.g., 18.17.0]
 
-## Acceptance criteria
+## Screenshots
 
-<!-- One observable outcome per box, each checkable by a command, a named test or
-     a named Maestro flow. Include the regression test that fails before the fix. -->
+<!-- If applicable, add screenshots to help explain your problem -->
 
-- [ ] A test fails before the fix and passes after: `path/to/test`
-- [ ]
+## Additional Context
 
-## Verification
+<!-- Add any other context about the problem here -->
 
-**Verifiable by:** CI alone | a local Maestro flow | a device | production access
+## Possible Solution
 
-<!-- The commands that prove it. Anything other than "CI alone" makes the issue
-     `needs-human` at the PR gate. -->
+<!-- If you have suggestions on how to fix the bug -->
 
-## Out of scope
-
--
-
-## Working notes for an unassisted agent
-
-<!-- Traps, related issues, paths that must not change. -->
-
--

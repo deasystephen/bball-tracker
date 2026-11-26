@@ -42,7 +42,7 @@ A long run fills the context window and older turns get summarised. A checklist 
 survives that. It lives in the session scratchpad directory, never in the repo (a stray
 `TASKS.md` would also silence the docs Stop hook, which treats any changed `.md` as "docs
 considered") and never in memory: GitHub issues remain the only store for work that outlives
-the session. An issue a session files follows `docs/automation/issue-specs.md`.
+the session.
 
 ## Closing message
 
