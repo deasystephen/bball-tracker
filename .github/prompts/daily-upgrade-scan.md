@@ -20,7 +20,7 @@ already open from Dependabot, leave it alone. You exist for the parts that need
 judgment:
 
 1. **Security overrides** for vulnerable transitive deps (all three sides).
-2. **Mobile caret-range patch bumps** — Dependabot's regenerated mobile lockfile
+2. **Mobile in-range patch bumps** — Dependabot's regenerated mobile lockfile
    drops `overrides` entries and fails `npm ci` (see PR #290 / #300), so mobile
    lockfile-only bumps are yours.
 3. **Deferral-list upkeep** (including the report-only inventory of backend
@@ -145,8 +145,12 @@ the PR body and on the 🟢 line of the daily log ("override retired: <entry>").
 
 ### Mobile patch bumps
 
-  - `npm outdated` entries where `current ≠ wanted` AND `wanted` is within the
-    existing caret range → AUTO-FIX (lockfile-only).
+  - `npm outdated` entries where `current ≠ wanted` → AUTO-FIX (lockfile-only).
+    `wanted` is by definition inside the range `package.json` declares,
+    whether that range is a caret (`^`) or a tilde (`~`). The bump moves the
+    lockfile to `wanted` and NEVER changes the declared range: a tilde is a
+    deliberate pin to one minor (the Expo SDK's packages), and rewriting it to
+    a caret would let a later scan take a minor as a patch (#1145).
   - Anything in the binary-coupled deferral list → DEFER, even a patch. This
     includes Expo SDK same-major patch bumps (`55.0.X → 55.0.Y`), which were
     auto-fixed before #562: almost every Expo module has native code.
@@ -179,7 +183,11 @@ For each side with ≥1 auto-fix item:
   1. `git checkout -b claude/auto-deps-<side>-YYYY-MM-DD`
   2. Apply all items for that side in one branch:
        overrides: edit `<side>/package.json` `overrides`, then `npm install`
-       caret patches: `npm update <pkg>` (transitive) or `npm install <pkg>@<wanted>` (direct)
+       in-range patches: `npm update <pkg>`, for a direct and a transitive
+         dependency alike. It moves the lockfile and leaves `package.json`
+         alone. NEVER `npm install <pkg>@<version>` and never `npm update
+         --save`: both rewrite the declared range (`~58.0.0` became
+         `^58.0.27`, #1145).
      Never add a transitive as a new direct dependency.
   3. Quality gates:
        backend: npm run type-check && npm test
@@ -205,6 +213,15 @@ For each side with ≥1 auto-fix item:
   4. DIFF GUARD — `git diff --name-only` must contain ONLY
      `<side>/package.json` and/or `<side>/package-lock.json`.
      Anything else → abort the whole batch → ⚠ Needs attention.
+     RANGE GUARD — no declared dependency range may change; in
+     `<side>/package.json` only `overrides` may differ from `main`. From the
+     repository root this must print nothing:
+       for k in dependencies devDependencies peerDependencies optionalDependencies; do
+         diff <(git show origin/main:<side>/package.json | jq -S ".$k") <(jq -S ".$k" <side>/package.json)
+       done
+     Any output → `git checkout origin/main -- <side>/package.json` is NOT the
+     fix (it would drop your overrides): abort the whole batch → ⚠ Needs
+     attention, naming the package and both ranges.
   5. Any gate fails → abort the whole batch → ⚠ Needs attention.
   6. `git commit` with a conventional message containing a version table and
      GHSA refs; end with `Co-Authored-By: Claude <noreply@anthropic.com>`.
