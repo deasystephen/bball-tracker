@@ -2,14 +2,5 @@
   "_doc": "High or critical advisories the audit floor gate (check-audit-floor.mjs) accepts on purpose, keyed by package directory (the keys are also the only directories the script runs from). Fields: `ghsa` the advisory id as `npm audit` reports it (the GHSA id, or `npm-<source id>` for an advisory without a GitHub URL; the gate's FAIL line names it); `package` the vulnerable package (an entry matches on ghsa AND package); `range` the vulnerable range and `severity` the severity as `npm audit` reported them when the entry was reviewed (ranges compare as semver sets, so re-formatting is not a change; when npm audit reports a different range or severity the advisory has moved, usually because a patch was published, and the gate FAILs until a human re-reviews the entry; it also FAILs an entry when npm reports a reachable fix, `fixAvailable` true or a non-major parent change); `why` the reasoning (why no override can fix it); `revisit` the condition that retires the entry. A matching advisory prints as `accepted` and does not fail the gate; an entry the audit no longer reports, or now reports below high, prints as `stale`, for a human to remove in a reviewed PR. A repeated (ghsa, package) pair stops the gate (exit 2). The scan never edits this file. Tests point the script at their own copy through ACCEPTED_ADVISORIES_FILE. Reasoning: docs/automation/daily-upgrade-scan.md, 'Audit floor gate'.",
   "backend": [],
   "web": [],
-  "mobile": [
-    {
-      "ghsa": "GHSA-fc5q-39xc-vjpf",
-      "package": "picomatch",
-      "range": "<=4.0.7",
-      "severity": "high",
-      "why": "Catastrophic regex backtracking when picomatch compiles a glob with a single-branch repeated extglob: a crafted glob pattern makes matching slow. No patched release exists: the advisory covers every version up to 4.0.7, which is the latest on npm (checked 2026-11-17), so no override can lift it. Every copy in mobile's production tree (2.3.2 and 4.0.4) sits under build tooling: Metro (metro-file-map -> micromatch, jest-worker -> jest-util), Expo CLI and @expo/metro-config, react-native -> tinyglobby and fdir, and jest-haste-map -> anymatch. Those run on a developer's machine or an EAS build worker against glob patterns written in this repo and its dependencies; none is in the JavaScript bundle the app ships, and no user or network input reaches a glob pattern. The worst case is a slow local build. Proposed for acceptance on 2026-11-17; the owner accepts by approving this PR.",
-      "revisit": "When picomatch publishes a patched release: add an override that lifts both the 2.x and 4.x copies above it (or take the Metro and Expo releases that do), and remove this entry in the same PR. The gate fails this entry on its own when npm audit reports a different range or a reachable fix."
-    }
-  ]
+  "mobile": []
 }

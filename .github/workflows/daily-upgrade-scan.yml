@@ -10,6 +10,7 @@
 #                             moving to Console pay-as-you-go credits.
 #   DEPENDABOT_ALERTS_TOKEN   Fine-grained PAT, this repo only, permission
 #                             "Dependabot alerts: Read-only", ≤90-day expiry.
+#                             Empty or missing fails a scheduled run.
 #                             GITHUB_TOKEN has no dependabot-alerts scope, so a
 #                             PAT is the only way to read the alerts API.
 #
@@ -60,6 +61,9 @@ jobs:
       # The ONLY step that sees the alerts PAT. Writes a JSON snapshot outside
       # the repo tree so the diff guard in the prompt is unaffected and the
       # file can never be committed.
+      # An empty or missing token fails a scheduled run here (#1093), as an
+      # expired one does (401): a green scan that cannot see the alerts is
+      # worse than a red one. Only a manual run may skip the snapshot.
       - name: Snapshot open Dependabot alerts
         id: alerts
         env:
@@ -68,8 +72,12 @@ jobs:
           set -euo pipefail
           out="$RUNNER_TEMP/dependabot-alerts.json"
           if [ -z "${GH_TOKEN:-}" ]; then
-            echo '::warning::DEPENDABOT_ALERTS_TOKEN not set — alert snapshot skipped'
-            echo '{"error":"DEPENDABOT_ALERTS_TOKEN secret not configured"}' > "$out"
+            if [ "$GITHUB_EVENT_NAME" != 'workflow_dispatch' ]; then
+              echo '::error::DEPENDABOT_ALERTS_TOKEN is empty or missing on the upgrade-scan environment; store a valid fine-grained PAT (docs/automation/daily-upgrade-scan.md, Secrets and permissions)'
+              exit 1
+            fi
+            echo '::warning::DEPENDABOT_ALERTS_TOKEN is empty or missing; manual run, alert snapshot skipped'
+            echo '{"error":"DEPENDABOT_ALERTS_TOKEN secret is empty or missing (manual run)"}' > "$out"
           else
             gh api "repos/${GITHUB_REPOSITORY}/dependabot/alerts?state=open&per_page=100" \
               --paginate \
