@@ -166,10 +166,10 @@ without it. The backend has no minimatch or brace-expansion override: the `^3` c
 - **Where it runs.** In `ci.yml` as its own matrix job, `Audit floor (backend)`, `Audit floor (mobile)` and `Audit floor (web)`, on every pull request (Dependabot's and the scan's included) and every push to `main`. A new advisory or a registry hiccup fails one attributable check and leaves the test jobs' results readable. The job installs nothing: `npm audit` reads the lockfile, and `semver` comes from npm's bundled copy. Every `npm ci` in `ci.yml` passes `--no-audit --no-fund`, so a run calls the audit endpoint once per package, in this job. **The three checks gate an auto-merge only once they are required status checks of `main`** (the owner adds them in branch protection, as for the web jobs in #690); until then a Dependabot pull request with a red audit can still merge, and only the deploy is held. In the scan, Step 3 runs it for every side before the PR is opened; a failure aborts the batch to Needs attention.
 - **It sits in the deploy path.** `Build & Deploy to ECS` needs the `audit-floor` job, so a newly published high or critical advisory against a production dependency blocks every deploy of `main`, a hotfix included, until an override or an allow-list entry lands. For a hotfix, add that override or entry in the same pull request as the fix; do not wait for a separate one.
 - **Output.** One line per high or critical advisory and package: `FAIL <GHSA> <package> <range> (<severity>): <title> <url>`, `FAIL <GHSA> <package>: a patched version exists …` when npm reports a reachable fix for an accepted advisory (`fixAvailable` is `true`, or a parent change that is not semver-major; npm's semver-major suggestions are ignored because it makes them even when no patch exists, such as a downgrade to expo-updates 0.11.7 for node-forge), `FAIL <GHSA> <package>: the advisory moved …` when an accepted advisory's reported range is no longer the same version set as the entry's `range` (compared with `semver.subset` both ways, so re-formatting such as `<=3.0.3` vs `<= 3.0.3` is not a move; re-review the entry), `FAIL <GHSA> <package>: the advisory was re-scored …` when its severity differs from the entry's `severity` (a `high` re-scored `critical`; re-review), or `accepted <GHSA> … (.github/scripts/accepted-advisories.json)`. The patched-version and moved-range FAILs are the retire signals: apply the patch and remove the entry. An entry the audit no longer reports for its package, or now reports below `high`, prints `stale …` (saying which) without failing, so a human can retire it; a `package` typo shows up this way too, next to the advisory's `FAIL`. The id is the GHSA id found anywhere in the advisory URL; an advisory without one (a legacy npmjs.com URL, or none) is keyed `npm-<source id>`, and its `FAIL` line names the id an entry must use. A repeated (`ghsa`, `package`) entry, or an allow-list that is not a JSON object keyed by side, stops the gate with exit 2. Exit 0 clean, 1 on any `FAIL`, 2 when the gate could not run (registry unreachable, npm missing, an unreadable allow-list): it fails closed, printing npm's own message; a registry outage turns the job red, and re-running the job is the remedy.
-- **Scope.** Production dependencies only (`--omit=dev`), at `high` and above. On 2026-10-18 the production trees of `backend/` and `web/` reported no advisory at all, and `mobile/` reported two high ones with no patched release (below). Dev-only advisories in the full trees are not gated. Moderate advisories (`sprintf-js`, `uuid` among them) are not gated either.
+- **Scope.** Production dependencies only (`--omit=dev`), at `high` and above. On 2026-10-18 the production trees of `backend/` and `web/` reported no advisory at all, and `mobile/` reported two high ones with no patched release; on 2026-11-27 `mobile/`'s production tree reported no high or critical advisory (10 moderate). Dev-only advisories in the full trees are not gated. Moderate advisories (`sprintf-js`, `uuid` among them) are not gated either.
 - **When it goes red on an advisory you did not cause.** A new advisory against something already in the tree turns every pull request red until it is handled. The fix is the same as the scan's auto-fix bucket: an `overrides` entry that lifts the package above the advisory's first patched version ("Override shape" above), in its own pull request.
 - **Adding an allow-listed advisory.** Only when the advisory has **no patched version** (or the patched version cannot be reached without a binary or major the project has deferred). A human adds an entry under the side's key in `.github/scripts/accepted-advisories.json` with `ghsa` (the id the gate's `FAIL` line prints: a GHSA id, or `npm-<source id>`), `package` (the entry matches on both), `range` and `severity` (as `npm audit` prints them today; the pins that make a moved or re-scored advisory fail), `why` (why no override can fix it and why the exposure is tolerable) and `revisit` (the condition that retires it), in a reviewed pull request; dismiss the matching GitHub alert at the same time. The scan never edits the file. `backend/tests/infra/check-audit-floor.test.ts` pins the file's shape and the script's verdicts on fixture reports, and runs the production path against a fake `npm` on `PATH` (no network). Both accept lists, and `semver`, are loaded through `.github/scripts/accept-list.mjs`.
-- **Today's entry (mobile only).** `GHSA-86w9-cpqp-85rv` (`node-forge` ≤ 1.4.0, RSA signature verification; through `@expo/code-signing-certificates`, and EAS Update code signing is not configured). The advisory names no patched version; the GitHub alert was dismissed on 2026-10-18. It retires when node-forge publishes a patched release. The second 2026-10-18 entry, `GHSA-vfj7-8cjw-p6xm` (`braces` ≤ 3.0.3), was retired on 2026-10-24 after GitHub withdrew the advisory on 2026-10-23 and the gate began printing it `stale`; `braces` 3.0.3 is still in the production tree through Metro's `micromatch`.
+- **Entries today: none.** Every side's list is empty. Past entries, all mobile: `GHSA-86w9-cpqp-85rv` (`node-forge` ≤ 1.4.0, accepted 2026-10-18) is no longer listed and `node-forge` now resolves to 1.4.4; `GHSA-qr28-fpjm-wq7f` (`decode-uri-component`) left with the Expo SDK 58 upgrade (#922); `GHSA-vfj7-8cjw-p6xm` (`braces` ≤ 3.0.3) was retired on 2026-10-24 after GitHub withdrew the advisory and the gate printed it `stale`; `GHSA-fc5q-39xc-vjpf` (`picomatch` ≤ 4.0.7, accepted 2026-11-17) was retired on 2026-11-27 (#1093) once `npm audit` in `mobile/` no longer reported it, full tree or production, and the gate printed it `stale`.
 
 ## Binary-coupled packages (#562)
 
@@ -215,7 +215,31 @@ would be readable by any workflow on any branch once merged.
 | Secret | What | Scope |
 | --- | --- | --- |
 | `CLAUDE_CODE_OAUTH_TOKEN` | Claude Code OAuth token | Generated with `claude setup-token` on a machine logged into the owner's **Claude Max** account; bills the subscription, not Console credits. ~1-year expiry — rotate by re-running `setup-token`. (Console pay-as-you-go alternative: `anthropic_api_key` input + `ANTHROPIC_API_KEY` secret in a spend-capped workspace.) |
-| `DEPENDABOT_ALERTS_TOKEN` | Fine-grained PAT | **This repo only**, permission *Dependabot alerts: Read-only* (and Metadata, implied), ≤90-day expiry. The default `GITHUB_TOKEN` has no dependabot-alerts scope, so a PAT is unavoidable. Exposed to **one** `gh api` step that writes a JSON snapshot to `$RUNNER_TEMP`; Claude's step never receives it and cannot dismiss alerts |
+| `DEPENDABOT_ALERTS_TOKEN` | Fine-grained PAT | **This repo only**, permission *Dependabot alerts: Read-only* (and Metadata, implied), ≤90-day expiry. The default `GITHUB_TOKEN` has no dependabot-alerts scope, so a PAT is unavoidable. Exposed to **one** `gh api` step that writes a JSON snapshot to `$RUNNER_TEMP`; Claude's step never receives it and cannot dismiss alerts. An empty or missing value **fails a scheduled run** at that step (below) |
+
+**An empty or missing alerts token fails the run (#1093).** The "Snapshot open
+Dependabot alerts" step exits 1 with
+`::error::DEPENDABOT_ALERTS_TOKEN is empty or missing on the upgrade-scan environment`
+on every trigger except `workflow_dispatch`, so a scheduled run goes red and the
+failure handler posts a ROUTINE ERROR comment on #276. An expired token already
+failed the same step (401). Before this, an empty value printed a warning, wrote
+`{"error": …}` and the scan carried on blind on `npm audit` alone: on 2026-11-22
+the secret was re-stored empty and two scheduled runs went green that way. A
+manual run still skips the snapshot explicitly (warning plus the `{"error": …}`
+file the prompt falls back on), so the rest of the scan can be exercised without
+the PAT. Forks need no case: scheduled workflows do not run on forks, and the
+`upgrade-scan` environment exists only here.
+`backend/tests/infra/scan-alerts-token.test.ts` runs the step's script under bash
+for both triggers.
+
+**Rotating the PAT.** The expiry date is not tracked in the repo: GitHub emails
+the token's owner before a fine-grained PAT expires, and that email is the
+reminder (owner's decision, #1093). If it is missed, the next scheduled scan
+fails at the snapshot step (401) and posts the ROUTINE ERROR comment, so a
+lapse costs at most one day's alert snapshot. To rotate: create a new
+fine-grained PAT with the scope above (≤90 days), store it as the
+`DEPENDABOT_ALERTS_TOKEN` environment secret on `upgrade-scan` (check the value
+is not empty), and run the workflow once by hand to see the snapshot count.
 
 GitHub writes (branches, PRs, comments) go through the **Claude GitHub App**
 already installed on the repo — the action exchanges the job's OIDC token for a
@@ -238,8 +262,7 @@ it sets up Node from the root `.nvmrc`, the production image's major.
 6. ✅ `CLAUDE_CODE_OAUTH_TOKEN` **environment** secret on `upgrade-scan`
    (in place — scheduled runs green since 2026-08-21).
 7. ✅ `DEPENDABOT_ALERTS_TOKEN` **environment** secret on `upgrade-scan`
-   (in place — the alerts snapshot step works; keep a calendar reminder for
-   the ≤90-day PAT expiry).
+   (in place — the alerts snapshot step works; rotation below).
 8. ✅ Hosted routine (`trig_01JNQaGi6W2wGKdKA961kUYT`) retired 2026-08-24 —
    paused after verifying three green scheduled Actions runs (Aug 21–23) and
    duplicate daily log comments on #276, then deleted in the claude.ai UI.
